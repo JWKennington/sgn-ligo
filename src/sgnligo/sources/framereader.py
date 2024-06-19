@@ -51,6 +51,8 @@ class FrameReader(TSSource):
         self.ifo = self.instruments[0]
         self.channel = self.channel_name[0]
 
+        # init arrays for time and data
+        self.times = np.array([])
         self.data = np.array([])
 
     def load_gwf_data(self):
@@ -58,16 +60,23 @@ class FrameReader(TSSource):
         load timeseries data from a gwf frame file
         """
         this_gwf = self.cache[0]
+        segment = this_gwf.segment
         path = this_gwf.path
 
         data = TimeSeries.read(path, f"{self.ifo}:{self.channel}")
 
         assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
 
+        # construct gps times
+        dt = data.dt.value
+        times = np.arange(float(segment[0]), float(segment[1]), dt)
+
+        data = np.array(data)
+
         # now that we have loaded data from this frame, remove it from the cache
         self.cache.pop(0)
 
-        return np.array(data)
+        return times, data
 
     def new(self, pad):
         """
@@ -84,21 +93,22 @@ class FrameReader(TSSource):
         else:
             if self.data.size == 0:
                 # load next frame of data from disk
-                self.data = self.load_gwf_data()
+                self.times, self.data = self.load_gwf_data()
 
         # outdata is the first duration = self.num_samples / self.rate seconds of data in the frame
         outdata = self.data[:self.num_samples]
+        outtimes = self.times[:self.num_samples]
+        epoch = outtimes[0]
 
         outbuf = SeriesBuffer(
-            offset=self.offset[pad], sample_rate=self.rate, data=outdata, shape=self.shape
+            offset=Offset.fromsec(epoch - Offset.offset_ref_t0), sample_rate=self.rate, data=outdata, shape=self.shape
         )
 
-        # pop outdata from self.data
+        # pop the used data
         self.data = self.data[self.num_samples:]
+        self.times = self.times[self.num_samples:]
 
-        self.offset[pad] += Offset.fromsamples(self.num_samples, self.rate)
-
-        # EOS condidtion is either that weve passed num_buffers if given, or that
+        # EOS condition is either that weve passed num_buffers if given, or that
         # that we have processed all data in every frame in the cache
         if self.num_buffers:
             EOS=self.cnt[pad] > self.num_buffers
