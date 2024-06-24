@@ -22,8 +22,6 @@ class DevShmSrc(TSSource):
         Shared memory directory name (full path).  Suggestion:  /dev/shm/kafka/L1_O3ReplayMDC
     wait_time: int
         Time to wait for next file.
-    watch_suffix: str
-        Filename suffix to watch for.
     instrument: str
         instrument, should be one to one with channel names
     channel_name: tuple
@@ -35,7 +33,6 @@ class DevShmSrc(TSSource):
     instrument: tuple = ()
     shared_memory_dir: str = None
     wait_time: int = 60
-    watch_suffix: str = ".gwf"
 
     def __post_init__(self):
         super().__post_init__()
@@ -50,45 +47,47 @@ class DevShmSrc(TSSource):
         self.events = deque(maxlen=300)
         self.last_t0 = None
 
-    def poll_dir(self, timeout=1):
+    def poll_dir(self, timeout=0.1):
         """
-        load data from the next file and send it off in an output buffer
+        poll directory for new files with inotify
         """
         events = self.inotify.event_gen(yield_nones=False, timeout_s=timeout)
+        create_events = []
         for event in events:
             (_, type_names, path, filename) = event
             if "IN_CREATE" in type_names:
-                self.events.append(os.path.join(path, filename))
+                create_events.append(os.path.join(path, filename))
+
+        return create_events
 
     def new(self, pad):
         self.cnt[pad] += 1
 
-        self.poll_dir()
-
-        if self.events:
-            next_file = self.events[0]
-            print("Next file: ", next_file)
-
-            # load data from the file using gwpy
-            data = TimeSeries.read(next_file, f"{self.instrument}:{self.channel_name}")
-            assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
-            t0 = data.t0.value
-            duration = data.duration.value
-
-            data = np.array(data)
-            shape = data.shape
-
-            print(f"Buffer t0: {t0} | Time delay: {float(now()) - t0}")
-
-            # once we have data, pop this file from the list
-            self.events.popleft()
-
+        watch_start = now()
+        while now() - watch_start < self.wait_time:
+            new_events = self.poll_dir()
+            # add new events to the queue and break
+            if new_events:
+                self.events.extend(new_events)
+                break
         else:
-            # FIXME: if theres not a next file, wait for 60 seconds
-            # and then start pushing gap buffers
-            data = None
-            shape = None
-            t0 = self.last_t0 + 1
+            # FIXME: handle this, weve reached the timeout so need to send a gap buffer
+            print(f"Reached 60 sec timeout with no new files in {self.shared_memory_dir}")
+            raise
+
+        # process next file
+        next_file = self.events[0]
+        print("Next file: ", next_file)
+
+        # load data from the file using gwpy
+        data = TimeSeries.read(next_file, f"{self.instrument}:{self.channel_name}")
+        assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
+        t0 = data.t0.value
+        duration = data.duration.value
+        data = np.array(data)
+
+        # once we have data, pop this file from the list
+        self.events.popleft()
 
         # keep track of the times of the last data sent
         # FIXME: handle discontinuities here
@@ -97,7 +96,7 @@ class DevShmSrc(TSSource):
         self.last_t0 = t0
 
         outbuf = SeriesBuffer(
-            offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=shape
+            offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
         )
 
         # online data is never EOS
