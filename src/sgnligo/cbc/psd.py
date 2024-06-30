@@ -23,7 +23,9 @@ import lalsimulation
 #
 
 
-def read_psd(filename: str, verbose: Optional[bool] = False) -> Dict[str, lal.REAL8FrequencySeries]:
+def read_psd(
+    filename: str, verbose: Optional[bool] = False
+) -> Dict[str, lal.REAL8FrequencySeries]:
     """Reads in an XML-formatted PSD.
 
     Args:
@@ -38,9 +40,7 @@ def read_psd(filename: str, verbose: Optional[bool] = False) -> Dict[str, lal.RE
     """
     return lal.series.read_psd_xmldoc(
         ligolw_utils.load_filename(
-            filename,
-            verbose=verbose,
-            contenthandler=lal.series.PSDContentHandler
+            filename, verbose=verbose, contenthandler=lal.series.PSDContentHandler
         )
     )
 
@@ -68,7 +68,12 @@ def write_psd(
             bool, default False, whether to display logging messages
 
     """
-    ligolw_utils.write_filename(lal.series.make_psd_xmldoc(psddict), filename, verbose = verbose, trap_signals = trap_signals)
+    ligolw_utils.write_filename(
+        lal.series.make_psd_xmldoc(psddict),
+        filename,
+        verbose=verbose,
+        trap_signals=trap_signals,
+    )
 
 
 def read_asd_txt(
@@ -109,12 +114,12 @@ def read_asd_txt(
     psd_data = psdinterp(uniformf)
 
     psd = lal.CreateREAL8FrequencySeries(
-        name = "PSD",
-        epoch = 0,
-        f0 = f[0],
-        deltaF = df,
-        sampleUnits = lal.Unit("s strain^2"),
-        length = len(psd_data),
+        name="PSD",
+        epoch=0,
+        f0=f[0],
+        deltaF=df,
+        sampleUnits=lal.Unit("s strain^2"),
+        length=len(psd_data),
     )
     psd.data.data = psd_data
 
@@ -141,10 +146,12 @@ def write_asd_txt(
         print("writing '%s' ..." % filename, file=sys.stderr)
     with open(filename, "w") as f:
         for i, x in enumerate(psd.data.data):
-            print("%.16g %.16g" % (psd.f0 + i * psd.deltaF, x**.5), file=f)
+            print("%.16g %.16g" % (psd.f0 + i * psd.deltaF, x**0.5), file=f)
 
 
-def interpolate_psd(psd: lal.REAL8FrequencySeries, deltaF: int) -> lal.REAL8FrequencySeries:
+def interpolate_psd(
+    psd: lal.REAL8FrequencySeries, deltaF: int
+) -> lal.REAL8FrequencySeries:
     """Interpolates a PSD to a target frequency resolution.
 
     Args:
@@ -169,21 +176,21 @@ def interpolate_psd(psd: lal.REAL8FrequencySeries, deltaF: int) -> lal.REAL8Freq
     # response of equivalent whitening filter
     #
 
-    #from scipy import fftpack
-    #psd_data = psd.data.data
-    #x = numpy.zeros((len(psd_data) * 2 - 2,), dtype = "double")
-    #psd_data = numpy.where(psd_data, psd_data, float("inf"))
-    #x[0] = 1 / psd_data[0]**.5
-    #x[1::2] = 1 / psd_data[1:]**.5
-    #x = fftpack.irfft(x)
-    #if deltaF < psd.deltaF:
+    # from scipy import fftpack
+    # psd_data = psd.data.data
+    # x = numpy.zeros((len(psd_data) * 2 - 2,), dtype = "double")
+    # psd_data = numpy.where(psd_data, psd_data, float("inf"))
+    # x[0] = 1 / psd_data[0]**.5
+    # x[1::2] = 1 / psd_data[1:]**.5
+    # x = fftpack.irfft(x)
+    # if deltaF < psd.deltaF:
     #    x *= numpy.cos(numpy.arange(len(x)) * math.pi / (len(x) + 1))**2
     #    x = numpy.concatenate((x[:(len(x) / 2)], numpy.zeros((int(round(len(x) * psd.deltaF / deltaF)) - len(x),), dtype = "double"), x[(len(x) / 2):]))
-    #else:
+    # else:
     #    x = numpy.concatenate((x[:(int(round(len(x) * psd.deltaF / deltaF)) / 2)], x[-(int(round(len(x) * psd.deltaF / deltaF)) / 2):]))
     #    x *= numpy.cos(numpy.arange(len(x)) * math.pi / (len(x) + 1))**2
-    #x = 1 / fftpack.rfft(x)**2
-    #psd_data = numpy.concatenate(([x[0]], x[1::2]))
+    # x = 1 / fftpack.rfft(x)**2
+    # psd_data = numpy.concatenate(([x[0]], x[1::2]))
 
     #
     # interpolate log(PSD) with cubic spline.  note that the PSD is
@@ -194,21 +201,24 @@ def interpolate_psd(psd: lal.REAL8FrequencySeries, deltaF: int) -> lal.REAL8Freq
     psd_data = psd.data.data
     psd_data = numpy.where(psd_data, psd_data, 1e-300)
     f = psd.f0 + numpy.arange(len(psd_data)) * psd.deltaF
-    interp = interpolate.splrep(f, numpy.log(psd_data), s = 0)
-    f = psd.f0 + numpy.arange(round((len(psd_data) - 1) * psd.deltaF / deltaF) + 1) * deltaF
-    psd_data = numpy.exp(interpolate.splev(f, interp, der = 0))
+    interp = interpolate.splrep(f, numpy.log(psd_data), s=0)
+    f = (
+        psd.f0
+        + numpy.arange(round((len(psd_data) - 1) * psd.deltaF / deltaF) + 1) * deltaF
+    )
+    psd_data = numpy.exp(interpolate.splev(f, interp, der=0))
 
     #
     # return result
     #
 
     psd = lal.CreateREAL8FrequencySeries(
-        name = psd.name,
-        epoch = psd.epoch,
-        f0 = psd.f0,
-        deltaF = deltaF,
-        sampleUnits = psd.sampleUnits,
-        length = len(psd_data)
+        name=psd.name,
+        epoch=psd.epoch,
+        f0=psd.f0,
+        deltaF=deltaF,
+        sampleUnits=psd.sampleUnits,
+        length=len(psd_data),
     )
     psd.data.data = psd_data
 
@@ -216,8 +226,7 @@ def interpolate_psd(psd: lal.REAL8FrequencySeries, deltaF: int) -> lal.REAL8Freq
 
 
 def movingmedian(
-    psd: Union[numpy.ndarray, lal.REAL8FrequencySeries],
-    window_size: int
+    psd: Union[numpy.ndarray, lal.REAL8FrequencySeries], window_size: int
 ) -> Union[numpy.ndarray, lal.REAL8FrequencySeries]:
     """Smoothen a PSD with a moving median.
 
@@ -240,20 +249,20 @@ def movingmedian(
         tmp = numpy.copy(psd.data.data)
 
     # compute rolling median
-    tmp[window_size:(len(tmp) - window_size)] = numpy.array(
-        pandas.Series(tmp).rolling(2 * window_size).median()[(2 * window_size - 1):-1]
+    tmp[window_size : (len(tmp) - window_size)] = numpy.array(
+        pandas.Series(tmp).rolling(2 * window_size).median()[(2 * window_size - 1) : -1]
     )
 
     if isinstance(psd, numpy.ndarray):
         return tmp
     else:  # lal Series
         new_psd = lal.CreateREAL8FrequencySeries(
-            name = psd.name,
-            epoch = psd.epoch,
-            f0 = psd.f0,
-            deltaF = psd.deltaF,
-            sampleUnits = psd.sampleUnits,
-            length = len(tmp)
+            name=psd.name,
+            epoch=psd.epoch,
+            f0=psd.f0,
+            deltaF=psd.deltaF,
+            sampleUnits=psd.sampleUnits,
+            length=len(tmp),
         )
         psd.data.data = tmp
         return new_psd
@@ -273,13 +282,13 @@ def movingaverage(psd: numpy.ndarray, window_size: int) -> numpy.ndarray:
 
     """
     window = lal.CreateTukeyREAL8Window(window_size, 0.5).data.data
-    return numpy.convolve(psd, window, 'same')
+    return numpy.convolve(psd, window, "same")
 
 
 def taperzero_fseries(
     fseries: lal.REAL8FrequencySeries,
     minfs: Optional[Tuple[float, float]] = (35.0, 40.0),
-    maxfs: Optional[Tuple[float, float]] = (1800., 2048.)
+    maxfs: Optional[Tuple[float, float]] = (1800.0, 2048.0),
 ) -> lal.REAL8FrequencySeries:
     """Taper the PSD to infinity for given min/max frequencies.
 
@@ -316,21 +325,31 @@ def taperzero_fseries(
     deltaF = fseries.deltaF
     kmin = int(minfs[0] / deltaF)
     kmax = int(minfs[1] / deltaF)
-    data[(len(data)//2 + 1) - kmin + 1:(len(data)//2 + 1) + kmin] = 0.
-    data[(len(data)//2 + 1) + kmin:(len(data)//2 + 1) + kmax] *= numpy.sin(numpy.arange(kmax-kmin) / (kmax-kmin-1.) * numpy.pi / 2.0)**4
-    data[(len(data)//2 + 1) - kmax:(len(data)//2 + 1) - kmin] *= numpy.cos(numpy.arange(kmax-kmin) / (kmax-kmin-1.) * numpy.pi / 2.0)**4
+    data[(len(data) // 2 + 1) - kmin + 1 : (len(data) // 2 + 1) + kmin] = 0.0
+    data[(len(data) // 2 + 1) + kmin : (len(data) // 2 + 1) + kmax] *= (
+        numpy.sin(numpy.arange(kmax - kmin) / (kmax - kmin - 1.0) * numpy.pi / 2.0) ** 4
+    )
+    data[(len(data) // 2 + 1) - kmax : (len(data) // 2 + 1) - kmin] *= (
+        numpy.cos(numpy.arange(kmax - kmin) / (kmax - kmin - 1.0) * numpy.pi / 2.0) ** 4
+    )
 
     kmin = int(maxfs[0] / deltaF) - 1
     kmax = int(maxfs[1] / deltaF) - 1
-    data[(len(data)//2 + 1) + kmax:] = data[:-(len(data)//2 + 1) - kmax] = 0.
-    data[(len(data)//2 + 1) + kmin:(len(data)//2 + 1) + kmax] *= numpy.cos(numpy.arange(kmax-kmin) / (kmax-kmin-1.) * numpy.pi / 2.0)**4
-    data[(len(data)//2 + 1) - kmax:(len(data)//2 + 1) - kmin] *= numpy.sin(numpy.arange(kmax-kmin) / (kmax-kmin-1.) * numpy.pi / 2.0)**4
+    data[(len(data) // 2 + 1) + kmax :] = data[: -(len(data) // 2 + 1) - kmax] = 0.0
+    data[(len(data) // 2 + 1) + kmin : (len(data) // 2 + 1) + kmax] *= (
+        numpy.cos(numpy.arange(kmax - kmin) / (kmax - kmin - 1.0) * numpy.pi / 2.0) ** 4
+    )
+    data[(len(data) // 2 + 1) - kmax : (len(data) // 2 + 1) - kmin] *= (
+        numpy.sin(numpy.arange(kmax - kmin) / (kmax - kmin - 1.0) * numpy.pi / 2.0) ** 4
+    )
 
     #
     # renormalize after tapering
     #
 
-    fseries.data.data = data * math.sqrt(norm_before / numpy.dot(data.conj(), data).real)
+    fseries.data.data = data * math.sqrt(
+        norm_before / numpy.dot(data.conj(), data).real
+    )
 
     #
     # done
@@ -343,9 +362,9 @@ def condition_psd(
     psd: lal.REAL8FrequencySeries,
     newdeltaF: int,
     minfs: Optional[Tuple[int, int]] = (35.0, 40.0),
-    maxfs: Optional[Tuple[int, int]] = (1800., 2048.),
-    smoothing_frequency: Optional[float] = 4.,
-    fir_whiten: Optional[bool] = False
+    maxfs: Optional[Tuple[int, int]] = (1800.0, 2048.0),
+    smoothing_frequency: Optional[float] = 4.0,
+    fir_whiten: Optional[bool] = False,
 ) -> lal.REAL8FrequencySeries:
     """Condition a PSD suitable for whitening waveforms.
 
@@ -412,13 +431,19 @@ def condition_psd(
         psddata = psd.data.data
         kmin = int(minfs[0] / newdeltaF)
         kmax = int(minfs[1] / newdeltaF)
-        psddata[:kmin+1] = numpy.inf
-        psddata[kmin:kmax] /= numpy.sin(numpy.arange(kmax-kmin) / (kmax-kmin-1.) * numpy.pi / 2.0)**4
+        psddata[: kmin + 1] = numpy.inf
+        psddata[kmin:kmax] /= (
+            numpy.sin(numpy.arange(kmax - kmin) / (kmax - kmin - 1.0) * numpy.pi / 2.0)
+            ** 4
+        )
 
         kmin = int(maxfs[0] / newdeltaF)
         kmax = int(maxfs[1] / newdeltaF)
         psddata[kmax:] = numpy.inf
-        psddata[kmin:kmax] /= numpy.cos(numpy.arange(kmax-kmin) / (kmax-kmin-1.) * numpy.pi / 2.0)**4
+        psddata[kmin:kmax] /= (
+            numpy.cos(numpy.arange(kmax - kmin) / (kmax - kmin - 1.0) * numpy.pi / 2.0)
+            ** 4
+        )
 
         psd.data.data = psddata
 
@@ -429,7 +454,7 @@ def condition_psd(
     horizon_after = horizon_distance(psd, 8.0)[0]
 
     psddata = psd.data.data
-    psd.data.data = psddata * (horizon_after / horizon_before)**2
+    psd.data.data = psddata * (horizon_after / horizon_before) ** 2
 
     #
     # done
@@ -443,7 +468,7 @@ def polyfit(
     f_low: float,
     f_high: float,
     order: int,
-    verbose: Optional[bool] = False
+    verbose: Optional[bool] = False,
 ) -> lal.REAL8FrequencySeries:
     """Fit a PSD to a polynomial.
 
@@ -475,37 +500,61 @@ def polyfit(
     data = interp(logf)
     p = numpy.poly1d(numpy.polyfit(logf, data, order))
     if verbose:
-        print("\nFit polynomial is: \n\nlog(PSD) = \n", p, "\n\nwhere x = f / f_min\n", file=sys.stderr)
+        print(
+            "\nFit polynomial is: \n\nlog(PSD) = \n",
+            p,
+            "\n\nwhere x = f / f_min\n",
+            file=sys.stderr,
+        )
     data = numpy.exp(p(numpy.log(f)))
     olddata = psd.data.data
     olddata[minsample:maxsample] = data
     psd = lal.CreateREAL8FrequencySeries(
-        name = psd.name,
-        epoch = psd.epoch,
-        f0 = psd.f0,
-        deltaF = psd.deltaF,
-        sampleUnits = psd.sampleUnits,
-        length = len(olddata)
+        name=psd.name,
+        epoch=psd.epoch,
+        f0=psd.f0,
+        deltaF=psd.deltaF,
+        sampleUnits=psd.sampleUnits,
+        length=len(olddata),
     )
     psd.data.data = olddata
     return psd
 
 
-def harmonic_mean(psddict: Dict[str, lal.REAL8FrequencySeries]) -> lal.REAL8FrequencySeries:
-    """Take the harmonic mean of a dictionary of PSDs.
-
-    """
+def harmonic_mean(
+    psddict: Dict[str, lal.REAL8FrequencySeries]
+) -> lal.REAL8FrequencySeries:
+    """Take the harmonic mean of a dictionary of PSDs."""
     refpsd = list(psddict.values())[0]
-    psd = lal.CreateREAL8FrequencySeries("psd", refpsd.epoch, 0., refpsd.deltaF, lal.Unit("strain^2 s"), refpsd.data.length)
-    psd.data.data[:] = 0.
+    psd = lal.CreateREAL8FrequencySeries(
+        "psd",
+        refpsd.epoch,
+        0.0,
+        refpsd.deltaF,
+        lal.Unit("strain^2 s"),
+        refpsd.data.length,
+    )
+    psd.data.data[:] = 0.0
     for ifo in psddict:
-        psd.data.data[:] += 1. / psddict[ifo].data.data
+        psd.data.data[:] += 1.0 / psddict[ifo].data.data
     psd.data.data[:] = len(psddict) / psd.data.data[:]
     return psd
 
 
 class HorizonDistance(object):
-    def __init__(self, f_min, f_max, delta_f, m1, m2, spin1 = (0., 0., 0.), spin2 = (0., 0., 0.), eccentricity = 0., inclination = 0., approximant = "IMRPhenomD"):
+    def __init__(
+        self,
+        f_min,
+        f_max,
+        delta_f,
+        m1,
+        m2,
+        spin1=(0.0, 0.0, 0.0),
+        spin2=(0.0, 0.0, 0.0),
+        eccentricity=0.0,
+        inclination=0.0,
+        approximant="IMRPhenomD",
+    ):
         """
         Configures the horizon distance calculation for a specific
         waveform model.  The waveform is pre-computed and stored,
@@ -588,21 +637,26 @@ class HorizonDistance(object):
         # (f_max + delta_f) if we want the waveform model defined
         # in the f_max bin
         hp, hc = lalsimulation.SimInspiralFD(
-            m1 * lal.MSUN_SI, m2 * lal.MSUN_SI,
-            spin1[0], spin1[1], spin1[2],
-            spin2[0], spin2[1], spin2[2],
-            1.0,    # distance (m)
+            m1 * lal.MSUN_SI,
+            m2 * lal.MSUN_SI,
+            spin1[0],
+            spin1[1],
+            spin1[2],
+            spin2[0],
+            spin2[1],
+            spin2[2],
+            1.0,  # distance (m)
             inclination,
-            0.0,    # reference orbital phase (rad)
-            0.0,    # longitude of ascending nodes (rad)
+            0.0,  # reference orbital phase (rad)
+            0.0,  # longitude of ascending nodes (rad)
             eccentricity,
-            0.0,    # mean anomaly of periastron
+            0.0,  # mean anomaly of periastron
             delta_f,
             f_min,
             f_max + delta_f,
-            100.,    # reference frequency (Hz)
-            None,    # LAL dictionary containing accessory parameters
-            lalsimulation.GetApproximantFromString(self.approximant)
+            100.0,  # reference frequency (Hz)
+            None,  # LAL dictionary containing accessory parameters
+            lalsimulation.GetApproximantFromString(self.approximant),
         )
         assert hp.data.length > 0, "huh!?  h+ has zero length!"
 
@@ -612,17 +666,16 @@ class HorizonDistance(object):
         #
 
         self.model = lal.CreateREAL8FrequencySeries(
-            name = "signal spectrum",
-            epoch = LIGOTimeGPS(0),
-            f0 = hp.f0,
-            deltaF = hp.deltaF,
-            sampleUnits = hp.sampleUnits * hp.sampleUnits,
-            length = hp.data.length
+            name="signal spectrum",
+            epoch=LIGOTimeGPS(0),
+            f0=hp.f0,
+            deltaF=hp.deltaF,
+            sampleUnits=hp.sampleUnits * hp.sampleUnits,
+            length=hp.data.length,
         )
-        self.model.data.data[:] = numpy.abs(hp.data.data)**2.
+        self.model.data.data[:] = numpy.abs(hp.data.data) ** 2.0
 
-
-    def __call__(self, psd, snr = 8.):
+    def __call__(self, psd, snr=8.0):
         """
         Compute the horizon distance for the configured waveform
         model given the PSD and the SNR at which the horizon is
@@ -664,7 +717,12 @@ class HorizonDistance(object):
         # evaluated at PSD's frequency bins
         #
 
-        indexes = ((f - self.model.f0) / self.model.deltaF).round().astype("int").clip(0, self.model.data.length - 1)
+        indexes = (
+            ((f - self.model.f0) / self.model.deltaF)
+            .round()
+            .astype("int")
+            .clip(0, self.model.data.length - 1)
+        )
         model = self.model.data.data[indexes]
 
         #
@@ -673,7 +731,14 @@ class HorizonDistance(object):
 
         kmin = (max(psd.f0, self.model.f0, self.f_min) - psd.f0) / psd.deltaF
         kmin = int(round(kmin))
-        kmax = (min(psd.f0 + psd.data.length * psd.deltaF, self.model.f0 + self.model.data.length * self.model.deltaF, self.f_max) - psd.f0) / psd.deltaF
+        kmax = (
+            min(
+                psd.f0 + psd.data.length * psd.deltaF,
+                self.model.f0 + self.model.data.length * self.model.deltaF,
+                self.f_max,
+            )
+            - psd.f0
+        ) / psd.deltaF
         kmax = int(round(kmax)) + 1
         assert kmin < kmax, "PSD and waveform model do not intersect"
 
@@ -684,7 +749,7 @@ class HorizonDistance(object):
 
         f = f[kmin:kmax]
         model = model[kmin:kmax]
-        D = math.sqrt(4. * (model / psd.data.data[kmin:kmax]).sum() * psd.deltaF)
+        D = math.sqrt(4.0 * (model / psd.data.data[kmin:kmax]).sum() * psd.deltaF)
 
         #
         # distance at desired SNR
@@ -696,7 +761,7 @@ class HorizonDistance(object):
         # scale inspiral spectrum by distance to achieve desired SNR
         #
 
-        model *= 4. / D**2.
+        model *= 4.0 / D**2.0
 
         #
         # D in Mpc for source with specified SNR, and waveform
@@ -718,6 +783,5 @@ def effective_distance_factor(inclination, fp, fc):
 
     See Equation (4.3) of arXiv:0705.1514.
     """
-    cos2i = math.cos(inclination)**2
-    return 1.0 / math.sqrt(fp**2 * (1+cos2i)**2 / 4 + fc**2 * cos2i)
-
+    cos2i = math.cos(inclination) ** 2
+    return 1.0 / math.sqrt(fp**2 * (1 + cos2i) ** 2 / 4 + fc**2 * cos2i)
