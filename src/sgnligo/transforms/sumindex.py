@@ -48,4 +48,5 @@ class SumIndex(TSTransform):
         return TSFrame(
             buffers=outbufs,
             EOS=frame.EOS,
+            metadata=frame.metadata
         )
