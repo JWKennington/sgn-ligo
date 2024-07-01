@@ -35,7 +35,8 @@ class TorchCorrelateValid(TransformElement):
 
     def pull(self, pad, frame):
         self.frame = frame
-        assert frame.shape[-1] > self.shape[-1]
+        if frame.shape[-1] > 0:
+            assert frame.shape[-1] > self.shape[-1]
 
     def corr(self, data):
         return Fconv1d(data, self.filters, groups=data.shape[-2]).view(
@@ -48,6 +49,20 @@ class TorchCorrelateValid(TransformElement):
         """
         outbufs = []
         frame = self.frame
+        offset=frame.offset + Offset.fromsamples(self.shape[-1] - 1, frame.sample_rate)
+        if frame.shape[-1] == 0:
+            #offset=frame.offset
+            #+ Offset.fromsamples(self.shape[-1] - 1, frame.sample_rate),
+            outbufs.append(
+                SeriesBuffer(
+                    offset=frame.offset + Offset.fromsamples(self.shape[-1] - 1, frame.sample_rate),
+                    sample_rate=frame.sample_rate,
+                    data=None,
+                    shape=self.shape[:-1] + (0,),
+                )
+            )
+            return TSFrame(buffers=outbufs, EOS=frame.EOS, metadata=frame.metadata)
+
         for i, buf in enumerate(frame):
             if buf.is_gap:
                 data = None
@@ -55,6 +70,7 @@ class TorchCorrelateValid(TransformElement):
                 # FIXME: Are there multi-channel correlation in numpy or scipy?
                 # FIXME: consider multi-dimensional filters
                 data = self.corr(buf.data)
+            shape=self.shape[:-1] + (buf.samples - self.shape[-1] + 1,)
             outbufs.append(
                 SeriesBuffer(
                     offset=buf.offset
@@ -64,4 +80,4 @@ class TorchCorrelateValid(TransformElement):
                     shape=self.shape[:-1] + (buf.samples - self.shape[-1] + 1,),
                 )
             )
-        return TSFrame(buffers=outbufs, EOS=frame.EOS)
+        return TSFrame(buffers=outbufs, EOS=frame.EOS, metadata=frame.metadata)
