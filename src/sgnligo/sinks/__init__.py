@@ -20,6 +20,7 @@ class ImpulseSink(TSSink):
     template_duration: float = None
     plotname: str = None
     impulse_pad: str = None
+    verbose: bool = False
 
     def __post_init__(self):
         super().__post_init__()
@@ -40,7 +41,8 @@ class ImpulseSink(TSSink):
         padname = pad.name.split(":")[-1]
         if padname  != self.impulse_pad:
             if bufs.buffers is not None:
-                print(self.cnt[pad], bufs)
+                if self.verbose:
+                    print(self.cnt[pad], bufs)
             for buf in bufs:
                 if buf.end_offset > impulse_offset: 
                     if buf.offset < impulse_offset + Offset.fromsec(
@@ -101,17 +103,21 @@ class ImpulseSink(TSSink):
         # )
         # print(nfull_temp, ntot)
         n = nfull_temp
-        print(
-            "number of templates",nfull_temp,
-        )
+        if self.verbose:
+            print(
+                "number of templates",nfull_temp,
+            )
         filter_output = self.A.copy_samples(self.A.size)
-        print("filter_output shape", filter_output.shape)
+        if self.verbose:
+            print("filter_output shape", filter_output.shape)
         filter_output = filter_output[: nfull_temp // 2].cpu().numpy()[0, 0]
 
         # only filter with current number of time slices
+        #full_template_length =  2048 * 13
         #full_templates = full_templates[:, -full_template_length :]
 
-        print("full_templates.shape", full_templates.shape)
+        if self.verbose:
+            print("full_templates.shape", full_templates.shape)
         outid = 0
         full_templates_flipped = np.flip(full_templates, 1)
 
@@ -122,7 +128,8 @@ class ImpulseSink(TSSink):
         iend = istart + int(n / 2)
         imiddle = int((istart + iend) / 2)
         # complex
-        print("Calculating response")
+        if self.verbose:
+            print("Calculating response")
         for i, k in enumerate(range(istart, iend)):
             # template pairs
             real = full_templates_flipped[2 * k]
@@ -151,7 +158,8 @@ class ImpulseSink(TSSink):
         plotname = self.plotname
         if plotname is not None:
             # for plotting response
-            print("Plotting...")
+            if self.verbose:
+                print("Plotting...")
             m = imiddle
             im = int(n / 4)
             #output = np.pad(filter_output[m].real, (self.impulse_position, 0), "constant")
