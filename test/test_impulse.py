@@ -12,8 +12,7 @@ from sgnligo.sinks import ImpulseSink
 from sgnligo.transforms import (
     Converter,
     TorchResampler,
-    TimeShifter,
-    TorchCorrelateValid,
+    LLOIDCorrelate,
     TorchMatmul,
     SumIndex,
     Adder,
@@ -26,13 +25,14 @@ svd_bank = [
     "H1-0250_GSTLAL_SVD_BANK_half-0-0.xml.gz",
 ]
 original_templates = "full_templates_bin0250_tol999_1024.hdf5"
-nbank_pretend = 2
+nbank_pretend = 0
 nslice = -1
 verbose = True
 
 copy_block = 1
 device = "cpu"
 dtype = torch.float32
+verbose = False
 
 banks = group_and_read_banks(
     svd_bank=svd_bank, nbank_pretend=nbank_pretend, nslice=nslice, verbose=verbose
@@ -65,9 +65,10 @@ pipeline.insert(
         source_pad_names=("H1","H1im"),
         num_buffers=143,
         rate=2048,
-        num_samples=num_samples,
+        num_samples=2048,
         signal_type="impulse",
         impulse_position=4 * 2048 - 64,
+        verbose=verbose,
     ),
     Converter(
         name="converter1",
@@ -75,6 +76,9 @@ pipeline.insert(
         source_pad_names=(
             "H1down",
             "H1shift",
+        ),
+        adapter_config=AdapterConfig(
+            stride=num_samples
         ),
         backend="torch",
         dtype="float32",
@@ -126,42 +130,28 @@ nfilter_samples = bank_metadata["nfilter_samples"]
 
 for from_rate in reversed(unique_rates):
     for to_rate, rate_group in sorted_rates[from_rate].items():
-        offset_segments = []
         segments = rate_group["segments_map"]
         shift=rate_group["shift"]
+        uppad=rate_group["uppad"]
+        downpad=rate_group["downpad"]
+        delays =[]
         for segment in segments:
-            offset_segments.append((
-                    -Offset.fromsamples(num_samples, maxrate) - Offset.fromsamples(nfilter_samples - 1, from_rate)
-                    -Offset.fromsec(segment[0]) + shift,
-                    -Offset.fromsec(segment[0]) + shift
-                    )
-            )
-        shift=shift
-        shiftname=f"timeshift_{from_rate}_{to_rate}"
-        sink_pad = "H1"
-        sink_pad_full = shiftname+":sink:"+sink_pad
-        pipeline.insert(
-            TimeShifter(
-                name=shiftname,
-                sink_pad_names=(sink_pad,),
-                source_pad_names=("H1",),
-                offset_segments=offset_segments,
-                shift=rate_group["shift"],
-                lib=math,
-            ),
-            link_map={sink_pad_full: multiband_source_pad_names[from_rate][to_rate]},
-        )
+            delays.append(Offset.fromsec(segment[0]))
 
         # Correlate
         corrname=f"corr_{from_rate}_{to_rate}"
         pipeline.insert(
-            TorchCorrelateValid(
+            LLOIDCorrelate(
                 name=corrname,
                 sink_pad_names=("H1",),
                 source_pad_names=("H1",),
                 filters=bases[from_rate][to_rate],
+                lib=math,
+                uppad=uppad,
+                downpad=downpad,
+                delays=delays,
             ),
-            link_map = {corrname+":sink:H1": shiftname+":src:H1"},
+            link_map = {corrname+":sink:H1": multiband_source_pad_names[from_rate][to_rate]},
         )
 
         # matmul
@@ -242,7 +232,8 @@ for from_rate in reversed(unique_rates):
                     original_templates=original_templates,
                     template_duration=143,
                     plotname="plots/response",
-                    impulse_pad="H1src"
+                    impulse_pad="H1src",
+                    verbose=verbose
                 ),
                 link_map = {"sink0:sink:H1": addname+":src:H1",
                 "sink0:sink:H1src": "src1:src:H1im"}
