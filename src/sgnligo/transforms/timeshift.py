@@ -10,13 +10,17 @@ class TimeShifter(TSTransform):
     """
 
     offset_segments: list[tuple[float, float]] = None
+    unique_segments: list[tuple[float, float]]= None
     shift: int = None
     lib: int = None
 
     def __post_init__(self):
         super().__post_init__()
+        assert len(self.sink_pads) == 1
         self.audioadapter = Audioadapter(self.lib)
         self.unique_segments = self.offset_segments
+        if self.unique_segments is None:
+            self.unique_segments = sorted(set(self.offset_segments))
         self.noffset = set(seg[1] - seg[0] for seg in self.unique_segments)
         assert len(self.noffset) == 1, "segments must be same length"
         self.noffset = list(self.noffset)[0]
@@ -32,6 +36,21 @@ class TimeShifter(TSTransform):
         frame = self.preparedframes[self.sink_pads[0]]
         # use the offset segment from the new frame as reference
         newest_offset = frame.end_offset
+        if frame.shape[-1] == 0:
+            # heartbeat buffer
+            outbuf = SeriesBuffer(
+                offset=newest_offset + self.shift - self.noffset + self.stride_offset,
+                #offset=frame.offset,
+                sample_rate=frame.sample_rate,
+                data=None,
+                shape=(len(self.offset_segments),0),
+            )
+
+            return TSFrame(
+                buffers=[outbuf],
+                EOS=frame.EOS,
+                metadata=frame.metadata,
+            )
         A.concatenate_data()
 
         outs_map = {}
@@ -87,4 +106,5 @@ class TimeShifter(TSTransform):
         return TSFrame(
             buffers=[outbuf],
             EOS=frame.EOS,
+            metadata=frame.metadata,
         )
