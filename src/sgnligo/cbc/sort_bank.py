@@ -15,7 +15,8 @@ import torch
 import torch.utils.benchmark as benchmark
 
 from ..base import Offset
-from sgnts.transforms.resampler import UP_HALF_LENGTH
+from sgnts.transforms.resampler import UP_HALF_LENGTH, DOWN_HALF_LENGTH
+
 
 def group_and_read_banks(svd_bank, nbank_pretend=0, nslice=-1, verbose=False):
     """
@@ -45,9 +46,7 @@ def group_and_read_banks(svd_bank, nbank_pretend=0, nslice=-1, verbose=False):
         # Pretend we are filtering multiple banks by copying the first bank
         #   many times
         svd_bank_url_dict = svd_banks[0]
-        banks_per_svd = parse_bank_files(
-            svd_bank_url_dict, verbose=verbose
-        )
+        banks_per_svd = parse_bank_files(svd_bank_url_dict, verbose=verbose)
         for i in range(nbank_pretend):
             for ifo in ifos:
                 banks[ifo].extend([banks_per_svd[ifo][0]])
@@ -55,9 +54,7 @@ def group_and_read_banks(svd_bank, nbank_pretend=0, nslice=-1, verbose=False):
         for svd_bank_url_dict in svd_banks:
             if verbose:
                 print(svd_bank_url_dict, flush=True, file=sys.stderr)
-            banks_per_svd = parse_bank_files(
-                svd_bank_url_dict, verbose=verbose
-            )
+            banks_per_svd = parse_bank_files(svd_bank_url_dict, verbose=verbose)
             for ifo in ifos:
                 banks[ifo].extend(banks_per_svd[ifo])
 
@@ -113,7 +110,6 @@ class SortedBank:
             self.autocorrelation_banks,
             self.processed_psd,
         ) = self.prepare_tensors(self.bank_metadata, self.reordered_bank)
-
 
     def prepare_metadata(self, bank):
         """
@@ -325,6 +321,7 @@ class SortedBank:
                             "same_data": False,
                             "unique_segments": [],
                             "segments_map": [],
+                            "sum_same_rate_slices": [],
                         }
                     if from_rate != maxrate:
                         to_bank = from_bank[to_rate]
@@ -341,17 +338,32 @@ class SortedBank:
 
         sorted_rates[maxrate][()]["counts"] = nbank
 
+        urates = list(unique_rates.keys())
+        downpads = {r: None for r in urates}
+        downpad = 0
+        downpads[2048] = 0
+        for urate in urates[1:]:
+            downpad += Offset.fromsamples(DOWN_HALF_LENGTH, urate)
+            downpads[urate] = downpad
+
         # loop over all subbanks and update metadata in each rate group
         for j in range(nbank):
             bk = reorder[ifos[0]][j]
             rates = [bf.rate for bf in bk.bank_fragments]
-            urates = np.array(sorted(set(rates), reverse=True))
+            # urates = np.array(sorted(set(rates), reverse=True))
+            urates = list(sorted(set(rates), reverse=True))
             urs = urates[1:]
-            uppad = {
-                r0: sum(Offset.fromsamples(UP_HALF_LENGTH, ri) for ri in urs[urs >= r0])
-                for r0 in urs
-            }
-            uppad[maxrate] = 0
+            # uppad = {
+            #    #r0: sum(Offset.fromsamples(UP_HALF_LENGTH, ri) for ri in urs[urs >= r0])
+            #    r0: sum([Offset.fromsamples(UP_HALF_LENGTH, ri) for ri in urs[urs >= r0]])
+            #    for r0 in urs
+            # }
+            uppads = {r: None for r in urates}
+            uppad = 0
+            uppads[maxrate] = 0
+            for ri in urs:
+                uppad += Offset.fromsamples(UP_HALF_LENGTH, ri)
+                uppads[ri] = uppad
 
             for bi, bf in enumerate(bk.bank_fragments):
                 rate = bf.rate
@@ -370,7 +382,8 @@ class SortedBank:
                 # mdata["starts"].append(bf.start)
                 # mdata["ends"].append(bf.end)
                 mdata["nslice"].append(bi)
-                rb["uppad"] = uppad[rate]
+                # rb["uppad"] = uppad[rate]
+                rb["shift"] = uppads[rate] + downpads[rate]
                 rb["segments_map"].append((bf.start, bf.end))
                 if rate != maxrate:
                     if rate == rates[bi - 1]:
@@ -416,6 +429,11 @@ class SortedBank:
                 v2["unique_segments"] = sorted(set([seg for seg in v2["segments_map"]]))
                 unique_segments2 = sorted(set(v2["segments_map"]))
                 assert v2["unique_segments"] == unique_segments2
+                mdata = v2["metadata"]
+                if v2["sum_same_rate"] is True:
+                    for md in mdata.values():
+                        ids = md["ids"]
+                        v2["sum_same_rate_slices"].append(slice(ids[0], ids[-1] + 1))
 
         return sorted_rates, reorder
 
@@ -516,6 +534,8 @@ class SortedBank:
                     nifo, count, nbm, nfilter_samples
                 )
                 # benchmark conv methods
+                rb["conv_group"] = True
+                """
                 if self.device == "cpu":
                     rb["conv_group"] = True
                 else:
@@ -561,6 +581,7 @@ class SortedBank:
                         rb["conv_group"] = True
                     else:
                         rb["conv_group"] = False
+                """
 
         # Get template ids
         #   Assume same ids for all ifos for the same bank
@@ -625,9 +646,9 @@ class SortedBank:
                 # this is for adjusting to the bank used for impulse test
                 if acorr.shape[0] > ntempmax // 2:
                     acorr = acorr[: ntempmax // 2]
-                autocorrelation_banks[
-                    i, j, : acorr.shape[0], : acorr.shape[1]
-                ] = torch.tensor(acorr)
+                autocorrelation_banks[i, j, : acorr.shape[0], : acorr.shape[1]] = (
+                    torch.tensor(acorr)
+                )
 
         processed_psd = dict(
             [(ifo, b[0].processed_psd) for ifo, b in reordered_bank.items()]
@@ -646,4 +667,3 @@ class SortedBank:
             autocorrelation_banks,
             processed_psd,
         )
-
