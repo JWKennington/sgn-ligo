@@ -382,7 +382,8 @@ class SortedBank:
                 # mdata["starts"].append(bf.start)
                 # mdata["ends"].append(bf.end)
                 mdata["nslice"].append(bi)
-                # rb["uppad"] = uppad[rate]
+                rb["uppad"] = uppads[rate]
+                rb["downpad"] = downpads[rate]
                 rb["shift"] = uppads[rate] + downpads[rate]
                 rb["segments_map"].append((bf.start, bf.end))
                 if rate != maxrate:
