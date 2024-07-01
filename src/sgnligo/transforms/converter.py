@@ -75,5 +75,6 @@ class Converter(TSTransform):
 
         return TSFrame(
             buffers=outbufs,
+            metadata=frame.metadata,
             EOS=frame.EOS,
         )
