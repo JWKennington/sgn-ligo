@@ -60,7 +60,7 @@ class TorchResampler(Resampler):
 
         # the domain should be the kernel_length divided by two
         c = kernel_length // 2
-        x = torch.arange(-c, c + 1, dtype=self.dtype)
+        x = torch.arange(-c, c + 1, device=self.device, dtype=self.dtype)
         out = torch.sinc(x / factor) * torch.sinc(x / c)
         # out = tpad(out, (0, factor - 1))
         out = self.adapter_config.lib.pad_func(out, (0, factor - 1))
