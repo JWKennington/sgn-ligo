@@ -1,5 +1,6 @@
 from collections import deque
 import inotify.adapters
+import inotify.constants
 from gwpy.timeseries import TimeSeries
 import numpy as np
 import os
@@ -42,33 +43,45 @@ class DevShmSrc(TSSource):
 
         # init inotify watcher on shared memory dir
         self.inotify = inotify.adapters.Inotify() 
-        self.inotify.add_watch(self.shared_memory_dir)
+        self.inotify.add_watch(self.shared_memory_dir, mask = inotify.constants.IN_CREATE)
 
         self.events = deque(maxlen=300)
-        self.last_t0 = None
+
+        # initialize a start up time. This will be used so that we make sure to only process
+        # new files that appear in the dirctory and to keep track of any gaps
+        self.last_t0 = now()
+        print(f"Start up t0: {self.last_t0}")
 
     def poll_dir(self, timeout=0.1):
         """
         poll directory for new files with inotify
         """
         events = self.inotify.event_gen(yield_nones=False, timeout_s=timeout)
-        create_events = []
+        files = []
+
+        ## this loop is hella slow
         for event in events:
             (_, type_names, path, filename) = event
-            if "IN_CREATE" in type_names:
-                create_events.append(os.path.join(path, filename))
+            _, _, start, dur = from_T050017(filename)
 
-        return create_events
+            if start <= self.last_t0:
+                print(f"Skipping file from before last t0: {filename}")
+                continue
+            print(f"Adding new file to queue: {filename}")
+
+            files.append(os.path.join(path, filename))
+
+        return files
 
     def new(self, pad):
         self.cnt[pad] += 1
 
         watch_start = now()
-        while now() - watch_start < self.wait_time:
-            new_events = self.poll_dir()
-            # add new events to the queue and break
-            if new_events:
-                self.events.extend(new_events)
+        while now() - watch_start < self.wait_time :
+            new_files = self.poll_dir()
+            if new_files:
+                # add new events to the queue and break
+                self.events.extend(new_files)
                 break
         else:
             # FIXME: handle this, weve reached the timeout so need to send a gap buffer
@@ -85,6 +98,7 @@ class DevShmSrc(TSSource):
         t0 = data.t0.value
         duration = data.duration.value
         data = np.array(data)
+        print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0}")
 
         # once we have data, pop this file from the list
         self.events.popleft()
