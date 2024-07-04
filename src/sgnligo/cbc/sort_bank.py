@@ -1,5 +1,5 @@
 """
-Sort svd banks and time slices by same rate
+Sort and group svd banks and time slices by sample rates
 """
 
 from collections import defaultdict, Counter
@@ -20,7 +20,8 @@ from sgnts.transforms.resampler import UP_HALF_LENGTH, DOWN_HALF_LENGTH
 
 def group_and_read_banks(svd_bank, nbank_pretend=0, nslice=-1, verbose=False):
     """
-    Read a list of svd banks file names into bank objects
+    Read a list of svd banks file names into bank objects,
+    group by ifo and bankid
     """
     # Read SVD banks
     svd_bank_cache = [CacheEntry.from_T050017(path) for path in svd_bank]
@@ -73,7 +74,7 @@ def group_and_read_banks(svd_bank, nbank_pretend=0, nslice=-1, verbose=False):
 
 class SortedBank:
     """
-    Sort svd banks and time slices by same rate
+    Sort and group svd banks and time slices by sample rate
     """
 
     def __init__(
@@ -110,6 +111,9 @@ class SortedBank:
             self.autocorrelation_banks,
             self.processed_psd,
         ) = self.prepare_tensors(self.bank_metadata, self.reordered_bank)
+
+        del self.reordered_bank
+        del banks
 
     def prepare_metadata(self, bank):
         """
@@ -216,13 +220,19 @@ class SortedBank:
         sorted_rates = {
             from_rate: {
                 to_rate: {
-                    'ids_counter':,'upids_counter':,'addto_counter':,'addids':,
-                    'counts':,'upcounts':,'nbmax':, 'ntempmax':,'sum_same_rate':,
-                    'same_data':,'unique_segments':,'segments_map':,'uppad':,
-                    'addslice':,'upslice':,'rescale':,'start':,
+                    '_ids_counter':,
+                    '_addto_counter':,
+                    '_addids':,
+                    'counts':,
+                    'nbmax':,
+                    'ntempmax':,
+                    'segments':,
+                    'sum_same_rate_slices':,
+                    'uppad':,
+                    'addslice':,
                     'metadata': {
                          bank_order: {
-                             'ids':,'nslice':,'sum_same_rate':,
+                             'ids':,'nslice':,
                          }
                     },
                 }
@@ -237,28 +247,49 @@ class SortedBank:
         unique_rates = bank_metadata["unique_rates"]
         maxrate = bank_metadata["maxrate"]
 
+        #
         # Sort the unique rates, this might alter the order of the template banks
-        sorted_unique_rates = []
+        #
+        sorted_unique_rates0 = []
+        unique_rates_by_bank = []
         for j in range(nbank):
             bk = bank0[j]
-            bankid = bk.bank_id
+            if self.nbank_pretend:
+                bankid = bk.bank_id + "_" + str(j)
+            else:
+                bankid = bk.bank_id
             unique_rates0 = dict(
                 sorted(
                     Counter([bi.rate for bi in bk.bank_fragments]).items(), reverse=True
                 )
             )
-            for key in unique_rates:
-                if key not in unique_rates0:
-                    unique_rates0[key] = 0
+            unique_rates_by_bank.append(tuple(unique_rates0.keys()))
+            # for key in unique_rates:
+            #    if key not in unique_rates0:
+            #        unique_rates0[key] = 0
             unique_rates0["bankid"] = bankid
-            sorted_unique_rates.append(unique_rates0)
+            sorted_unique_rates0.append(unique_rates0)
 
-        sorted_unique_rates = sorted(
-            # sorted_unique_rates, key=lambda x: x.keys(), reverse=True
-            sorted_unique_rates,
-            key=operator.itemgetter(*list(unique_rates.keys())),
-            reverse=True,
-        )
+        # sorted_unique_rates = sorted(
+        #    # sorted_unique_rates, key=lambda x: x.keys(), reverse=True
+        #    sorted_unique_rates,
+        #    key=operator.itemgetter(*list(unique_rates.keys())),
+        #    reverse=True,
+        # )
+
+        unique_rates_by_bank = sorted(set(unique_rates_by_bank), reverse=True)
+        sorted_unique_rates = []
+
+        for urb in unique_rates_by_bank:
+            for s in sorted_unique_rates0:
+                s2 = list(s.keys())
+                s2.remove("bankid")
+                if list(urb) == s2 and s not in sorted_unique_rates:
+                    sorted_unique_rates.append(s)
+
+        # if self.nbank_pretend:
+        #    sorted_unique_rates *= self.nbank_pretend
+
         if self.verbose:
             print("sorted_unique_rates", flush=True, file=sys.stderr)
             for a in sorted_unique_rates:
@@ -266,11 +297,11 @@ class SortedBank:
 
         # check if nbank_pretend is true
         bankids = [a["bankid"] for a in sorted_unique_rates]
-        nbank_pretend = False
-        if len(bankids) > 1 and len(set(bankids)) == 1:
-            if self.verbose:
-                print("nbank_pretend", flush=True, file=sys.stderr)
-            nbank_pretend = True
+        # nbank_pretend = False
+        # if len(bankids) > 1 and len(set(bankids)) == 1:
+        #    if self.verbose:
+        #        print("nbank_pretend", flush=True, file=sys.stderr)
+        #    nbank_pretend = True
 
         # reorder bankid
         bankid_order = {}
@@ -280,7 +311,7 @@ class SortedBank:
 
         reorder = {}
         # reordered bank
-        if nbank_pretend is False:
+        if self.nbank_pretend == 0:
             for ifo in ifos:
                 reorder[ifo] = {}
                 for j in range(nbank):
@@ -289,6 +320,8 @@ class SortedBank:
                     order = bankid_order[bankid]
                     reorder[ifo][order] = bk
         else:
+            if self.verbose:
+                print("nbank_pretend", flush=True, file=sys.stderr)
             for ifo in ifos:
                 reorder[ifo] = {i: b for i, b in enumerate(bank[ifo])}
 
@@ -296,9 +329,12 @@ class SortedBank:
         # Construct sorted_rates, determine id placement of timeslices
         #
         sorted_rates = defaultdict(dict)
-        for from_rate in unique_rates:
-            from_bank = sorted_rates[from_rate]
-            for a in sorted_unique_rates:
+        addto_ids = {}
+        for a in sorted_unique_rates:
+            temp = {}
+            for from_rate in unique_rates:
+                from_bank = sorted_rates[from_rate]
+                bankid = a["bankid"]
                 k = list(a.keys())
                 if from_rate in k and a[from_rate] > 0:
                     to_rate = tuple(
@@ -308,33 +344,35 @@ class SortedBank:
                     )
                     if to_rate not in from_bank:
                         from_bank[to_rate] = {
-                            "ids_counter": 0,
-                            "upids_counter": 0,
-                            "addto_counter": 0,
-                            "addids": [],
+                            "_ids_counter": 0,
+                            "_addto_counter": 0,
+                            "_addids": [],
                             "counts": 0,
-                            "upcounts": 0,
-                            "metadata": {},
                             "nbmax": [],
                             "ntempmax": [],
-                            "sum_same_rate": False,
-                            "same_data": False,
-                            "unique_segments": [],
-                            "segments_map": [],
-                            "sum_same_rate_slices": [],
+                            "segments": [],
+                            "sum_same_rate_slices": None,
+                            "metadata": {},
                         }
+                    to_bank = from_bank[to_rate]
                     if from_rate != maxrate:
-                        to_bank = from_bank[to_rate]
                         to_bank["counts"] += a[from_rate]
-                        to_bank["upcounts"] += 1
-                        # shift starting point of ids counter,
-                        # the slices that are added are placed
-                        # after slices that are going to be upsampled
-                        # to_bank["ids_counter"] += 1 # preallocate
-                        to_bank["addids"].append(
-                            sorted_rates[to_rate[-1]][to_rate[:-1]]["addto_counter"]
-                        )
-                        sorted_rates[to_rate[-1]][to_rate[:-1]]["addto_counter"] += 1
+                    temp[from_rate] = to_bank["_addto_counter"]
+                    to_bank["_addto_counter"] += 1
+            addto_ids[bankid] = temp
+
+        # find the ids each bank should addto after upsampling
+        # FIXME: is there a more elegant way?
+        for bankid, a in addto_ids.items():
+            for from_rate in unique_rates:
+                from_bank = sorted_rates[from_rate]
+                k = list(a.keys())
+                if from_rate in k:
+                    to_rate = tuple(
+                        ki for ki in k if type(ki) is int and ki > from_rate
+                    )
+                    if from_rate != maxrate:
+                        from_bank[to_rate]["_addids"].append(a[to_rate[-1]])
 
         sorted_rates[maxrate][()]["counts"] = nbank
 
@@ -368,36 +406,28 @@ class SortedBank:
             for bi, bf in enumerate(bk.bank_fragments):
                 rate = bf.rate
                 to_rate = tuple(r for r in urates if r > rate)
-                rb = sorted_rates[rate][to_rate]
-                if j not in rb["metadata"]:
-                    rb["metadata"][j] = {
-                        # "starts": [],
-                        # "ends": [],
+                rate_group = sorted_rates[rate][to_rate]
+                if j not in rate_group["metadata"]:
+                    rate_group["metadata"][j] = {
                         "ids": [],
                         "nslice": [],
-                        "sum_same_rate": False,
                     }
-                mdata = rb["metadata"][j]
+                mdata = rate_group["metadata"][j]
                 mdata["bankid"] = bk.bank_id
-                # mdata["starts"].append(bf.start)
-                # mdata["ends"].append(bf.end)
                 mdata["nslice"].append(bi)
-                rb["uppad"] = uppads[rate]
-                rb["downpad"] = downpads[rate]
-                rb["shift"] = uppads[rate] + downpads[rate]
-                rb["segments_map"].append((bf.start, bf.end))
+                rate_group["uppad"] = uppads[rate]
+                rate_group["downpad"] = downpads[rate]
+                rate_group["shift"] = uppads[rate] + downpads[rate]
+                rate_group["segments"].append((bf.start, bf.end))
                 if rate != maxrate:
                     if rate == rates[bi - 1]:
-                        mdata["ids"].append(rb["ids_counter"])
-                        rb["ids_counter"] += 1
+                        mdata["ids"].append(rate_group["_ids_counter"])
+                        rate_group["_ids_counter"] += 1
                         if len(mdata["ids"]) > 1:
-                            rb["sum_same_rate"] = True
-                            mdata["sum_same_rate"] = True
+                            rate_group["sum_same_rate_slices"] = []
                     else:
-                        # mdata["ids"].append(rb["upids_counter"]) # preallocate
-                        # rb["upids_counter"] += 1 # preallocate
-                        mdata["ids"].append(rb["ids_counter"])
-                        rb["ids_counter"] += 1
+                        mdata["ids"].append(rate_group["_ids_counter"])
+                        rate_group["_ids_counter"] += 1
                 else:
                     mdata["ids"] = [j]
 
@@ -409,32 +439,24 @@ class SortedBank:
                     rate = bf.rate
                     urates = np.array(sorted(set(rates), reverse=True))
                     to_rate = tuple(r for r in urates if r > rate)
-                    rb = sorted_rates[rate][to_rate]
-                    rb["nbmax"].append(bf.mix_matrix.shape[0])
-                    rb["ntempmax"].append(bf.mix_matrix.shape[1])
+                    rate_group = sorted_rates[rate][to_rate]
+                    rate_group["nbmax"].append(bf.mix_matrix.shape[0])
+                    rate_group["ntempmax"].append(bf.mix_matrix.shape[1])
 
         for from_rate, v in sorted_rates.items():
-            for to_rate, v2 in v.items():
+            for to_rate, rate_group in v.items():
                 if from_rate != maxrate:
-                    addids = v2["addids"]
-                    v2["addslice"] = slice(addids[0], addids[-1] + 1)
-                    v2["upslice"] = slice(0, v2["upcounts"])
-                    v2["rescale"] = (to_rate[-1] / from_rate) ** 0.5
-                v2["nbmax"] = max(v2["nbmax"])
-                v2["ntempmax"] = max(v2["ntempmax"])
-                # starts = [s for b in v2["metadata"].values() for s in b["starts"]]
-                # sst = set(starts)
-                # if len(sst) == 1:
-                #    v2["same_data"] = True
-                #    v2["start"] = list(sst)[0]
-                v2["unique_segments"] = sorted(set([seg for seg in v2["segments_map"]]))
-                unique_segments2 = sorted(set(v2["segments_map"]))
-                assert v2["unique_segments"] == unique_segments2
-                mdata = v2["metadata"]
-                if v2["sum_same_rate"] is True:
+                    addids = rate_group["_addids"]
+                    rate_group["addslice"] = slice(addids[0], addids[-1] + 1)
+                rate_group["nbmax"] = max(rate_group["nbmax"])
+                rate_group["ntempmax"] = max(rate_group["ntempmax"])
+                mdata = rate_group["metadata"]
+                if rate_group["sum_same_rate_slices"] is not None:
                     for md in mdata.values():
                         ids = md["ids"]
-                        v2["sum_same_rate_slices"].append(slice(ids[0], ids[-1] + 1))
+                        rate_group["sum_same_rate_slices"].append(
+                            slice(ids[0], ids[-1] + 1)
+                        )
 
         return sorted_rates, reorder
 
@@ -463,51 +485,57 @@ class SortedBank:
 
         # outputs
         data_by_rate = defaultdict(dict)
-        bases_by_rate = defaultdict(dict)
-        coeff_sv_by_rate = defaultdict(dict)
+        # bases_by_rate = defaultdict(dict)
+        # coeff_sv_by_rate = defaultdict(dict)
+        bases_by_rate = {
+            r1: {r2: {} for r2 in rb.keys()} for r1, rb in sorted_rates.items()
+        }
+        coeff_sv_by_rate = {
+            r1: {r2: {} for r2 in rb.keys()} for r1, rb in sorted_rates.items()
+        }
 
         # construct big tensors of data, bases, and coeff_sv, grouped by sample rates
         for from_rate, rbr in sorted_rates.items():
-            for to_rate, rb in rbr.items():
-                count = rb["counts"]
-                mdata = rb["metadata"]
-                nbm = rb["nbmax"]
-                ntempmax = rb["ntempmax"]
-                same_data = rb["same_data"]
+            for to_rate, rate_group in rbr.items():
+                count = rate_group["counts"]
+                mdata = rate_group["metadata"]
+                nbm = rate_group["nbmax"]
+                ntempmax = rate_group["ntempmax"]
 
                 # data
-                if same_data:
-                    data_by_rate[from_rate][to_rate] = torch.zeros(
-                        size=(nifo, nfilter_samples - 1 + int(from_rate * copy_block)),
+                # if same_data:
+                #    data_by_rate[from_rate][to_rate] = torch.zeros(
+                #        size=(nifo, nfilter_samples - 1 + int(from_rate * copy_block)),
+                #        device=device,
+                #        dtype=dtype,
+                #    )
+                # else:
+                #    data_by_rate[from_rate][to_rate] = torch.zeros(
+                #        size=(
+                #            nifo * count,
+                #            nfilter_samples - 1 + int(from_rate * copy_block),
+                #        ),
+                #        device=device,
+                #        dtype=dtype,
+                #    )
+                for ifo in ifos:
+
+                    # group the bases by sample rate
+                    bases_by_rate[from_rate][to_rate][ifo] = torch.zeros(
+                        size=(count, nbm, nfilter_samples),
                         device=device,
                         dtype=dtype,
                     )
-                else:
-                    data_by_rate[from_rate][to_rate] = torch.zeros(
-                        size=(
-                            nifo * count,
-                            nfilter_samples - 1 + int(from_rate * copy_block),
-                        ),
+
+                    # group the coeff by sample rate
+                    coeff_sv_by_rate[from_rate][to_rate][ifo] = torch.zeros(
+                        size=(count, ntempmax, nbm),
                         device=device,
                         dtype=dtype,
                     )
 
-                # group the bases by sample rate
-                bases_by_rate[from_rate][to_rate] = torch.zeros(
-                    size=(nifo, count, nbm, nfilter_samples),
-                    device=device,
-                    dtype=dtype,
-                )
-
-                # group the coeff by sample rate
-                coeff_sv_by_rate[from_rate][to_rate] = torch.zeros(
-                    size=(nifo, count, ntempmax, nbm),
-                    device=device,
-                    dtype=dtype,
-                )
-
-                # fill in the bases and coeff tensors!
-                for k, ifo in enumerate(ifos):
+                    # fill in the bases and coeff tensors!
+                    # for k, ifo in enumerate(ifos):
                     bifo = reordered_bank[ifo]
                     for bank_order, md in mdata.items():
                         bifo_order = bifo[bank_order]
@@ -518,24 +546,24 @@ class SortedBank:
                             assert this_slice.rate == from_rate
                             b = this_slice.orthogonal_template_bank
                             c = this_slice.mix_matrix.T
-                            bases_by_rate[from_rate][to_rate][
-                                k, id0, : b.shape[0], :
+                            bases_by_rate[from_rate][to_rate][ifo][
+                                id0, : b.shape[0], :
                             ] = torch.tensor(b, device=device, dtype=dtype)
-                            coeff_sv_by_rate[from_rate][to_rate][
-                                k, id0, : c.shape[0], : c.shape[1]
+                            coeff_sv_by_rate[from_rate][to_rate][ifo][
+                                id0, : c.shape[0], : c.shape[1]
                             ] = torch.tensor(c, device=device, dtype=dtype)
-                bases = bases_by_rate[from_rate][to_rate].view(
+                bases = bases_by_rate[from_rate][to_rate][ifo].view(
                     -1,
                     nfilter_samples,
                 )
                 bases = (
                     bases.unsqueeze(1).unsqueeze(0).to(memory_format=self.memory_format)
                 )
-                bases_by_rate[from_rate][to_rate] = bases.view(
-                    nifo, count, nbm, nfilter_samples
+                bases_by_rate[from_rate][to_rate][ifo] = bases.view(
+                    count, nbm, nfilter_samples
                 )
                 # benchmark conv methods
-                rb["conv_group"] = True
+                rate_group["conv_group"] = True
                 """
                 if self.device == "cpu":
                     rb["conv_group"] = True
