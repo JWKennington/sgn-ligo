@@ -4,7 +4,6 @@ from .whiten import *
 from .horizon import *
 from .converter import *
 from .resampler import *
-from .timeshift import *
 from .correlate import *
 from .matmul import *
 from .sumindex import *
