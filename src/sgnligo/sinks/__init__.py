@@ -15,12 +15,15 @@ class ImpulseSink(TSSink):
     """
     A fake sink element
     """
+
     original_templates: str = None
     bank_index: int = None
     template_duration: float = None
     plotname: str = None
     impulse_pad: str = None
+    data_pad: str = None
     verbose: bool = False
+    bankno: int = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -33,27 +36,31 @@ class ImpulseSink(TSSink):
         getting the buffer on the pad just modifies the name to show this final
         graph point and the prints it to prove it all works.
         """
+        # super().pull(pad, bufs)
+        # bufs = self.preparedframes[pad]
+        # FIXME: use preparedframes
         self.cnt[pad] += 1
         impulse_offset = bufs.metadata["impulse_offset"]
         self.impulse_offset = impulse_offset
-        #if bufs.EOS:
+        # if bufs.EOS:
         #    self.mark_eos(pad)
         padname = pad.name.split(":")[-1]
-        if padname  != self.impulse_pad:
+        if padname == self.data_pad:
             if bufs.buffers is not None:
                 if self.verbose:
                     print(self.cnt[pad], bufs)
             for buf in bufs:
-                if buf.end_offset > impulse_offset: 
+                if buf.end_offset > impulse_offset:
                     if buf.offset < impulse_offset + Offset.fromsec(
                         self.template_duration + 1
                     ):
                         # only save data around the impulse
+                        buf.data = buf.data[self.bankno]
                         self.A.push(buf)
                     else:
                         recovered_impulse_offset, match = self.impulse_test()
                         print(f"{impulse_offset=} {recovered_impulse_offset=} {match=}")
-                        if impulse_offset == recovered_impulse_offset and match > 0.99:
+                        if impulse_offset == recovered_impulse_offset and match > 0.997:
                             print("Impulse test passed")
                         else:
                             print("Impulse test failed")
@@ -61,10 +68,10 @@ class ImpulseSink(TSSink):
                 else:
                     # not at the impulse yet
                     pass
-        else:
+        elif padname == self.impulse_pad:
             for buf in bufs:
                 if buf.offset > impulse_offset - Offset.fromsec(
-                     1
+                    1
                 ) and buf.offset < impulse_offset + Offset.fromsec(
                     self.template_duration
                 ):
@@ -90,7 +97,6 @@ class ImpulseSink(TSSink):
         # ntot = subbanks[bankno]["ntemp"]
         # print(f"Running impulse test for {n} templates out of {ntot} total...")
         # self.full_template_length = 2048 * (1+4+8)
-        #full_template_length = self.template_duration * 2048
 
         f1 = h5py.File(self.original_templates, "r")
         full_templates = np.array(f1["full_templates1"])
@@ -105,16 +111,20 @@ class ImpulseSink(TSSink):
         n = nfull_temp
         if self.verbose:
             print(
-                "number of templates",nfull_temp,
+                "number of templates",
+                nfull_temp,
             )
         filter_output = self.A.copy_samples(self.A.size)
         if self.verbose:
             print("filter_output shape", filter_output.shape)
-        filter_output = filter_output[: nfull_temp // 2].cpu().numpy()[0, 0]
+        # bankno=0
+        # filter_output = filter_output[: nfull_temp // 2].cpu().numpy()[bankno]
+        # filter_output = filter_output.cpu().numpy()[bankno]
+        filter_output = filter_output.cpu().numpy()
 
         # only filter with current number of time slices
-        #full_template_length =  2048 * 13
-        #full_templates = full_templates[:, -full_template_length :]
+        # full_template_length =  2048 * 13
+        # full_templates = full_templates[:, -full_template_length :]
 
         if self.verbose:
             print("full_templates.shape", full_templates.shape)
@@ -144,7 +154,7 @@ class ImpulseSink(TSSink):
             normo = np.linalg.norm(o)
 
             # correlate
-            response1 = np.abs(correlate(o, h, "valid")) / (normh * normo)
+            response1 = np.abs(correlate(o, h, "valid")) / normh / normo
             response.append(response1)
 
             # find peak
@@ -162,15 +172,15 @@ class ImpulseSink(TSSink):
                 print("Plotting...")
             m = imiddle
             im = int(n / 4)
-            #output = np.pad(filter_output[m].real, (self.impulse_position, 0), "constant")
+            # output = np.pad(filter_output[m].real, (self.impulse_position, 0), "constant")
             output = filter_output[m].real
-            #res = np.pad(response[im], (self.impulse_position, 0), "constant")
+            # res = np.pad(response[im], (self.impulse_position, 0), "constant")
             res = response[im]
-            #indata = np.pad(
+            # indata = np.pad(
             #    torch.cat((self.indata)).cpu(), (self.impulse_position, 0), "constant"
-            #)
+            # )
             indata = self.Ainput.copy_samples(self.Ainput.size)
-            #indata = np.zeros(2048)
+            # indata = np.zeros(2048)
             data = [indata, output, res] + [
                 full_templates[m],
                 full_templates_flipped[m],
@@ -214,4 +224,3 @@ class ImpulseSink(TSSink):
         plt.tight_layout()
         plt.savefig(figname + "match")
         plt.clf()
-
