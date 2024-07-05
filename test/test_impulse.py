@@ -299,14 +299,12 @@ for ifo in ifos:
                             },
                         ),
                     )
-                    print(from_rate, to_rate, rate_group["addslice"])
                 else:
                     final_adder_coeff_map[sink_name] = (to_rate[-1] / from_rate) ** 0.5
                     final_adder_addslices_map[sink_name] = (
                         rate_group["addslice"],
                         slice(rate_group["ntempmax"]),
                     )
-                    print(from_rate, to_rate, rate_group["addslice"])
 
     if nslice != 1:
         # final adder
