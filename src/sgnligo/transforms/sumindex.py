@@ -10,7 +10,7 @@ class SumIndex(TSTransform):
     Change the data type or the device of the data
     """
 
-    sl: slice = None
+    sl: list[slice] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -29,24 +29,18 @@ class SumIndex(TSTransform):
                 data_all = []
                 for sl in self.sl:
                     if sl.stop - sl.start == 1:
-                        data_all.append((data[:, sl.start, :, :]).unsqueeze(1))
+                        data_all.append((data[sl.start, :, :]).unsqueeze(0))
                     else:
-                        data_all.append(
-                            torch.sum(data[:, sl, :, :], dim=1).unsqueeze(1)
-                        )
+                        data_all.append(torch.sum(data[sl, :, :], dim=0).unsqueeze(0))
 
-                out = torch.cat(data_all, dim=1)
+                out = torch.cat(data_all, dim=0)
 
             outbuf = SeriesBuffer(
                 offset=buf.offset,
                 sample_rate=buf.sample_rate,
                 data=out,
-                shape=(buf.shape[0],) + (len(self.sl),) + buf.shape[-2:],
+                shape=(len(self.sl),) + buf.shape[-2:],
             )
         outbufs.append(outbuf)
 
-        return TSFrame(
-            buffers=outbufs,
-            EOS=frame.EOS,
-            metadata=frame.metadata
-        )
+        return TSFrame(buffers=outbufs, EOS=frame.EOS, metadata=frame.metadata)
