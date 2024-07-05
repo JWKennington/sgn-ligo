@@ -3,7 +3,7 @@ from sgnts.sinks import *
 from .kafka_sink import *
 from .influx_sink import *
 from sgnts.base import Audioadapter, TSSink, Offset
-from .. import math
+from ..math import Math
 import h5py
 from scipy.signal import correlate
 import torch
@@ -28,7 +28,7 @@ class ImpulseSink(TSSink):
     def __post_init__(self):
         super().__post_init__()
         self.cnt = {p: 0 for p in self.sink_pads}
-        self.A = Audioadapter(lib=math)
+        self.A = Audioadapter(lib=Math)
         self.Ainput = Audioadapter()
 
     def pull(self, pad, bufs):
