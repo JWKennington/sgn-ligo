@@ -665,8 +665,10 @@ class SortedBank:
             for i, ifo in enumerate(ifos)
             for j in range(nbank)
         )
-        autocorrelation_banks = torch.zeros(
-            size=(nifo, nbank, ntempmax // 2, max_acl), device=device, dtype=self.cdtype
+        autocorrelation_banks = {}
+        for ifo in ifos:
+            autocorrelation_banks[ifo] = torch.zeros(
+            size=(nbank, ntempmax // 2, max_acl), device=device, dtype=self.cdtype
         )
         for i, ifo in enumerate(ifos):
             for j in range(nbank):
@@ -675,7 +677,7 @@ class SortedBank:
                 # this is for adjusting to the bank used for impulse test
                 if acorr.shape[0] > ntempmax // 2:
                     acorr = acorr[: ntempmax // 2]
-                autocorrelation_banks[i, j, : acorr.shape[0], : acorr.shape[1]] = (
+                autocorrelation_banks[ifo][j, : acorr.shape[0], : acorr.shape[1]] = (
                     torch.tensor(acorr)
                 )
 
