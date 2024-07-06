@@ -124,7 +124,7 @@ class LLOIDCorrelate(TSTransform):
                                     (Offset.tosamples(cp_segment1 - cp_segment0, buf.sample_rate),)
                                 )
                             outs.append(out)
-			outs = self.lib.stack_func(outs)
+                        outs = self.lib.stack_func(outs)
                 else:
                     outs = None
 
