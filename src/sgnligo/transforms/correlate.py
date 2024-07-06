@@ -81,7 +81,6 @@ class LLOIDCorrelate(TSTransform):
                 nthis_segment = this_segment1 - this_segment0
 
                 A.push(buf)
-                A.concatenate_data()
 
                 outs_map = {}
                 # Only do the copy for unique delays 
@@ -94,7 +93,9 @@ class LLOIDCorrelate(TSTransform):
                     cp_segment1 = this_segment1 + self.uppad - delay
                     cp_segment0 = cp_segment1 - (this_segment1 - this_segment0) - Offset.fromsamples(self.shape[-1] - 1, buf.sample_rate)
                     earliest.append(cp_segment0)
-                    if cp_segment1 > A.offset:
+                    if cp_segment1 > A.offset and not A.is_gap():
+                        if A.data_all is None:
+                            A.concatenate_data()
                         cp_segment = (max(A.offset, cp_segment0), cp_segment1)
                         # We need to do a copy
                         out = A.copy_samples_by_offset_segment(cp_segment)
@@ -113,15 +114,17 @@ class LLOIDCorrelate(TSTransform):
                 if copied_data is True:
                     outs = []
                     # Now stack the output array
-                    for delay in self.delays:
-                        out = outs_map[delay]
-                        if out is None:
-                            out = self.lib.zeros_func(
-                                (Offset.tosamples(cp_segment1 - cp_segment0, buf.sample_rate),)
-                            )
-                        outs.append(out)
-
-                    outs = self.lib.stack_func(outs)
+                    if len(self.unique_delays) == 1:
+                        outs = outs_map[delay].unsqueeze(0)
+                    else:
+                        for delay in self.delays:
+                            out = outs_map[delay]
+                            if out is None:
+                               out = self.lib.zeros_func(
+                                    (Offset.tosamples(cp_segment1 - cp_segment0, buf.sample_rate),)
+                                )
+                            outs.append(out)
+			outs = self.lib.stack_func(outs)
                 else:
                     outs = None
 
@@ -129,6 +132,7 @@ class LLOIDCorrelate(TSTransform):
                 flush_end_offset = min(earliest)
                 if flush_end_offset > A.offset:
                     A.flush_samples_by_end_offset_segment(flush_end_offset)
+                A.data_all = None
 
                 # Do the correlation!
                 if outs is not None:
