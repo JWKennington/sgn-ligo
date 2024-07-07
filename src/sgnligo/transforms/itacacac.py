@@ -2,7 +2,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 import torch
-from torch.masked import masked_tensor, as_masked_tensor
 
 from sgnts.base import Offset
 from ..base import SeriesBuffer, TSFrame, TSTransform, AdapterConfig, Time 
@@ -250,9 +249,9 @@ class Itacacac(TSTransform):
 
         # 3 ifo coincs
         coinc3_mask = coinc2_mask12 & coinc2_mask23 & coinc2_mask31
-        network_snr123 = (snr1.masked_fill(~coinc3_mask,0)**2
-                      + snr2.masked_fill(~coinc3_mask,0)**2
-                      + snr3.masked_fill(~coinc3_mask,0)**2)**.5
+        network_snr123 = ((snr1 * coinc3_mask)**2
+                      + (snr2 * coinc3_mask)**2
+                      + (snr3 * coinc3_mask)**2)**.5
 
         # 2 ifo coincs
         # update coinc masks: filter out 3 ifo coincs
@@ -260,12 +259,12 @@ class Itacacac(TSTransform):
         coinc2_mask23 = coinc2_mask23 & ~coinc3_mask
         coinc2_mask31 = coinc2_mask31 & ~coinc3_mask
 
-        network_snr12 = (snr1.masked_fill(~coinc2_mask12,0)**2
-                        +snr2.masked_fill(~coinc2_mask12,0)**2)**.5
-        network_snr23 = (snr2.masked_fill(~coinc2_mask23,0)**2
-                        +snr3.masked_fill(~coinc2_mask23,0)**2)**.5
-        network_snr31 = (snr1.masked_fill(~coinc2_mask31,0)**2
-                        +snr3.masked_fill(~coinc2_mask31,0)**2)**.5
+        network_snr12 = ((snr1 * coinc2_mask12)**2
+                        + (snr2 * coinc2_mask12)**2)**.5
+        network_snr23 = ((snr2 * coinc2_mask23)**2
+                        + (snr3 * coinc2_mask23)**2)**.5
+        network_snr31 = ((snr1 * coinc2_mask31)**2
+                        +(snr3 * coinc2_mask31)**2)**.5
 
         # update coinc masks: there may be cases where a template has 
         # two coincs, (e.g., HV coinc and LV coinc, but not HL coinc), 
@@ -277,12 +276,12 @@ class Itacacac(TSTransform):
         coinc2_mask31 = coinc2_mask31 & (network_snr31 > network_snr12) & (network_snr31 >= network_snr23)
 
         # update 2 ifo network snrs
-        network_snr12 = (snr1.masked_fill(~coinc2_mask12,0)**2
-                        +snr2.masked_fill(~coinc2_mask12,0)**2)**.5
-        network_snr23 = (snr2.masked_fill(~coinc2_mask23,0)**2
-                        +snr3.masked_fill(~coinc2_mask23,0)**2)**.5
-        network_snr31 = (snr1.masked_fill(~coinc2_mask31,0)**2
-                        +snr3.masked_fill(~coinc2_mask31,0)**2)**.5
+        network_snr12 = ((snr1 * coinc2_mask12)**2
+                        +(snr2 * coinc2_mask12)**2)**.5
+        network_snr23 = ((snr2 * coinc2_mask23)**2
+                        +(snr3 * coinc2_mask23)**2)**.5
+        network_snr31 = ((snr1 * coinc2_mask31)**2
+                        +(snr3 * coinc2_mask31)**2)**.5
 
         # 1 ifo
         # FIXME: what to do when snrs are equal?
@@ -290,9 +289,9 @@ class Itacacac(TSTransform):
         single_mask2 = ~coinc3_mask & ~coinc2_mask12 & ~coinc2_mask23 & ~coinc2_mask31 & (snr2 >= snr1) & (snr2 > snr3)
         single_mask3 = ~coinc3_mask & ~coinc2_mask12 & ~coinc2_mask23 & ~coinc2_mask31 & (snr3 > snr1) & (snr3 >= snr2)
 
-        single_snr1 = snr1.masked_fill(~single_mask1,0)
-        single_snr2 = snr2.masked_fill(~single_mask2,0)
-        single_snr3 = snr3.masked_fill(~single_mask3,0)
+        single_snr1 = snr1 * single_mask1
+        single_snr2 = snr2 * single_mask2
+        single_snr3 = snr3 * single_mask3
 
         all_network_snrs = network_snr123 + network_snr12 + network_snr23 + network_snr31 + single_snr1  + single_snr2  + single_snr3 
 
@@ -309,14 +308,14 @@ class Itacacac(TSTransform):
         single_mask1 = (snr1 > snr2) & ~coinc_mask
         single_mask2 = ~single_mask1 & ~coinc_mask
 
-        snr_masked1 = masked_tensor(snr1, coinc_mask)
-        snr_masked2 = masked_tensor(snr2, coinc_mask)
+        snr_masked1 = snr1 * coinc_mask
+        snr_masked2 = snr2 * coinc_mask
         coinc_network_snr = (snr_masked1 ** 2 + snr_masked2 ** 2)**.5
 
-        single1 = masked_tensor(snr1, single_mask1)
-        single2 = masked_tensor(snr2, single_mask2)
+        single1 = snr1 * single_mask1
+        single2 = snr2 * single_mask2
 
-        all_network_snr = coinc_network_snr.to_tensor(0) + single1.to_tensor(0) + single2.to_tensor(0)
+        all_network_snr = coinc_network_snr + single1 + single2
 
         return coinc_mask, single_mask1, single_mask2, all_network_snr,
 
@@ -364,9 +363,10 @@ class Itacacac(TSTransform):
             if not buf.is_gap: 
                 snrs[sink_pad.name.split(":")[-1]] = buf.data
 
+        metadata= frame.metadata
         if len(snrs.keys()) >= 1:
-            triggers = self.find_peaks_and_calculate_chisqs(snrs)
 
+            triggers = self.find_peaks_and_calculate_chisqs(snrs)
             # FIXME: consider edge effects
             ifo_combs, all_network_snr, single_masks = self.make_coincs(triggers)
 
@@ -389,7 +389,6 @@ class Itacacac(TSTransform):
                 background[ifo]["chisqs"] = triggers[ifo][1][...,2]
                 background[ifo]["single_masks"] = single_masks[ifo]
 
-            metadata= frame.metadata
             metadata["coincs"] = {
                     "template_ids":clustered_coinc[0][...,0],
                     "ifo_combs":clustered_coinc[0][...,1],
@@ -399,8 +398,6 @@ class Itacacac(TSTransform):
                     "sngl":clustered_coinc[2],
                     }
             metadata["background"] = background
-        else:
-            metadata = frame.metadata
 
         outbuf = SeriesBuffer(
             offset=self.preparedoutoffsets[self.sink_pads[0]][0]["offset"],
