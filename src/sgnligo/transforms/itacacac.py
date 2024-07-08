@@ -4,8 +4,7 @@ from typing import Any
 import torch
 
 from sgnts.base import Offset
-from ..base import SeriesBuffer, TSFrame, TSTransform, AdapterConfig, Time
-from ..math import Math
+from ..base import SeriesBuffer, TSFrame, TSTransform, AdapterConfig, Time, ArrayOps
 import math
 
 import lal
@@ -62,7 +61,7 @@ class Itacacac(TSTransform):
         self.adapter_config = AdapterConfig(
             stride=self.trigger_finding_length,
             overlap=(self.padding, self.padding),
-            lib=Math,
+            lib=ArrayOps,
         )
         self.ifos_number_map = {ifo: i + 1 for i, ifo in enumerate(self.ifos)}
         self.template_ids = self.template_ids.to(self.device)
