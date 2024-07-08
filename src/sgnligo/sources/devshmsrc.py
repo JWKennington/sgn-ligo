@@ -41,29 +41,28 @@ class DevShmSrc(TSSource):
     shared_memory_dir: str = None
     wait_time: int = 60
     watch_suffix: str = ".gwf"
+    buffer_duration: int = 1
 
     def __post_init__(self):
         super().__post_init__()
         self.cnt = {p: 0 for p in self.source_pads}
-
         self.shape = (self.num_samples,)
-
         self.queue = queue.Queue()
 
         # initialize a start up time. This will be used so that we make sure to only process
         # new files that appear in the dirctory and to keep track of any gaps
-        self.last_t0 = now()
+        self.last_t0 = float(now())
         print(f"Start up t0: {self.last_t0}")
 
         # Create the inotify handler
-        observer = threading.Thread(
+        self.observer = threading.Thread(
             target=self.monitor_dir,
             args=(self.queue, self.shared_memory_dir)
         )
 
         # Start the observer and set the stop attribute
-        observer.stop = False
-        observer.start()
+        self.observer.stop = False
+        self.observer.start()
 
     def monitor_dir(self, queue, watch_dir):
         """
@@ -91,56 +90,84 @@ class DevShmSrc(TSSource):
                 if not (extension == self.watch_suffix):
                     continue
 
-                # Add the filename to the queue
-                queue.put(os.path.join(watch_dir, filename))
+                # parse filename for the t0, we dont want to
+                # add files to the queue if they arrive late
+                _, _, t0, _ = from_T050017(filename)
+                if t0 < self.last_t0:
+                    pass
+                else:
+                    # Add the filename to the queue
+                    queue.put(os.path.join(watch_dir, filename))
 
         # Remove the watch
         i.rm_watch(watch_dir)
 
     def new(self, pad):
         self.cnt[pad] += 1
+        outbuf = []
 
         # process next file
         try:
-            next_file = self.queue.get(timeout=1)
+            # Im not sure what the right timeout here is,
+            # but I want to avoid a situation where get()
+            # times out just before the new file arrives and
+            # prematurely decides to send a gap buffer
+            next_file = self.queue.get(timeout=2)
         except queue.Empty:
-            # send a gap buffer
-            # FIXME: should also fail at some point after a long time with no new files?
-            print("Queue is empty.")
-            t0 = self.last_t0 + 1 # FIXME
+            if now() - self.last_t0 >= self.wait_time:
+                self.observer.stop = True
+                raise ValueError(f"Reached {self.wait_time} seconds with no new files in {self.shared_memory_dir}, exiting.")
+            elif now() - self.last_t0 >= self.buffer_duration:
+                # send a gap buffer
+                if self.cnt[pad] == 1:
+                    # send the first gap buffer starting from the program start up time
+                    t0 = self.last_t0
+                else:
+                    # send subsequent gaps at self.buffer_duration intervals
+                    t0 = self.last_t0 + self.buffer_duration
+                shape = (self.rate * self.buffer_duration,)
+                print(f"Queue is empty, sending a gap buffer at t0: {t0}")
+                outbuf.append(SeriesBuffer(
+                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=None, shape=shape
+                ))
 
-            outbuf = SeriesBuffer(
-                offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=None, is_gap=True
-            )
-
+                # update last t0
+                self.last_t0 = t0
         else:
-            next_file = self.queue.get()
-            print("Next file: ", next_file)
-
             # load data from the file using gwpy
             data = TimeSeries.read(next_file, f"{self.instrument}:{self.channel_name}")
             assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
             t0 = data.t0.value
             duration = data.duration.value
+            print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0} | shape: {data.shape} | sample rate: {data.sample_rate.value}")
             data = np.array(data)
-            print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0}")
 
-            # keep track of the times of the last data sent
-            # FIXME: handle discontinuities here
-            if self.last_t0 and t0 - self.last_t0 > duration:
+            if t0 - self.last_t0 > duration:
+                # if there is a discontinuity we need to send
+                # a gap buffer to cover the missing data
+                # FIXME: maybe we need to make several buffers
+                # all with duration = self.buffer_duration instead
+                # of making one large gap buffer here if
+                # gap_duration > self.buffer_duration? Im not sure
+                # if anything will break downstream
                 print(f"Warning: discontinuity. last t0 = {self.last_t0} | t0 = {t0} | duration = {duration}")
-            self.last_t0 = t0
-
-            outbuf = SeriesBuffer(
-                offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
-            )
+                gap_duration = t0 - (self.last_t0 + self.buffer_duration)
+                shape = (int(gap_duration / self.buffer_duration) * self.rate,)
+                outbuf.append(SeriesBuffer(
+                    offset=Offset.fromsec(self.last_t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=None, shape = shape
+                ))
+            else:
+                self.last_t0 = t0
+                outbuf.append(SeriesBuffer(
+                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
+                ))
 
         # online data is never EOS
         # FIXME but maybe there should be some kind of graceful shutdown
         EOS = False
 
         return TSFrame(
-            buffers=[outbuf],
+            buffers=outbuf,
             metadata={"cnt": self.cnt, "name": "'%s'" % pad.name},
             EOS=EOS,
         )
