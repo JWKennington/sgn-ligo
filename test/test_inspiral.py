@@ -19,22 +19,26 @@ from sgnligo.transforms import (
     Align,
     Itacacac,
 )
-from sgnligo.math import Math as torchmath
+from sgnligo.base import ArrayOps
+
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 # Read in the svd banks!
 svd_bank = [
-    "H1-0250_GSTLAL_SVD_BANK_half-0-0.xml.gz",
-    "L1-0250_GSTLAL_SVD_BANK_half-0-0.xml.gz",
-    "V1-0250_GSTLAL_SVD_BANK_half-0-0.xml.gz",
-    "/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
+    "H1-0750_GSTLAL_SVD_BANK-0-0.xml.gz",
+    "L1-0750_GSTLAL_SVD_BANK-0-0.xml.gz",
+    "V1-0750_GSTLAL_SVD_BANK-0-0.xml.gz",
+    #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
     #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0101_GSTLAL_SVD_BANK-0-0.xml.gz",
     #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0102_GSTLAL_SVD_BANK-0-0.xml.gz",
-    "/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/L1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
-    "/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/V1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
+    #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/L1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
+    #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/V1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
 ]
 impulse_bankno = 0
 original_templates = "full_templates_bin0250_tol999_1024.hdf5"
-nbank_pretend = 0
+nbank_pretend = 32
 nslice = -1
 verbose = True
 
@@ -45,8 +49,8 @@ impulse = False
 
 trigger_finding_length = 2048
 
-torchmath.DEVICE = device
-torchmath.DTYPE = dtype
+ArrayOps.DEVICE = device
+ArrayOps.DTYPE = dtype
 
 banks = group_and_read_banks(
     svd_bank=svd_bank, nbank_pretend=nbank_pretend, nslice=nslice, verbose=verbose
@@ -177,7 +181,7 @@ for ifo in ifos:
                 source_pad_names=(ifo,),
                 dtype=dtype,
                 device=device,
-                adapter_config=AdapterConfig(pad_zeros_startup=True, lib=torchmath),
+                adapter_config=AdapterConfig(pad_zeros_startup=True, lib=ArrayOps),
                 inrate=rate,
                 outrate=rate_down,
             ),
@@ -212,7 +216,7 @@ for ifo in ifos:
                     sink_pad_names=(ifo,),
                     source_pad_names=(ifo,),
                     filters=bases[from_rate][to_rate][ifo],
-                    lib=torchmath,
+                    lib=ArrayOps,
                     uppad=uppad,
                     downpad=downpad,
                     delays=delays,
@@ -277,7 +281,7 @@ for ifo in ifos:
                         dtype=dtype,
                         device=device,
                         adapter_config=AdapterConfig(
-                            pad_zeros_startup=True, lib=torchmath
+                            pad_zeros_startup=True, lib=ArrayOps
                         ),
                         inrate=from_rate,
                         outrate=to_rate[-1],
@@ -300,7 +304,7 @@ for ifo in ifos:
                             name=addname,
                             sink_pad_names=(ifo, sink_name),
                             source_pad_names=(ifo,),
-                            lib=torchmath,
+                            lib=ArrayOps,
                             coeff_map={
                                 ifo: 1,
                                 sink_name: (to_rate[-1] / from_rate) ** 0.5,
@@ -327,7 +331,7 @@ for ifo in ifos:
                 name=f"{ifo}_add_{maxrate}",
                 sink_pad_names=(ifo,) + tuple(k for k in final_adder_coeff_map.keys()),
                 source_pad_names=(ifo,),
-                lib=torchmath,
+                lib=ArrayOps,
                 coeff_map=dict(
                     {
                         ifo: 1,
@@ -428,7 +432,7 @@ for ifo in ifos:
                     )
 
 # Plot pipeline
-pipeline.visualize("plots/graph.png")
+#pipeline.visualize("plots/graph.png")
 
 # Run pipeline
 pipeline.run()
