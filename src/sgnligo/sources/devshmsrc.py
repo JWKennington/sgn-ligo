@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import inotify.adapters
 import inotify.constants
 from inotify_simple import INotify, flags
@@ -21,6 +23,11 @@ import queue
 import time
 
 @dataclass
+class LastBuffer:
+    t0: int
+    is_gap: bool
+
+@dataclass
 class DevShmSrc(TSSource):
     """
     shared_memory_dir: str
@@ -41,7 +48,6 @@ class DevShmSrc(TSSource):
     shared_memory_dir: str = None
     wait_time: int = 60
     watch_suffix: str = ".gwf"
-    buffer_duration: int = 1
 
     def __post_init__(self):
         super().__post_init__()
@@ -49,10 +55,16 @@ class DevShmSrc(TSSource):
         self.shape = (self.num_samples,)
         self.queue = queue.Queue()
 
-        # initialize a start up time. This will be used so that we make sure to only process
-        # new files that appear in the dirctory and to keep track of any gaps
-        self.last_t0 = float(now())
-        print(f"Start up t0: {self.last_t0}")
+        # set assumed buffer duration based on sample rate
+        # and num samples per buffer. Will fail if this does
+        # not match the file duration
+        self.buffer_duration = self.num_samples / self.rate
+
+        # initialize a named tuple to track info about the previous
+        # buffer sent. this will be used to make sure we dont resend
+        # late data and to track discontinuities
+        self.last_buffer = LastBuffer(int(now()), False)
+        print(f"Start up t0: {self.last_buffer.t0}")
 
         # Create the inotify handler
         self.observer = threading.Thread(
@@ -93,81 +105,86 @@ class DevShmSrc(TSSource):
                 # parse filename for the t0, we dont want to
                 # add files to the queue if they arrive late
                 _, _, t0, _ = from_T050017(filename)
-                if t0 < self.last_t0:
+                if t0 < self.last_buffer.t0:
                     pass
                 else:
                     # Add the filename to the queue
-                    queue.put(os.path.join(watch_dir, filename))
+                    queue.put((os.path.join(watch_dir, filename), t0))
 
         # Remove the watch
         i.rm_watch(watch_dir)
 
     def new(self, pad):
         self.cnt[pad] += 1
-        outbuf = []
 
-        # process next file
+        # get next file from queue. if its old, try again until we
+        # find a new file or reach the end of the queue
         try:
-            # Im not sure what the right timeout here is,
-            # but I want to avoid a situation where get()
-            # times out just before the new file arrives and
-            # prematurely decides to send a gap buffer
-            next_file = self.queue.get(timeout=2)
+            while True:
+                # Im not sure what the right timeout here is,
+                # but I want to avoid a situation where get()
+                # times out just before the new file arrives and
+                # prematurely decides to send a gap buffer
+                next_file, t0 = self.queue.get(timeout=2)
+                if t0 <= self.last_buffer.t0:
+                    continue
+                else:
+                    break
+
         except queue.Empty:
-            if now() - self.last_t0 >= self.wait_time:
+            if now() - self.last_buffer.t0 >= self.wait_time:
                 self.observer.stop = True
                 raise ValueError(f"Reached {self.wait_time} seconds with no new files in {self.shared_memory_dir}, exiting.")
-            elif now() - self.last_t0 >= self.buffer_duration:
+            else:
                 # send a gap buffer
                 if self.cnt[pad] == 1:
                     # send the first gap buffer starting from the program start up time
-                    t0 = self.last_t0
+                    t0 = self.last_buffer.t0
                 else:
                     # send subsequent gaps at self.buffer_duration intervals
-                    t0 = self.last_t0 + self.buffer_duration
+                    t0 = self.last_buffer.t0 + self.buffer_duration
                 shape = (self.rate * self.buffer_duration,)
                 print(f"Queue is empty, sending a gap buffer at t0: {t0}")
-                outbuf.append(SeriesBuffer(
+                outbuf = SeriesBuffer(
                     offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=None, shape=shape
-                ))
+                )
 
-                # update last t0
-                self.last_t0 = t0
+                # update last buffer
+                self.last_buffer.t0 = t0
+                self.last_buffer.is_gap = True
         else:
             # load data from the file using gwpy
             data = TimeSeries.read(next_file, f"{self.instrument}:{self.channel_name}")
-            assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
             t0 = data.t0.value
             duration = data.duration.value
-            print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0} | shape: {data.shape} | sample rate: {data.sample_rate.value}")
+
+            # check sample rate and duration matches what we expect
+            assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
+            assert duration == self.buffer_duration, "File duration ({duration} sec) does not match assumed buffer duration ({self.buffer_duration} sec)."
+
             data = np.array(data)
 
-            if t0 - self.last_t0 > duration:
-                # if there is a discontinuity we need to send
-                # a gap buffer to cover the missing data
-                # FIXME: maybe we need to make several buffers
-                # all with duration = self.buffer_duration instead
-                # of making one large gap buffer here if
-                # gap_duration > self.buffer_duration? Im not sure
-                # if anything will break downstream
-                print(f"Warning: discontinuity. last t0 = {self.last_t0} | t0 = {t0} | duration = {duration}")
-                gap_duration = t0 - (self.last_t0 + self.buffer_duration)
-                shape = (int(gap_duration / self.buffer_duration) * self.rate,)
-                outbuf.append(SeriesBuffer(
-                    offset=Offset.fromsec(self.last_t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=None, shape = shape
-                ))
-            else:
-                self.last_t0 = t0
-                outbuf.append(SeriesBuffer(
-                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
-                ))
+            if self.last_buffer.is_gap:
+                # FIXME: how do we want to pass on info to downstream elements that
+                # there was a discontinuity? Do we actually need to?
+                print("LAST BUFFER WAS GAP, SET DISCONT FLAG")
+
+            outbuf = SeriesBuffer(
+                offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
+            )
+
+            print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0:.3e} | Discont: {self.last_buffer.is_gap}")
+
+            # update last buffer
+            self.last_buffer.t0 = t0
+            self.last_buffer.is_gap = False
 
         # online data is never EOS
         # FIXME but maybe there should be some kind of graceful shutdown
         EOS = False
 
         return TSFrame(
-            buffers=outbuf,
+            buffers=[outbuf],
             metadata={"cnt": self.cnt, "name": "'%s'" % pad.name},
             EOS=EOS,
         )
