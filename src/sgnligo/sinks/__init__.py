@@ -8,6 +8,7 @@ import h5py
 from scipy.signal import correlate
 import torch
 import matplotlib.pyplot as plt
+from .strike_sink import StrikeSink
 
 
 @dataclass

@@ -2,12 +2,13 @@ from sgnligo.cbc.sort_bank import group_and_read_banks, SortedBank
 import torch
 
 from sgn.apps import Pipeline
+from sgn.sinks import FakeSink
 
 from sgnts.sources import FakeSeriesSrc
 from sgnts.sinks import DumpSeriesSink, FakeSeriesSink
 from sgnts.base import AdapterConfig, Offset
 
-from sgnligo.sinks import ImpulseSink
+from sgnligo.sinks import ImpulseSink, StrikeSink
 
 from sgnligo.transforms import (
     Converter,
@@ -30,21 +31,21 @@ svd_bank = [
     "H1-0750_GSTLAL_SVD_BANK-0-0.xml.gz",
     "L1-0750_GSTLAL_SVD_BANK-0-0.xml.gz",
     "V1-0750_GSTLAL_SVD_BANK-0-0.xml.gz",
-    #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
-    #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0101_GSTLAL_SVD_BANK-0-0.xml.gz",
-    #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0102_GSTLAL_SVD_BANK-0-0.xml.gz",
-    #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/L1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
-    #"/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/V1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
+    # "/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
+    # "/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0101_GSTLAL_SVD_BANK-0-0.xml.gz",
+    # "/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/H1-0102_GSTLAL_SVD_BANK-0-0.xml.gz",
+    # "/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/L1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
+    # "/home/yun-jing.huang/phd/o3mdc-filters/mdc11/svd_bank/V1-0000_GSTLAL_SVD_BANK-0-0.xml.gz",
 ]
 impulse_bankno = 0
 original_templates = "full_templates_bin0250_tol999_1024.hdf5"
-nbank_pretend = 32
+nbank_pretend = 0
 nslice = -1
 verbose = True
 
 copy_block = 1
-device = "cuda:0"
-dtype = torch.float16
+device = "cpu"
+dtype = torch.float32
 impulse = False
 
 trigger_finding_length = 2048
@@ -93,7 +94,7 @@ for ifo in ifos:
         FakeSeriesSrc(
             name=ifo + "_src",
             source_pad_names=source_pad_names,
-            num_buffers=10_000,
+            num_buffers=10,
             rate=2048,
             num_samples=2048,
             signal_type=signal_type,
@@ -109,7 +110,7 @@ pipeline.insert(
         source_pad_names=tuple(ifos),
         adapter_config=AdapterConfig(stride=num_samples),
         backend="torch",
-        dtype="float16",
+        dtype="float32",
         device=device,
     ),
 )
@@ -131,19 +132,28 @@ if impulse:
         ),
     )
 else:
+    template_ids_np = sorted_bank.template_ids.numpy().flatten()
     pipeline.insert(
         Itacacac(
-            name="itacacac", 
+            name="itacacac",
             sink_pad_names=tuple(ifos),
             source_pad_names=("trigs",),
             trigger_finding_length=trigger_finding_length,
             autocorrelation_banks=sorted_bank.autocorrelation_banks,
             template_ids=sorted_bank.template_ids,
+            bankids_map=sorted_bank.bankids_map,
             end_times=sorted_bank.end_times,
             device=device,
         ),
-        FakeSeriesSink(name="sink0", sink_pad_names=("trigs",), verbose=verbose),
-        link_map={"sink0:sink:trigs":"itacacac:src:trigs"},
+        StrikeSink(
+            name="sink0",
+            sink_pad_names=("trigs",),
+            ifos=ifos,
+            verbose=False,
+            template_ids=tuple(template_ids_np[template_ids_np != -1]),
+            bankids_map=sorted_bank.bankids_map,
+        ),
+        link_map={"sink0:sink:trigs": "itacacac:src:trigs"},
     )
 
 # Multi-band
@@ -432,7 +442,7 @@ for ifo in ifos:
                     )
 
 # Plot pipeline
-#pipeline.visualize("plots/graph.png")
+pipeline.visualize("plots/graph.png")
 
 # Run pipeline
 pipeline.run()
