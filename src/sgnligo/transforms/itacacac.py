@@ -8,6 +8,7 @@ from ..base import SeriesBuffer, TSFrame, TSTransform, AdapterConfig, Time, Arra
 import math
 
 import lal
+import numpy as np
 
 
 def index_select(tensor, dim, index):
@@ -53,12 +54,13 @@ class Itacacac(TSTransform):
         self.nifo = len(self.ifos)
 
         (
-            self.nbank,
+            self.nsubbank,
             self.ntempmax,
             self.autocorrelation_length,
         ) = self.autocorrelation_banks[self.ifos[0]].shape
         self.autocorrelation_banks_real = {}
         self.autocorrelation_banks_imag = {}
+        self.ifos_number_map = {ifo: i + 1 for i, ifo in enumerate(self.ifos)}
         for ifo in self.ifos:
             self.autocorrelation_banks_real[ifo] = self.autocorrelation_banks[ifo].real
             self.autocorrelation_banks_imag[ifo] = self.autocorrelation_banks[ifo].imag
@@ -69,9 +71,9 @@ class Itacacac(TSTransform):
             overlap=(self.padding, self.padding),
             lib=ArrayOps,
         )
-        self.ifos_number_map = {ifo: i + 1 for i, ifo in enumerate(self.ifos)}
         self.template_ids = self.template_ids.to(self.device)
-        self.template_ids_np = self.template_ids.to(self.device).numpy()
+        self.template_ids_np = self.template_ids.to("cpu").numpy()
+        self.end_times = self.end_times.numpy()
 
         # Denominator Eq 28 from arXiv:1604.04324
         # self.autocorrelation_norms = torch.sum(
@@ -88,7 +90,7 @@ class Itacacac(TSTransform):
 
         self.snr_time_series_indices = torch.arange(
             self.autocorrelation_length, device=self.device
-        ).expand(self.nbank, self.ntempmax, -1)
+        ).expand(self.nsubbank, self.ntempmax, -1)
 
         super().__post_init__()
 
@@ -134,7 +136,7 @@ class Itacacac(TSTransform):
             real_peak = real_time_series[..., padding].unsqueeze(2).expand(snr_ts_shape)
             imag_peak = imag_time_series[..., padding].unsqueeze(2).expand(snr_ts_shape)
 
-            # complex operations are slow with torch compile
+            # complex operations are slow with torch compile, make them real
             autocorrelation_chisq = torch.sum(
                 (
                     real_time_series
@@ -153,7 +155,6 @@ class Itacacac(TSTransform):
             autocorrelation_chisq /= self.autocorrelation_norms[ifo]
             triggers[ifo] = [
                 peak_locations,
-                # torch.dstack([peaks, angles, autocorrelation_chisq]),
                 peaks,
                 autocorrelation_chisq,
             ]
@@ -380,47 +381,58 @@ class Itacacac(TSTransform):
             all_network_snr,
         )
 
-    def cluster_coincs(self, ifo_combs, all_network_snr, template_ids, triggers):
+    def cluster_coincs(self, ifo_combs, all_network_snr, template_ids, triggers, snrs):
         clustered_snr, max_locations = torch.max(all_network_snr, dim=-1)
-        clustered_ifo_combs = index_select(ifo_combs, 1, max_locations)
-        clustered_template_ids = index_select(template_ids, 1, max_locations)
+        clustered_ifo_combs = ifo_combs[range(self.nsubbank), max_locations]
+        clustered_template_ids = template_ids[range(self.nsubbank), max_locations]
+        max_locations = max_locations.to("cpu").numpy()
         sngls = {}
         for ifo, trig in triggers.items():
             sngls[ifo] = {}
-            time = index_select(triggers[ifo][0], 1, max_locations)
-            trig1 = index_select(triggers[ifo][1], 1, max_locations)
-            trig2 = index_select(triggers[ifo][2], 1, max_locations)
-            if self.device != "cpu":
-                time = time.to("cpu").numpy()
-                trig1 = trig1.to("cpu").numpy()
-                trig2 = trig2.to("cpu").numpy()
-            else:
-                time = time.numpy()
-                trig2 = trig2.numpy()
-            sngls[ifo]["time"] = time
+            peak_locations = triggers[ifo][0][range(self.nsubbank), max_locations]
+            sngl_snr = triggers[ifo][1][range(self.nsubbank), max_locations]
+            sngl_chisq = triggers[ifo][2][range(self.nsubbank), max_locations]
 
-            sngls[ifo]["snr"] = trig1
-            sngls[ifo]["chisq"] = trig2
-            # sngls[ifo]["phase"] = trig1[...,1]
+            sngls[ifo]["time"] = (
+                np.round(
+                    (Offset.fromsamples(peak_locations, self.rate) + self.offset)
+                    / Offset.OFFSET_RATE
+                    * Time.SECONDS
+                )
+                + Offset.offset_ref_t0
+                + self.end_times
+            )
+            sngls[ifo]["snr"] = sngl_snr
+            sngls[ifo]["chisq"] = sngl_chisq
 
-        # clustered_phases = index_select(phases, 1, max_locations)
-        # clustered_chisq = index_select(phase, 1, max_locations)
+            # go back and find the phase only for the clustered coincs
+            # FIXME: find the snr snippet
+            snrs0 = snrs[ifo]
+            snrs0 = snrs0.view(snrs0.shape[0], snrs0.shape[1] // 2, 2, snrs0.shape[2])
+            snr_pairs = snrs0[range(snrs0.shape[0]), max_locations]
+            sngl_peaks = snr_pairs[range(snr_pairs.shape[0]), :, peak_locations]
+            real = sngl_peaks[:, 0]
+            imag = sngl_peaks[:, 1]
+            phase = torch.atan2(imag, real)
+            sngls[ifo]["phase"] = phase.to("cpu").numpy()
 
         # FIXME: is stacking then index_select faster?
-        # FIXME: how is the time, phase, chisq defined?
-        # FIXME: add end_time correction
-
+        # FIXME: is stacking then copying to cpu faster?
         return [clustered_template_ids, clustered_ifo_combs, clustered_snr, sngls]
-        # torch.dstack([clustered_snr, clustered_phases, clustered_chisq])]
 
     # @torch.compile
     def itacacac(self, snrs):
         triggers = self.find_peaks_and_calculate_chisqs(snrs)
+
         # FIXME: consider edge effects
         ifo_combs, all_network_snr, single_masks = self.make_coincs(triggers)
 
+        for ifo in triggers.keys():
+            for i in range(len(triggers[ifo])):
+                triggers[ifo][i] = triggers[ifo][i].to("cpu").numpy()
+
         clustered_coinc = self.cluster_coincs(
-            ifo_combs, all_network_snr, self.template_ids, triggers
+            ifo_combs, all_network_snr, self.template_ids, triggers, snrs
         )
 
         return triggers, ifo_combs, all_network_snr, single_masks, clustered_coinc
@@ -438,6 +450,8 @@ class Itacacac(TSTransform):
             buf = frame.buffers[0]
             if not buf.is_gap:
                 snrs[sink_pad.name.split(":")[-1]] = buf.data
+        self.rate = frame.sample_rate
+        self.offset = frame.offset
 
         metadata = frame.metadata
         if len(snrs.keys()) >= 1:
@@ -446,22 +460,8 @@ class Itacacac(TSTransform):
                 self.itacacac(snrs)
             )
 
-            if self.device != "cpu":
-                for ifo in triggers.keys():
-                    for i in range(len(triggers[ifo])):
-                        triggers[ifo][i] = triggers[ifo][i].to("cpu").numpy()
-                    if len(single_masks.keys()) > 1:
-                        single_masks[ifo] = single_masks[ifo].to("cpu").numpy()
-                for j in range(len(clustered_coinc) - 1):
-                    clustered_coinc[j] = clustered_coinc[j].to("cpu").numpy()
-            else:
-                for ifo in triggers.keys():
-                    for i in range(len(triggers[ifo])):
-                        triggers[ifo][i] = triggers[ifo][i].numpy()
-                    if len(single_masks.keys()) > 1:
-                        single_masks[ifo] = single_masks[ifo].numpy()
-                for j in range(len(clustered_coinc) - 1):
-                    clustered_coinc[j] = clustered_coinc[j].numpy()
+            for j in range(len(clustered_coinc) - 1):
+                clustered_coinc[j] = clustered_coinc[j].to("cpu").numpy()
 
             # FIXME: is stacking then copying to cpu faster?
             # FIXME: do we only need snr chisq for singles?
@@ -475,11 +475,20 @@ class Itacacac(TSTransform):
                     background[bankid][ifo]["chisqs"] = []
                     background[bankid][ifo]["template_ids"] = []
                     if ifo in single_masks:
+                        smask0 = single_masks[ifo].to("cpu").numpy()
                         for i in ids:
-                            smask = single_masks[ifo][i]
-                            background[bankid][ifo]["time"].append(
-                                triggers[ifo][0][i][smask]
+                            smask = smask0[i]
+                            time = triggers[ifo][0][i][smask]
+                            time = (
+                                np.round(
+                                    (Offset.fromsamples(time, self.rate) + self.offset)
+                                    / Offset.OFFSET_RATE
+                                    * Time.SECONDS
+                                )
+                                + Offset.offset_ref_t0
+                                + np.expand_dims(self.end_times, 1)
                             )
+                            background[bankid][ifo]["time"].append(time)
                             background[bankid][ifo]["snrs"].append(
                                 triggers[ifo][1][i][smask]
                             )
@@ -505,7 +514,7 @@ class Itacacac(TSTransform):
             sample_rate=frame.sample_rate,
             data=None,
             shape=(
-                self.nbank,
+                self.nsubbank,
                 Offset.tosamples(
                     self.preparedoutoffsets[self.sink_pads[0]][0]["noffset"],
                     frame.sample_rate,
