@@ -63,8 +63,6 @@ class Whiten(TSTransform):
 
         super().__post_init__()
         
-        self.inputs = {}
-
         # init the hann window
         self.window = self.hann_window()
 
@@ -90,19 +88,12 @@ class Whiten(TSTransform):
             Whiten incoming data in segments of fft-length seconds overlapped by fft-length / 4
             Some ascii art here would be helpful to illustrate what were doing.
             """
-            """
-            metadata={
-                "name": "%s -> %s" % (
-                    "+".join(f.metadata["name"] for f in self.inputs.values()),
-                    pad.name,
-                )
-            }
-            """
             # incoming frame handling
             outbufs = []
             frame = self.preparedframes[self.sink_pads[0]]
-            EOS=any(frame.EOS for frame in self.inputs.values())
+            EOS = frame.EOS
             outoffsets = self.preparedoutoffsets[self.sink_pads[0]]
+
 
             # passes the psd along with an aligned attribute if the pad is the psd_pad
             # if aligned == True, then the current offset == psd offset
