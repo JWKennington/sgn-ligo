@@ -16,6 +16,8 @@ def parse_command_line():
     parser = OptionParser()
 
     parser.add_option("--instrument", metavar = "ifo", help = "Instrument to analyze. H1, L1, or V1.")
+    parser.add_option("--gps-start-time", metavar = "seconds", help="Set the start time of the segment to analyze in GPS seconds.")
+    parser.add_option("--gps-end-time", metavar = "seconds", help="Set the end time of the segment to analyze in GPS seconds.")
     parser.add_option("--output-dir", metavar = "path", help = "Directory to write output data into.")
     parser.add_option("--sample-rate", metavar = "Hz", type = int, default=16384, help="Requested sampling rate of the data.")
     parser.add_option("--buffer-duration", metavar = "seconds", type = int, default = 1, help = "Length of output buffers in seconds. Default is 1 second.")
@@ -37,6 +39,9 @@ def test_whitengraph(capsys):
     os.makedirs(options.output_dir, exist_ok=True)
 
     num_samples = options.sample_rate * options.buffer_duration
+
+    if not (options.gps_start_time and options.gps_end_time):
+        raise ValueError("Must provide both --gps-start-time and --gps-end-time.")
 
     # sanity check the whitening method given
     if options.whitening_method not in ("gwpy", "gstlal"):
@@ -69,8 +74,10 @@ def test_whitengraph(capsys):
                rate=options.sample_rate,
                num_samples=num_samples,
                framecache=options.frame_cache,
-               channel_name = (options.channel_name,), # FIXME why is this a tuple
-               instruments = (options.instrument,), # FIXME why  is this a tuple
+               channel_name = options.channel_name,
+               instrument = options.instrument, 
+               gps_start_time = options.gps_start_time,
+               gps_end_time = options.gps_end_time,
              ),
              Resampler(
                name="trans1",
