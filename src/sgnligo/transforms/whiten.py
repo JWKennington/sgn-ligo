@@ -65,10 +65,6 @@ class Whiten(TSTransform):
         
         self.inputs = {}
 
-        # sanity check the whitening method given
-        if self.whitening_method not in ("gwpy", "gstlal"):
-            raise ValueError("Unknown whitening method, exiting.")
-
         # init the hann window
         self.window = self.hann_window()
 
@@ -105,7 +101,7 @@ class Whiten(TSTransform):
             # incoming frame handling
             outbufs = []
             frame = self.preparedframes[self.sink_pads[0]]
-            EOS=any(frame.EOS for frame in self.inputs.values()),
+            EOS=any(frame.EOS for frame in self.inputs.values())
             outoffsets = self.preparedoutoffsets[self.sink_pads[0]]
 
             # passes the psd along with an aligned attribute if the pad is the psd_pad
