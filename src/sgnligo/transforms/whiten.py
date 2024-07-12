@@ -113,7 +113,7 @@ class Whiten(TSTransform):
                                         offset=outoffsets[0]["offset"],
                                         sample_rate=self.sample_rate,
                                         data=None,
-                                        shape=frame.shape)],
+                                        shape=(Offset.tosamples(outoffsets[0]["noffset"], self.sample_rate),))],
                             EOS = EOS,
                             metadata = {"psd": None, "aligned": None})
                 else:
@@ -123,7 +123,7 @@ class Whiten(TSTransform):
                                         offset=outoffsets[0]["offset"],
                                         sample_rate=self.sample_rate,
                                         data=None,
-                                        shape=frame.shape)],
+                                        shape=(Offset.tosamples(outoffsets[0]["noffset"], self.sample_rate),))],
                             EOS = EOS,
                             metadata = {"psd": self.psd_geometric_mean, "aligned": aligned})
 
@@ -185,7 +185,7 @@ class Whiten(TSTransform):
                     psd_median = np.median(self.psd_buffer, axis=0)
 
                     # create geometric mean template
-                    if self.psd_geometric_mean == []:
+                    if len(self.psd_geometric_mean) == 0:
                         self.psd_geometric_mean = np.ones_like(psd_median)
 
                     # load ref psd if necessary
@@ -215,7 +215,7 @@ class Whiten(TSTransform):
                     whitened_data *= (1/self.sample_rate) * np.sqrt(np.sum(self.window ** 2))
 
                     # accounts for overlap by summing with prev_data over the stride of the adapter
-                    if self.prev_data == []:
+                    if len(self.prev_data) == 0:
                         self.prev_data = whitened_data[self.adapter_config.stride:]
                     else:
                         whitened_data[:self.adapter_config.overlap[1]] += self.prev_data
