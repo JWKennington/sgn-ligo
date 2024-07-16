@@ -152,6 +152,8 @@ else:
             verbose=False,
             template_ids=tuple(template_ids_np[template_ids_np != -1]),
             bankids_map=sorted_bank.bankids_map,
+            subbankids=sorted_bank.subbankids,
+            template_sngls=sorted_bank.sngls,
         ),
         link_map={"sink0:sink:trigs": "itacacac:src:trigs"},
     )
