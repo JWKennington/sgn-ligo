@@ -71,6 +71,9 @@ class FrameReader(TSSource):
         self.offsets = np.array([])
         self.data = np.array([])
 
+        # keep track of buffer epochs
+        self.last_epoch = None
+
     @staticmethod
     def ifo_strings(ifo):
         """
@@ -119,7 +122,7 @@ class FrameReader(TSSource):
         self.cnt[pad] += 1
         # load next frame of data from disk when we have less than
         # one buffer length of data left
-        if (self.data.size < self.num_samples) and self.cache:
+        if (self.data.size <= self.num_samples) and self.cache:
              offsets, data = self.load_gwf_data(self.cache[0])
 
              self.offsets = np.concatenate((self.offsets, offsets))
@@ -132,8 +135,8 @@ class FrameReader(TSSource):
         # outdata is the first self.num_samples of data in the frame
         outdata = self.data[:self.num_samples]
         outoffsets = self.offsets[:self.num_samples]
-        epoch = int(outoffsets[0])
 
+        epoch = int(outoffsets[0])
         outbuf = SeriesBuffer(
             offset=epoch, sample_rate=self.rate, data=outdata, shape=outdata.shape
         )
@@ -142,9 +145,14 @@ class FrameReader(TSSource):
         self.data = self.data[self.num_samples:]
         self.offsets = self.offsets[self.num_samples:]
 
+        # update last buffer epoch
+        self.last_epoch = epoch
+
         # EOS condition is when we have processed all data intersecting
         # the analysis segment in every frame in the cache
-        EOS = (self.data.size == 0) and (len(self.cache) == 0)
+        # set this condition on second to last buffer so it can propagate to
+        # downstream elements
+        EOS = (self.data.size <= self.num_samples) and (len(self.cache) == 0)
 
         return TSFrame(
             buffers=[outbuf],
