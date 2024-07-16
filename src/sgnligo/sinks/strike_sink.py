@@ -41,7 +41,7 @@ class event_dummy(object):
 class StrikeSink(SinkElement):
 
     ifos: list[str] = None
-    template_ids: Sequence[Any] = None
+    all_template_ids: Sequence[Any] = None
     bankids_map: dict[str, list] = None
     subbankids: Sequence[Any] = None
     template_sngls: list[dict] = None
@@ -100,10 +100,12 @@ class StrikeSink(SinkElement):
         self.coinc_tables = {}
         self.coinc_event_map_tables = {}
         self.coinc_outdocs = {}
-        for bankid in self.bankids_map:
+        for bankid, ids in self.bankids_map.items():
+            bank_template_ids = self.all_template_ids[ids]
+            bank_template_ids = tuple(bank_template_ids[bank_template_ids != -1])
             # Ranking stat output
             self.ranking_stats[bankid] = likelihood_ratio.LnLikelihoodRatio(
-                template_ids=self.template_ids,
+                template_ids=bank_template_ids,
                 instruments=self.ifos,
             )
 

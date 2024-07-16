@@ -132,7 +132,6 @@ if impulse:
         ),
     )
 else:
-    template_ids_np = sorted_bank.template_ids.numpy().flatten()
     pipeline.insert(
         Itacacac(
             name="itacacac",
@@ -150,7 +149,7 @@ else:
             sink_pad_names=("trigs",),
             ifos=ifos,
             verbose=False,
-            template_ids=tuple(template_ids_np[template_ids_np != -1]),
+            all_template_ids=sorted_bank.template_ids.numpy(),
             bankids_map=sorted_bank.bankids_map,
             subbankids=sorted_bank.subbankids,
             template_sngls=sorted_bank.sngls,
