@@ -105,7 +105,7 @@ class SortedBank:
             self.bases_cat,
             self.template_ids,
             self.end_times,
-            self.bankids,
+            self.subbankids,
             self.bankids_map,
             self.sngls,
             self.autocorrelation_banks,
@@ -618,7 +618,7 @@ class SortedBank:
         #   the template id for empty entries will be -1
         ntempmax = bank_metadata["ntempmax"]
         template_ids = torch.ones(size=(nbank, ntempmax // 2), dtype=torch.int32) * -1
-        bankids = []
+        subbankids = []
         sngls = []
         end_times = torch.zeros(size=(nbank,), dtype=torch.long)
         bankids_map = defaultdict(list)
@@ -636,9 +636,10 @@ class SortedBank:
                 bank_id = subbank_id.split("_")[0] + "_" + str(j)
             else:
                 bank_id = subbank_id.split("_")[0]
-            bankids.append(subbank_id)
+            subbankids.append(subbank_id)
             bankids_map[bank_id].append(j)
-            sngls.append(sngl)
+            sngl0 = {row.template_id: row for row in sngl}
+            sngls.append(sngl0)
 
         # Write out single inspiral table
         # sngl0 = reordered_bank[ifos[0]][0].sngl_inspiral_table
@@ -668,8 +669,8 @@ class SortedBank:
         autocorrelation_banks = {}
         for ifo in ifos:
             autocorrelation_banks[ifo] = torch.zeros(
-            size=(nbank, ntempmax // 2, max_acl), device=device, dtype=self.cdtype
-        )
+                size=(nbank, ntempmax // 2, max_acl), device=device, dtype=self.cdtype
+            )
         for i, ifo in enumerate(ifos):
             for j in range(nbank):
                 acorr = reordered_bank[ifo][j].autocorrelation_bank
@@ -692,7 +693,7 @@ class SortedBank:
             bases_by_rate,
             template_ids,
             end_times,
-            bankids,
+            subbankids,
             bankids_map,
             sngls,
             autocorrelation_banks,
