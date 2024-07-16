@@ -398,7 +398,7 @@ class Itacacac(TSTransform):
                     (Offset.fromsamples(peak_locations, self.rate) + self.offset)
                     / Offset.OFFSET_RATE
                     * Time.SECONDS
-                )
+                ).astype(int)
                 + Offset.offset_ref_t0
                 + self.end_times
             )
@@ -484,7 +484,7 @@ class Itacacac(TSTransform):
                                     (Offset.fromsamples(time, self.rate) + self.offset)
                                     / Offset.OFFSET_RATE
                                     * Time.SECONDS
-                                )
+                                ).astype(int)
                                 + Offset.offset_ref_t0
                                 + np.expand_dims(self.end_times, 1)
                             )
