@@ -98,25 +98,23 @@ class Whiten(TSTransform):
             # passes the psd along with an aligned attribute if the pad is the psd_pad
             # if aligned == True, then the current offset == psd offset
             if pad.name == self.psd_pad_name:
-                if self.psd_offset == None:
-                    return TSFrame(
-                            buffers = [SeriesBuffer(
-                                        offset=outoffsets[0]["offset"],
-                                        sample_rate=self.sample_rate,
-                                        data=None,
-                                        shape=(Offset.tosamples(outoffsets[0]["noffset"], self.sample_rate),))],
-                            EOS = EOS,
-                            metadata = {"psd": None, "aligned": None})
+                offset = outoffsets[0]["offset"]
+                shape = (Offset.tosamples(outoffsets[0]["noffset"], self.sample_rate),)
+                if self.psd_offset is None:
+                    psd = None
+                    aligned = None
                 else:
-                    aligned = (outoffsets[0]["offset"] == self.psd_offset)
-                    return TSFrame(
-                            buffers = [SeriesBuffer(
-                                        offset=outoffsets[0]["offset"],
-                                        sample_rate=self.sample_rate,
-                                        data=None,
-                                        shape=(Offset.tosamples(outoffsets[0]["noffset"], self.sample_rate),))],
-                            EOS = EOS,
-                            metadata = {"psd": self.psd_geometric_mean, "aligned": aligned})
+                    psd = self.psd_geometric_mean
+                    aligned = outoffsets[0]["offset"] == self.psd_offset
+
+                return TSFrame(
+                        buffers = [SeriesBuffer(
+                                    offset=offset,
+                                    sample_rate=self.sample_rate,
+                                    data=None,
+                                    shape=shape)],
+                        EOS = EOS,
+                        metadata = {"psd": psd, "aligned": aligned})
 
             # used for plotting purposes
             offset_start = frame.buffers[0].offset
