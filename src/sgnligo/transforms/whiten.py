@@ -30,6 +30,8 @@ class Whiten(TSTransform):
     -----------
     whitening-method: str
         currently supported types: (1) 'gwpy', (2) 'gstlal'
+    instrument: str
+        instrument to process. Used if reference-psd is given
     sample-rate: int 
         sample rate of the data
     fft-length: int
@@ -45,6 +47,7 @@ class Whiten(TSTransform):
         pad name of the psd output source pad
     """
 
+    instrument: str = None
     whitening_method: str = "gwpy"
     sample_rate: int = 2048
     fft_length: int = 8
@@ -54,6 +57,8 @@ class Whiten(TSTransform):
     psd_pad_name: str = ""
 
     def __post_init__(self):
+        print(f"Sample rate: {self.sample_rate}")
+
         # define block overlap following arxiv:1604.04324
         self.n = int(self.fft_length * self.sample_rate)
         self.z = int(self.fft_length / 4 * self.sample_rate)
@@ -69,6 +74,7 @@ class Whiten(TSTransform):
         # set up for gstlal method:
         if self.whitening_method == "gstlal":
             self.delta_f = 1 / (1 / self.sample_rate) / self.n
+            print(f"delta f: {self.delta_f}")
             self.window = self.hann_window(int(self.n), int(self.z))
             self.psd_buffer = deque(maxlen = self.nmed)
             self.prev_data = None
@@ -77,11 +83,16 @@ class Whiten(TSTransform):
             # load ref psd if necessary
             if self.reference_psd:
                 psd = lal.series.read_psd_xmldoc(ligolw_utils.load_filename(self.reference_psd, verbose=True, contenthandler=lal.series.PSDContentHandler))
-
-                psd_data = psd[self.instrument].data.data
-                self.psd_geometric_mean = psd_data
+                psd = psd[self.instrument]
+                psd_data = psd.data.data
+                ref_psd_freqs = psd.f0 + np.arange(psd.data.length) * psd.deltaF
+                self.psd_geometric_mean = psd
+                print(f"Reference PSD frequencies: {ref_psd_freqs}")
+                print(f"Reference PSD f0: {psd.f0} | epoch: {psd.epoch} | deltaF: {psd.deltaF} | sampleUnits: {psd.sampleUnits} | size: {len(psd.data.data)}")
             else:
                 self.psd_geometric_mean = None
+
+            self.arithmetic_mean_psd = None
 
 
         
@@ -127,7 +138,7 @@ class Whiten(TSTransform):
                     psd = None
                     aligned = None
                 else:
-                    psd = self.psd_geometric_mean
+                    psd = self.arithmetic_mean_psd
                     aligned = outoffsets[0]["offset"] == self.psd_offset
 
                 return TSFrame(
@@ -138,11 +149,6 @@ class Whiten(TSTransform):
                                     shape=shape)],
                         EOS = EOS,
                         metadata = {"psd": psd, "aligned": aligned})
-
-            # FIXME: delete
-            # used for plotting purposes
-            offset_start = frame.buffers[0].offset
-            offset_end = frame.buffers[0].offset + frame.buffers[0].noffset
 
             # if audioadapter hasn't given us a frame, then we have to wait for more
             # data before we can whiten. send a gap buffer
@@ -160,9 +166,6 @@ class Whiten(TSTransform):
                 frame = frame.buffers[0]
                 this_seg_data = frame.data
                 
-                # FIXME: delete
-                np.savetxt(f"seg_data/seg_data_{offset_start}-{offset_end}.txt", this_seg_data)
-
                 if self.whitening_method == "gwpy":
                     # check the type of the timeseries data. 
                     # transform it to a gwpy.timeseries object
@@ -187,6 +190,11 @@ class Whiten(TSTransform):
                     # apply fourier transform
                     freq_data = np.fft.rfft(this_seg_data)
 
+                    # get frequency bins. FIXME: is this right?
+                    timestep = (1 / self.sample_rate)
+                    freqs = np.fft.rfftfreq(this_seg_data.size, d=timestep)
+                    f0 = freqs[0]
+
                     # inst. PSD is proportional to the sq. magnitude
                     # see arxiv: 1604.04324 (10)
                     psd_inst = 2 * self.delta_f * (np.abs(freq_data) ** 2) 
@@ -205,17 +213,25 @@ class Whiten(TSTransform):
                     beta = 1  # beta value
                     log_psd_median_adjusted = np.log(psd_median / beta)
                     if self.psd_geometric_mean is not None:
-                        log_psd_geometric_mean = (self.navg - 1) / self.navg * np.log(self.psd_geometric_mean) + 1 / self.navg * log_psd_median_adjusted
+                        log_psd_geometric_mean = (self.navg - 1) / self.navg * np.log(self.psd_geometric_mean.data.data) + 1 / self.navg * log_psd_median_adjusted
                     else:
                         # start up condition when we're not using a reference psd
                         log_psd_geometric_mean = log_psd_median_adjusted
 
                     # now update the "last" geometric mean
-                    self.psd_geometric_mean = np.exp(log_psd_geometric_mean)
+                    # offset of most recent psd
+                    self.psd_offset = outoffsets[0]["offset"]
+                    psd_epoch = Offset.tosec(self.psd_offset)
+                    self.psd_geometric_mean = lal.CreateREAL8FrequencySeries("geometric_mean_psd", psd_epoch, f0, self.delta_f, "s strain^2", len(log_psd_geometric_mean))
+                    self.psd_geometric_mean.data.data = np.exp(log_psd_geometric_mean)
 
                     # whiten by dividing data by the square root of the arithmetic PSD
                     # see arxiv: 1604.04324 (12)
-                    freq_data_whitened = freq_data / np.sqrt(self.psd_geometric_mean * EULERGAMMA)
+                    arithmetic_mean_psd = self.psd_geometric_mean.data.data * EULERGAMMA
+                    self.arithmetic_mean_psd = lal.CreateREAL8FrequencySeries("arithmetic_mean_psd", psd_epoch, f0, self.delta_f, "s strain^2", len(arithmetic_mean_psd))
+                    self.arithmetic_mean_psd.data.data = arithmetic_mean_psd
+
+                    freq_data_whitened = freq_data / np.sqrt(arithmetic_mean_psd)
 
                     # Fourier Transform back to the time domain
                     # # see arxiv: 1604.04324 (13)
@@ -224,15 +240,12 @@ class Whiten(TSTransform):
 
                     # accounts for overlap by summing with prev_data over the
                     # stride of the adapter
-                    if not self.prev_data:
+                    if self.prev_data is None:
                         self.prev_data = whitened_data[self.adapter_config.stride:]
                     else:
                         whitened_data[:self.adapter_config.overlap[1]] += self.prev_data
                         self.prev_data = whitened_data[self.adapter_config.stride:]
                     
-                    # offset of most recent psd
-                    self.psd_offset = outoffsets[0]["offset"]
-
                 # only output data up till the length of the adapter stride      
                 outbufs.append(
                     SeriesBuffer(
