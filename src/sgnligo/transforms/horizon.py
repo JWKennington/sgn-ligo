@@ -76,7 +76,7 @@ class HorizonDistance(TSTransform):
         )
         self.model.data.data[:] = np.abs(hp.data.data)**2.
 
-    def compute_horizon(psd, ):
+    def compute_horizon(self, psd):
         """
         compute the horizon distance in Mpc
         """
@@ -102,7 +102,7 @@ class HorizonDistance(TSTransform):
         D = math.sqrt(4. * (model / psd.data.data[kmin:kmax]).sum() * psd.deltaF)
 
         # distance at desired SNR
-        D /= snr
+        D /= self.snr
 
         # scale inspiral spectrum by distance to achieve desired SNR
         model *= 4. / D**2.
@@ -126,23 +126,29 @@ class HorizonDistance(TSTransform):
         print(f"Received frame from pad: {pad.name} with offset: {offset} and shape: {shape}")
 
         metadata = frame.metadata
-        for k,v in metadata.items():
-            print(f"{k}: {v}")
 
         # get spectrum from metadata
         # FIXME: this is a hack since the PSD is a frequency series.
         # FIXME: make sure PSD is a lal frequency series
-        #psd = metadata["psd"]
+        psd = metadata["psd"]
+        if psd is not None:
+            assert isinstance(psd, lal.REAL8FrequencySeries)
 
-        #dist = self.compute_horizon(psd)
+            dist = self.compute_horizon(psd)
+            print(f"Horizon distance: {dist} Mpc")
+        else:
+            dist = None
 
         # send a gap buffer for now
         outbuf = SeriesBuffer(
-            offset=offset, sample_rate=self.rate, data=None, shape=shape
+            offset=offset, sample_rate=frame.sample_rate, data=None, shape=shape
         )
 
         return TSFrame(
             buffers=[outbuf],
-            metadata={"name": "'%s'" % pad.name},
+            metadata= {
+                "name": "'%s'" % pad.name,
+                "horizon": dist,
+            },
             EOS=EOS,
         )
