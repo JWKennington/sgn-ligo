@@ -98,6 +98,11 @@ def test_whitengraph(capsys):
                name = "Horizon",
                source_pad_names = ("horizon",),
                sink_pad_names = ("spectrum",),
+               m1 = 1.4,
+               m2 = 1.4,
+               fmin = 10.,
+               fmax = 1000.,
+               delta_f = 1/16.,
              ),
              DumpSeriesSink(
                name = "HoftSnk",

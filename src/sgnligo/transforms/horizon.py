@@ -39,9 +39,9 @@ class HorizonDistance(TSTransform):
 
         # init waveform
         # NOTE:  the waveform models are computed up-to but not
-        # including the supplied f_max parameter so we need to pass
-        # (f_max + delta_f) if we want the waveform model defined
-        # in the f_max bin
+        # including the supplied fmax parameter so we need to pass
+        # (fmax + delta_f) if we want the waveform model defined
+        # in the fmax bin
         hp, hc = lalsimulation.SimInspiralFD(
             self.m1 * lal.MSUN_SI, self.m2 * lal.MSUN_SI,
             self.spin1[0], self.spin1[1], self.spin1[2],
@@ -53,8 +53,8 @@ class HorizonDistance(TSTransform):
             self.eccentricity,
             0.0,    # mean anomaly of periastron
             self.delta_f,
-            self.f_min,
-            self.f_max + self.delta_f,
+            self.fmin,
+            self.fmax + self.delta_f,
             100.,    # reference frequency (Hz)
             None,    # LAL dictionary containing accessory parameters
             lalsimulation.GetApproximantFromString(self.approximant)
@@ -89,9 +89,9 @@ class HorizonDistance(TSTransform):
         model = self.model.data.data[indexes]
 
         # range of indexes for integration
-        kmin = (max(psd.f0, self.model.f0, self.f_min) - psd.f0) / psd.deltaF
+        kmin = (max(psd.f0, self.model.f0, self.fmin) - psd.f0) / psd.deltaF
         kmin = int(round(kmin))
-        kmax = (min(psd.f0 + psd.data.length * psd.deltaF, self.model.f0 + self.model.data.length * self.model.deltaF, self.f_max) - psd.f0) / psd.deltaF
+        kmax = (min(psd.f0 + psd.data.length * psd.deltaF, self.model.f0 + self.model.data.length * self.model.deltaF, self.fmax) - psd.f0) / psd.deltaF
         kmax = int(round(kmax)) + 1
         assert kmin < kmax, "PSD and waveform model do not intersect"
 
@@ -121,23 +121,24 @@ class HorizonDistance(TSTransform):
         outbufs = []
         frame = self.preparedframes[self.sink_pads[0]]
         EOS = frame.EOS
+        shape = frame.shape
         offset = frame.offset
-        print(f"Received buffer from sink pad: {self.sink_pads[0]} with offset: {offset}")
+        print(f"Received frame from pad: {pad.name} with offset: {offset} and shape: {shape}")
 
         metadata = frame.metadata
-        for k, v in metadata.items():
-            print(f"metadata {k}: {v}")
+        for k,v in metadata.items():
+            print(f"{k}: {v}")
 
         # get spectrum from metadata
         # FIXME: this is a hack since the PSD is a frequency series.
         # FIXME: make sure PSD is a lal frequency series
-        psd = metadata["psd"]
+        #psd = metadata["psd"]
 
-        dist = self.compute_horizon(psd)
+        #dist = self.compute_horizon(psd)
 
         # send a gap buffer for now
         outbuf = SeriesBuffer(
-            offset=offset, sample_rate=self.rate, data=None, shape=(1,)
+            offset=offset, sample_rate=self.rate, data=None, shape=shape
         )
 
         return TSFrame(
@@ -145,7 +146,3 @@ class HorizonDistance(TSTransform):
             metadata={"name": "'%s'" % pad.name},
             EOS=EOS,
         )
-
-
-
-
