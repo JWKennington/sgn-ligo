@@ -91,7 +91,7 @@ def test_whitengraph(capsys):
                source_pad_names = ("hoft","spectrum"),
                sink_pad_names = ("resamp",),
                whitening_method = options.whitening_method,
-               ref_psd = options.reference_psd,
+               reference_psd = options.reference_psd,
                psd_pad_name = "Whitener:src:spectrum"
              ),
              HorizonDistance(
