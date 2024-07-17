@@ -114,9 +114,9 @@ class Whiten(TSTransform):
 
         # FIXME gstlal had a method of adding from the two ends of the window
         # so that small numbers weren't added to big ones
-        window_norm = np.sqrt(N / np.sum(hann ** 2))
+        self.window_norm = np.sqrt(N / np.sum(hann ** 2))
 
-        return hann * window_norm
+        return hann
 
     def transform(self, pad):
             """
@@ -163,8 +163,8 @@ class Whiten(TSTransform):
                 )
             else:
                 # copy samples from the deque
-                frame = frame.buffers[0]
-                this_seg_data = frame.data
+                buf = frame.buffers[0]
+                this_seg_data = buf.data
                 
                 if self.whitening_method == "gwpy":
                     # check the type of the timeseries data. 
@@ -185,7 +185,7 @@ class Whiten(TSTransform):
                     # FIXME kinda goes for the entire gstlal whitener: some
                     # things here are different than gstlal - not good. Luckily
                     # it seems to be caused by some missing proportionality constant.
-                    this_seg_data = self.window * this_seg_data # * 1/self.sample_rate
+                    this_seg_data = self.window * this_seg_data * 1/self.sample_rate * self.window_norm
 
                     # apply fourier transform
                     freq_data = np.fft.rfft(this_seg_data)
@@ -198,7 +198,7 @@ class Whiten(TSTransform):
                     # inst. PSD is proportional to the sq. magnitude
                     # see arxiv: 1604.04324 (10)
                     psd_inst = 2 * self.delta_f * (np.abs(freq_data) ** 2) 
- 
+
                     # keep track of last nmed instantaneous PSDs
                     self.psd_buffer.append(psd_inst)
 
