@@ -354,30 +354,33 @@ class Whiten(TSTransform):
 
 
                     *
+                   * *
                   *   *
                  *     *
                 *
-        1) ----|....|....|----
-         -1s   0s   1s   2s   3s
+        1) ----|........|----
+         -1s   0s       2s   3s
                { add to next  }
 
 
-                         *
-                       *   *
-                      *     *
-                     *
-        2)      ----|....|....|----
-               0s   1s   2s   3s   4s
-                [out]{ add to next }
+                        *
+                       * *
+                      *   *
+                     *     *
+                    *
+        2)     ----|........|----
+              0s   1s       3s   4s
+               [out]{ add to next }
 
 
-                              *
-                            *   *
-                           *     *
-                          *
-        3)           ----|....|....|----
-                    0s   2s   3s   4s   5s
-                     [out]{ add to next }
+                            *
+                           * *
+                          *   *
+                         *     *
+                        *
+        3)         ----|........|----
+                  0s   2s      4s   5s
+                   [out]{ add to next }
 
 
         Each fft-length of data will be windowed by the zero-padded Hann window, then
