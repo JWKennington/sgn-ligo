@@ -18,9 +18,60 @@ from ligo.lw import utils as ligolw_utils
 import numpy as np
 import os
 from sympy import EulerGamma
+from scipy.special import loggamma
 
-EULERGAMMA = np.exp(float(EulerGamma.evalf()))
+EULERGAMMA = float(EulerGamma.evalf())
 print(EULERGAMMA)
+
+def interpolate_psd(psd: lal.REAL8FrequencySeries, deltaF: int) -> lal.REAL8FrequencySeries:
+    """Interpolates a PSD to a target frequency resolution.
+
+    Args:
+        psd:
+            lal.REAL8FrequencySeries, the PSD to interpolate
+        deltaF:
+            int, the target frequency resolution to interpolate to
+
+    Returns:
+        lal.REAL8FrequencySeries, the interpolated PSD
+
+    """
+    #
+    # no-op?
+    #
+
+    if deltaF == psd.deltaF:
+        return psd
+
+    #
+    # interpolate log(PSD) with cubic spline.  note that the PSD is
+    # clipped at 1e-300 to prevent nan's in the interpolator (which
+    # doesn't seem to like the occasional sample being -inf)
+    #
+
+    psd_data = psd.data.data
+    psd_data = np.where(psd_data, psd_data, 1e-300)
+    f = psd.f0 + np.arange(len(psd_data)) * psd.deltaF
+    interp = interpolate.splrep(f, np.log(psd_data), s = 0)
+    f = psd.f0 + np.arange(round((len(psd_data) - 1) * psd.deltaF / deltaF) + 1) * deltaF
+    psd_data = np.exp(interpolate.splev(f, interp, der = 0))
+
+    #
+    # return result
+    #
+
+    psd = lal.CreateREAL8FrequencySeries(
+        name = psd.name,
+        epoch = psd.epoch,
+        f0 = psd.f0,
+        deltaF = deltaF,
+        sampleUnits = psd.sampleUnits,
+        length = len(psd_data)
+    )
+    psd.data.data = psd_data
+
+    return psd
+
 
 @dataclass
 class Whiten(TSTransform):
@@ -68,34 +119,75 @@ class Whiten(TSTransform):
         self.adapter_config = AdapterConfig()
         self.adapter_config.overlap = (0, overlap) 
         self.adapter_config.stride = self.n - overlap
+        self.adapter_config.pad_zeros_startup = True
 
         super().__post_init__()
 
         # set up for gstlal method:
         if self.whitening_method == "gstlal":
+            self.n_samples = 0
             self.delta_f = 1 / (1 / self.sample_rate) / self.n
+            self.delta_t = (1 / self.sample_rate)
             print(f"delta f: {self.delta_f}")
             self.window = self.hann_window(int(self.n), int(self.z))
-            self.psd_buffer = deque(maxlen = self.nmed)
+            self.square_data_bufs = deque(maxlen = self.nmed)
             self.prev_data = None
             self.psd_offset = None
+            self.lal_normalization_constant = 2 * self.delta_f
 
             # load ref psd if necessary
             if self.reference_psd:
                 psd = lal.series.read_psd_xmldoc(ligolw_utils.load_filename(self.reference_psd, verbose=True, contenthandler=lal.series.PSDContentHandler))
                 psd = psd[self.instrument]
-                psd_data = psd.data.data
                 ref_psd_freqs = psd.f0 + np.arange(psd.data.length) * psd.deltaF
-                self.psd_geometric_mean = psd
+                self.psd_geometric_mean = None
                 print(f"Reference PSD frequencies: {ref_psd_freqs}")
                 print(f"Reference PSD f0: {psd.f0} | epoch: {psd.epoch} | deltaF: {psd.deltaF} | sampleUnits: {psd.sampleUnits} | size: {len(psd.data.data)}")
+
+                #def psd_units_or_resolution_changed(elem, pspec, psd):
+                # make sure units are set, compute scale factor
+                # FIXME: what is this units?
+                #units = lal.Unit(elem.get_property("psd-units"))
+                #if units == lal.DimensionlessUnit:
+                #    return
+                #scale = float(psd.sampleUnits / units)
+                scale = 1
+                # get frequency resolution and number of bins
+                fnyquist = self.sample_rate / 2
+                n = int(round(fnyquist / self.delta_f) + 1)
+                # interpolate, rescale, and install PSD
+                psd = interpolate_psd(psd, self.delta_f)
+                ref_psd_data = psd.data.data[:n] * scale
+                self.set_psd(ref_psd_data, self.navg) 
+
             else:
                 self.psd_geometric_mean = None
 
-            self.arithmetic_mean_psd = None
+            self.tukey = None
+            if self.z:
+                # use tukey window
+                self.tukey = self.tukey_window(self.n, 2*self.z/self.n)
+                
+    def tukey_window(self, length, beta):
+        """
+        1.0 and flat in the middle, cos^2 transition at each end, zero
+        at end points, 0.0 <= beta <= 1.0 sets what fraction of the
+        window is transition (0 --> rectangle window, 1 --> Hann window)
+        """
+        if beta < 0 or beta > 1:
+            raise ValueError("Invalide value for beta")
+
+        transition_length = round(beta * length)
+
+        n = (transition_length+1)//2
+
+        out = np.ones(length)
+        transition =  1/2 * (1 - np.cos(2 * np.pi * np.arange((transition_length + 1) // 2)/ transition_length))
+        out[:n] = transition
+        out[-n:] = np.flip(transition)
+        return out
 
 
-        
     def hann_window(self, N, Z):
         """
         Define hann window
@@ -117,6 +209,62 @@ class Whiten(TSTransform):
         self.window_norm = np.sqrt(N / np.sum(hann ** 2))
 
         return hann
+
+    # XLALMedianBias
+    # https://lscsoft.docs.ligo.org/lalsuite/lal/_average_spectrum_8c_source.html#l00378
+    def median_bias(self, nn):
+        ans = 1
+        n = (nn - 1)//2
+        for i in range(1,n+1):
+            ans -= 1.0/(2*i);
+            ans += 1.0/(2*i + 1);
+        return ans
+
+    # XLALLogMedianBiasGeometric
+    # https://lscsoft.docs.ligo.org/lalsuite/lal/_average_spectrum_8c_source.html#l01423
+    def log_median_bias_geometric(self, nn):
+        return np.log(self.median_bias(nn)) - nn * (loggamma(1/nn) - np.log(nn))
+
+    # XLALPSDRegressorAdd 
+    # https://lscsoft.docs.ligo.org/lalsuite/lal/_average_spectrum_8c_source.html#l01632
+    def add_psd(self, fdata):
+        self.square_data_bufs.append(np.abs(fdata) ** 2)
+
+        if self.n_samples == 0:
+            self.geometric_mean_square = np.log(self.square_data_bufs[0])
+            self.n_samples += 1
+        else:
+            self.n_samples += 1
+            self.n_samples = min(self.n_samples, self.navg)
+            median_bias = self.log_median_bias_geometric(len(self.square_data_bufs))
+            # FIXME: this is how XLALPSDRegressorAdd gets the median,
+            # but this is not exactly the median when the number is even.
+            # numpy takes the average of the middle two, while this gets
+            # the larger one
+            log_bin_median = np.log(np.sort(self.square_data_bufs, axis=0)[len(self.square_data_bufs)//2])
+            self.geometric_mean_square = (self.geometric_mean_square * (self.n_samples - 1) + log_bin_median - median_bias) / self.n_samples
+
+    # XLALPSDRegressorGetPSD
+    # https://lscsoft.docs.ligo.org/lalsuite/lal/_average_spectrum_8c_source.html#l01773
+    def get_psd(self, fdata):
+        # running average mode (track-psd)
+        if self.n_samples == 0:
+            return self.lal_normalization_constant * (np.abs(fdata) ** 2)
+        else:
+            return np.exp(self.geometric_mean_square + EULERGAMMA) * self.lal_normalization_constant
+
+    # XLALPSDRegressorSetPSD
+    # https://lscsoft.docs.ligo.org/lalsuite/lal/_average_spectrum_8c_source.html#l01831
+    def set_psd(self, ref_psd_data, weight):
+        arithmetic_mean_square_data = ref_psd_data / self.lal_normalization_constant 
+
+        # populate the buffer history with the ref psd
+        for i in range(self.nmed):
+            self.square_data_bufs.append(arithmetic_mean_square_data)
+
+        self.geometric_mean_square = np.log(arithmetic_mean_square_data) - EULERGAMMA
+        self.n_samples = min(weight, self.navg)
+
 
     def transform(self, pad):
             """
@@ -195,48 +343,57 @@ class Whiten(TSTransform):
                     freqs = np.fft.rfftfreq(this_seg_data.size, d=timestep)
                     f0 = freqs[0]
 
-                    # inst. PSD is proportional to the sq. magnitude
-                    # see arxiv: 1604.04324 (10)
-                    psd_inst = 2 * self.delta_f * (np.abs(freq_data) ** 2) 
+                    # set DC and Nyquist terms to zero
+                    freq_data[0] = 0
+                    freq_data[self.n//2] = 0
 
-                    # keep track of last nmed instantaneous PSDs
-                    self.psd_buffer.append(psd_inst)
+                    # 
+                    # PSD
+                    #
+                    # get the psd
+                    this_psd = self.get_psd(freq_data)
 
-                    # compute median of PSDs, geometric mean, and arithmetic mean of PSDs 
-                    # calculate median over the last nmed instantaneous PSDs
-                    psd_median = np.median(self.psd_buffer, axis=0)
+                    # push freq data into psd history
+                    self.add_psd(freq_data)
 
-                    # calculate new geometric mean
-                    # FIXME this beta value appears in arxiv: 1604.04324, but idk what
-                    # it is - and I havent found it in the gstlal code either
-                    # see arxiv: 1604.04324 (11)
-                    beta = 1  # beta value
-                    log_psd_median_adjusted = np.log(psd_median / beta)
-                    if self.psd_geometric_mean is not None:
-                        log_psd_geometric_mean = (self.navg - 1) / self.navg * np.log(self.psd_geometric_mean.data.data) + 1 / self.navg * log_psd_median_adjusted
-                    else:
-                        # start up condition when we're not using a reference psd
-                        log_psd_geometric_mean = log_psd_median_adjusted
 
                     # now update the "last" geometric mean
                     # offset of most recent psd
-                    self.psd_offset = outoffsets[0]["offset"]
-                    psd_epoch = Offset.tosec(self.psd_offset)
-                    self.psd_geometric_mean = lal.CreateREAL8FrequencySeries("geometric_mean_psd", psd_epoch, f0, self.delta_f, "s strain^2", len(log_psd_geometric_mean))
-                    self.psd_geometric_mean.data.data = np.exp(log_psd_geometric_mean)
+                    #self.psd_offset = outoffsets[0]["offset"]
+                    #psd_epoch = Offset.tosec(self.psd_offset)
+                    #self.psd_geometric_mean = lal.CreateREAL8FrequencySeries("geometric_mean_psd", psd_epoch, f0, self.delta_f, "s strain^2", len(log_psd_geometric_mean))
+                    #self.psd_geometric_mean.data.data = np.exp(log_psd_geometric_mean)
+                    #for i in range(self.psd_geometric_mean.data.data.shape[-1]):
+                    #    print("psd_geometric_mean",i,self.psd_geometric_mean.data.data[i])
 
                     # whiten by dividing data by the square root of the arithmetic PSD
                     # see arxiv: 1604.04324 (12)
-                    arithmetic_mean_psd = self.psd_geometric_mean.data.data * EULERGAMMA
-                    self.arithmetic_mean_psd = lal.CreateREAL8FrequencySeries("arithmetic_mean_psd", psd_epoch, f0, self.delta_f, "s strain^2", len(arithmetic_mean_psd))
-                    self.arithmetic_mean_psd.data.data = arithmetic_mean_psd
+                    #arithmetic_mean_psd = self.psd_geometric_mean.data.data * EULERGAMMA
+                    #self.arithmetic_mean_psd = lal.CreateREAL8FrequencySeries("arithmetic_mean_psd", psd_epoch, f0, self.delta_f, "s strain^2", len(arithmetic_mean_psd))
+                    #self.arithmetic_mean_psd.data.data = arithmetic_mean_psd
+                    #for i in range(self.arithmetic_mean_psd.data.data.shape[-1]):
+                    #    print("psd_arithmetic_mean",i,self.arithmetic_mean_psd.data.data[i])
 
-                    freq_data_whitened = freq_data / np.sqrt(arithmetic_mean_psd)
+                    #
+                    # Whitening
+                    #
+                    # norm = 2 * self.delta_f in https://lscsoft.docs.ligo.org/lalsuite/lal/_average_spectrum_8c_source.html#l01366
+                    # the DC and Nyquist terms are zero
+                    freq_data_whitened = np.zeros_like(freq_data)
+                    freq_data_whitened[1:-1] = freq_data[1:-1] * np.sqrt(2 * self.delta_f / this_psd[1:-1])
 
                     # Fourier Transform back to the time domain
                     # # see arxiv: 1604.04324 (13)
-                    whitened_data = np.fft.irfft(freq_data_whitened, self.n)
-                    whitened_data *= 2 * self.delta_f * (1 / self.sample_rate) * np.sqrt(np.sum(self.window ** 2))
+                    #
+                    # np.fft.irfft default norm is "backward", which uses a normalization factor of 1/n
+                    # choose norm="forward" so there is no factor, to match XLALREAL8FreqTimeFFT
+                    #
+                    # self.delta_f scaling https://lscsoft.docs.ligo.org/lalsuite/lal/_time_freq_f_f_t_8c_source.html#l00183
+                    whitened_data = np.fft.irfft(freq_data_whitened, self.n, norm="forward")  * self.delta_f
+                    whitened_data *= self.delta_t * np.sqrt(np.sum(self.window ** 2))
+
+                    if self.tukey is not None:
+                        whitened_data *= self.tukey
 
                     # accounts for overlap by summing with prev_data over the
                     # stride of the adapter

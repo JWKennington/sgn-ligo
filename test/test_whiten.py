@@ -79,19 +79,19 @@ def test_whitengraph(capsys):
                gps_start_time = options.gps_start_time,
                gps_end_time = options.gps_end_time,
              ),
-#             Resampler(
-#               name="Resampler",
-#               source_pad_names=("resamp",),
-#               sink_pad_names=("frsrc",),
-#               inrate=options.sample_rate,
-#               outrate=16384,
-#             ),
+             Resampler(
+               name="Resampler",
+               source_pad_names=("resamp",),
+               sink_pad_names=("frsrc",),
+              inrate=options.sample_rate,
+               outrate=2048,
+             ),
              Whiten(
                name = "Whitener",
                source_pad_names = ("hoft","spectrum"),
                sink_pad_names = ("resamp",),
                instrument = options.instrument,
-               sample_rate = 16384,
+               sample_rate = 2048,
                fft_length = 4,
                whitening_method = options.whitening_method,
                reference_psd = options.reference_psd,
@@ -130,9 +130,9 @@ def test_whitengraph(capsys):
            fname = 'in.txt'
          ))
     pipeline.insert(link_map={
-#                              "Resampler:sink:frsrc": "FrameReader:src:frsrc",
-#                              "Whitener:sink:resamp": "Resampler:src:resamp",
-                              "Whitener:sink:resamp": "FrameReader:src:frsrc",
+                              "Resampler:sink:frsrc": "FrameReader:src:frsrc",
+                              "Whitener:sink:resamp": "Resampler:src:resamp",
+#                              "Whitener:sink:resamp": "FrameReader:src:frsrc",
                               "Horizon:sink:spectrum": "Whitener:src:spectrum",
                               "HoftSnk:sink:hoft": "Whitener:src:hoft",
                               "SpectrumSnk:sink:spectrum": "Whitener:src:spectrum",
