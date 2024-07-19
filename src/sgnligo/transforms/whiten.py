@@ -303,7 +303,13 @@ class Whiten(TSTransform):
         """
         # running average mode (track-psd)
         if self.n_samples == 0:
-            return self.lal_normalization_constant * (np.abs(fdata) ** 2)
+            out = self.lal_normalization_constant * (np.abs(fdata) ** 2)
+
+            # set DC and Nyquist terms to zero
+            # FIXME: gstlal had a condition if self.f0 == 0
+            out[0] = 0
+            out[self.n // 2] = 0
+            return out
         else:
             return (
                 np.exp(self.geometric_mean_square + EULERGAMMA)
@@ -414,11 +420,6 @@ class Whiten(TSTransform):
 
                 # get frequency bins
                 freqs = np.fft.rfftfreq(this_seg_data.size, d=self.delta_t)
-
-                # set DC and Nyquist terms to zero
-                # see arxiv: 1604.04324
-                freq_data[0] = 0
-                freq_data[self.n // 2] = 0
 
                 # get the latest PSD
                 this_psd = self.get_psd(freq_data)
