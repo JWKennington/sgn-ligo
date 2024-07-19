@@ -110,10 +110,10 @@ class Whiten(TSTransform):
     fft-length: int
         length of fft in seconds used for whitening
     nmed: int
-        how many previous samples we should account for when calcualting 
+        how many previous samples we should account for when calcualting
         the geometric mean of the psd
     navg: int
-        changes to the PSD must occur over a time scale of at least 
+        changes to the PSD must occur over a time scale of at least
         navg*(n/2 − z)*(1/sample_rate) *check cody's paper for more info
     reference_psd: file
         path to reference psd xml
@@ -332,8 +332,66 @@ class Whiten(TSTransform):
 
     def transform(self, pad):
         """
-        Whiten incoming data in segments of fft-length seconds overlapped by fft-length / 4
-        Some ascii art here would be helpful to illustrate what were doing.
+        Whiten incoming data in segments of fft-length seconds overlapped by fft-length * 3/4
+        If the data segment has N samples, we apply a zero-padded Hann window on the data with
+        zero-padding of Z = N/4 samples. The Hann window length is then N - 2 * Z. The output
+        stride is hann_length / 2.
+
+        Example:
+        --------
+        fft_length = 4 sec
+        sample_rate = 4
+        N = 16
+        Z = 4
+        hann_length = 8
+        output_stride = 4
+
+        .. : input data
+        -- : zero-padding
+        ** : hann window
+        [] : output buffer
+        {} : output that will be added to next iteration
+
+
+                    *
+                  *   *
+                 *     *
+                *
+        1) ----|....|....|----
+         -1s   0s   1s   2s   3s
+               { add to next  }
+
+
+                         *
+                       *   *
+                      *     *
+                     *
+        2)      ----|....|....|----
+               0s   1s   2s   3s   4s
+                [out]{ add to next }
+
+
+                              *
+                            *   *
+                           *     *
+                          *
+        3)           ----|....|....|----
+                    0s   2s   3s   4s   5s
+                     [out]{ add to next }
+
+
+        Each fft-length of data will be windowed by the zero-padded Hann window, then
+        FFTed to obtain the instantaneous PSD. The instantaneous PSD will be saved to
+        a queue to calculate the running geometric mean of median PSDs, see
+        arxiv:1604.04324. The running geometric mean of median PSDs from the last
+        iteration will be used to whiten the current windowed-fft-length of data.
+        The overlap segment from the previous output will be added to current whitened
+        data. Finally the first output-stride samples of the whitened data will be put
+        into the output buffer.
+
+        Note that we will only start to produce output when the output offset is equal
+        to or after the first input buffer, so the first iteration is a gap buffer.
+
         """
         # incoming frame handling
         outbufs = []
