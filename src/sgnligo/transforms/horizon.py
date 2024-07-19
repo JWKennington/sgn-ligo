@@ -61,11 +61,8 @@ class HorizonDistance(TSTransform):
         )
         assert hp.data.length > 0, "huh!?  h+ has zero length!"
 
-        #
         # store |h(f)|^2 for source at D = 1 m.  see (5) in
         # arXiv:1003.2481
-        #
-
         self.model = lal.CreateREAL8FrequencySeries(
             name = "signal spectrum",
             epoch = LIGOTimeGPS(0),
@@ -123,23 +120,20 @@ class HorizonDistance(TSTransform):
         EOS = frame.EOS
         shape = frame.shape
         offset = frame.offset
-        print(f"Received frame from pad: {pad.name} with offset: {offset} and shape: {shape}")
-
         metadata = frame.metadata
 
         # get spectrum from metadata
         # FIXME: this is a hack since the PSD is a frequency series.
-        # FIXME: make sure PSD is a lal frequency series
         psd = metadata["psd"]
         if psd is not None:
             assert isinstance(psd, lal.REAL8FrequencySeries)
 
             dist = self.compute_horizon(psd)
-            print(f"Horizon distance: {dist} Mpc")
+            print(f"Horizon distance: {dist} Mpc | Range = {dist / 2.25} Mpc")
         else:
             dist = None
 
-        # send a gap buffer for now
+        # send buffer with no data, put horizon history in metadata
         outbuf = SeriesBuffer(
             offset=offset, sample_rate=frame.sample_rate, data=None, shape=shape
         )
