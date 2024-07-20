@@ -26,6 +26,8 @@ EULERGAMMA = float(EulerGamma.evalf())
 
 def Y(length, i):
     """
+    https://lscsoft.docs.ligo.org/lalsuite/lal/_window_8c_source.html#l00109
+
     Maps the length of a window and the offset within the window to the "y"
     co-ordinate of the LAL documentation.
 
@@ -168,7 +170,7 @@ class Whiten(TSTransform):
             # we apply a hann window to incoming raw data
             self.hann = self.hann_window(self.n, self.z)
 
-            # we apply a tukey window on whitened data if we have an overlap
+            # we apply a tukey window on whitened data if we have zero-padding
             if self.z:
                 self.tukey = self.tukey_window(self.n, 2 * self.z / self.n)
             else:
@@ -185,6 +187,7 @@ class Whiten(TSTransform):
                 )
                 psd = psd[self.instrument]
 
+                # gstlal.condition
                 # def psd_units_or_resolution_changed(elem, pspec, psd):
                 # make sure units are set, compute scale factor
                 # FIXME: what is this units?
@@ -207,6 +210,9 @@ class Whiten(TSTransform):
 
     def tukey_window(self, length, beta):
         """
+        XLALCreateTukeyREAL8Window
+        https://lscsoft.docs.ligo.org/lalsuite/lal/_window_8c_source.html#l00597
+
         1.0 and flat in the middle, cos^2 transition at each end, zero
         at end points, 0.0 <= beta <= 1.0 sets what fraction of the
         window is transition (0 --> rectangle window, 1 --> Hann window)
@@ -438,7 +444,7 @@ class Whiten(TSTransform):
 
         # if audioadapter hasn't given us a frame, then we have to wait for more
         # data before we can whiten. send a gap buffer
-        if frame.shape[-1] == 0:
+        if frame.is_gap:
             outbufs.append(
                 SeriesBuffer(
                     offset=outoffset,
@@ -448,7 +454,8 @@ class Whiten(TSTransform):
                 )
             )
         else:
-            # copy samples from the deque
+            # retrieve samples from the deque
+            assert len(frame.buffers) == 1, "Multiple buffers not implemented yet."
             buf = frame.buffers[0]
             this_seg_data = buf.data
 
