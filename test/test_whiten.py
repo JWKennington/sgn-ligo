@@ -7,7 +7,7 @@ from sgn.apps import Pipeline
 
 from sgnts.sources import FakeSeriesSrc
 from sgnts.sinks import DumpSeriesSink
-from sgnligo.transforms import Whiten
+from sgnligo.transforms import Whiten, HorizonDistance
 from sgnligo.sources import FrameReader
 from sgnts.transforms import Resampler
 import os
@@ -69,8 +69,8 @@ def test_whitengraph(capsys):
     #
 
     pipeline.insert(FrameReader(
-               name = "src1",
-               source_pad_names = ("H1",),
+               name = "FrameReader",
+               source_pad_names = ("frsrc",),
                rate=options.sample_rate,
                num_samples=num_samples,
                framecache=options.frame_cache,
@@ -80,43 +80,63 @@ def test_whitengraph(capsys):
                gps_end_time = options.gps_end_time,
              ),
              Resampler(
-               name="trans1",
-               source_pad_names=("H1",),
-               sink_pad_names=("H1",),
-               inrate=options.sample_rate,
+               name="Resampler",
+               source_pad_names=("resamp",),
+               sink_pad_names=("frsrc",),
+              inrate=options.sample_rate,
                outrate=2048,
              ),
              Whiten(
-               name = "whiten",
-               source_pad_names = ("H1","H2"),
-               sink_pad_names = ("H1",),
+               name = "Whitener",
+               source_pad_names = ("hoft","spectrum"),
+               sink_pad_names = ("resamp",),
+               instrument = options.instrument,
+               sample_rate = 2048,
+               fft_length = 4,
                whitening_method = options.whitening_method,
-               ref_psd = options.reference_psd,
-               psd_pad_name = "whiten:src:H2"
+               reference_psd = options.reference_psd,
+               psd_pad_name = "Whitener:src:spectrum"
+             ),
+             HorizonDistance(
+               name = "Horizon",
+               source_pad_names = ("horizon",),
+               sink_pad_names = ("spectrum",),
+               m1 = 1.4,
+               m2 = 1.4,
+               fmin = 10.,
+               fmax = 1000.,
+               delta_f = 1/16.,
              ),
              DumpSeriesSink(
-               name = "snk1",
-               sink_pad_names = ("H1",),
+               name = "HoftSnk",
+               sink_pad_names = ("hoft",),
                fname = os.path.join(options.output_dir, 'out.txt'),
              ),
              DumpSeriesSink(
-                 name = "snk3",
-                 sink_pad_names = ("H2",),
+                 name = "SpectrumSnk",
+                 sink_pad_names = ("spectrum",),
                  fname = os.path.join(options.output_dir, 'psd_out.txt'),
+             ),
+             DumpSeriesSink(
+                 name = "HorizonSnk",
+                 sink_pad_names = ("horizon",),
+                 fname = os.path.join(options.output_dir, "horizon.txt"),
              )
     )
 
     pipeline.insert(DumpSeriesSink(
-           name = "snk2",
-           sink_pad_names = ("H1",),
+           name = "RawSnk",
+           sink_pad_names = ("frsrc",),
            fname = 'in.txt'
          ))
     pipeline.insert(link_map={
-                              "trans1:sink:H1": "src1:src:H1",
-                              "whiten:sink:H1":"trans1:src:H1",
-                              "snk1:sink:H1":"whiten:src:H1",
-                              "snk2:sink:H1":"src1:src:H1",
-                              "snk3:sink:H2":"whiten:src:H2"
+                              "Resampler:sink:frsrc": "FrameReader:src:frsrc",
+                              "Whitener:sink:resamp": "Resampler:src:resamp",
+                              "Horizon:sink:spectrum": "Whitener:src:spectrum",
+                              "HoftSnk:sink:hoft": "Whitener:src:hoft",
+                              "SpectrumSnk:sink:spectrum": "Whitener:src:spectrum",
+                              "HorizonSnk:sink:horizon": "Horizon:src:horizon",
+                              "RawSnk:sink:frsrc": "FrameReader:src:frsrc",
                               })
 
     pipeline.run()
