@@ -102,14 +102,14 @@ def test_whitengraph(capsys):
 		source_pad_names=("threshold",),
 		sink_pad_names=("data",),
 		threshold = 7,
-		startwn = 10,
-		stopwn = 10,
+		startwn = 1024,
+		stopwn = 1024,
                 invert = True,
 		),
              DumpSeriesSink(
                name = "HoftSnk",
                sink_pad_names = ("hoft",),
-               fname = os.path.join(options.output_dir, 'out.txt'),
+               fname = os.path.join(options.output_dir, 'out_gated.txt'),
              ),
     )
     pipeline.insert(link_map={
