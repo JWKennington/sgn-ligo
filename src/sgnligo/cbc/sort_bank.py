@@ -80,7 +80,6 @@ class SortedBank:
     def __init__(
         self,
         banks,
-        copy_block,
         device="cpu",
         dtype=torch.float16,
         memory_format=torch.contiguous_format,
@@ -88,7 +87,6 @@ class SortedBank:
         nslice=-1,
         verbose=False,
     ):
-        self.copy_block = copy_block
         self.device = device
         self.dtype = dtype
         self.memory_format = memory_format
@@ -475,7 +473,6 @@ class SortedBank:
 
         dtype = self.dtype
         device = self.device
-        copy_block = self.copy_block
 
         nifo = bank_metadata["nifo"]
         ifos = bank_metadata["ifos"]
@@ -502,22 +499,6 @@ class SortedBank:
                 nbm = rate_group["nbmax"]
                 ntempmax = rate_group["ntempmax"]
 
-                # data
-                # if same_data:
-                #    data_by_rate[from_rate][to_rate] = torch.zeros(
-                #        size=(nifo, nfilter_samples - 1 + int(from_rate * copy_block)),
-                #        device=device,
-                #        dtype=dtype,
-                #    )
-                # else:
-                #    data_by_rate[from_rate][to_rate] = torch.zeros(
-                #        size=(
-                #            nifo * count,
-                #            nfilter_samples - 1 + int(from_rate * copy_block),
-                #        ),
-                #        device=device,
-                #        dtype=dtype,
-                #    )
                 for ifo in ifos:
 
                     # group the bases by sample rate
