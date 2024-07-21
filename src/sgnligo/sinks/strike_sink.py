@@ -268,7 +268,7 @@ class StrikeSink(SinkElement):
                         sngl_row.template_duration = template_row.template_duration
                         sngl_row.template_id = template_id
                         sngl_row.process_id = 0
-                        sngl_row.eff_distance = 0
+                        sngl_row.eff_distance = float('nan')
                         sngl_row.event_id = self.event_id_counter
                         self.event_id_counter += 1
                         self.sngl_tables[bankid].append(sngl_row)
