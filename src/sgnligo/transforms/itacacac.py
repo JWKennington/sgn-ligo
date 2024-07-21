@@ -170,7 +170,7 @@ class Itacacac(TSTransform):
             # return the single ifo snrs
             all_network_snr = [t[1] for t in triggers.values()][0]
             ifo_combs = (
-                torch.zeros_like(all_network_snr, dtype=torch.int)
+                torch.ones_like(all_network_snr, dtype=torch.int)
                 * self.ifos_number_map[on_ifos[0]]
             )
 
