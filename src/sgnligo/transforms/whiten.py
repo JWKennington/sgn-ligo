@@ -406,6 +406,7 @@ class Whiten(TSTransform):
         outbufs = []
         frame = self.preparedframes[self.sink_pads[0]]
         EOS = frame.EOS
+        metadata = frame.metadata
         outoffsets = self.preparedoutoffsets[self.sink_pads[0]]
 
         if self.first_output_offset is None:
@@ -428,6 +429,7 @@ class Whiten(TSTransform):
         # passes the spectrum in metadata if the pad is the psd_pad
         if pad.name == self.psd_pad_name:
             psd = self.latest_psd
+            metadata["psd"] = psd
 
             return TSFrame(
                 buffers=[
@@ -439,7 +441,7 @@ class Whiten(TSTransform):
                     )
                 ],
                 EOS=EOS,
-                metadata={"psd": psd},
+                metadata=metadata,
             )
 
         # if audioadapter hasn't given us a frame, then we have to wait for more
@@ -550,6 +552,6 @@ class Whiten(TSTransform):
         # return frame with the correct buffers
         return TSFrame(
             buffers=outbufs,
-            # metadata = metadata,
             EOS=EOS,
+            metadata=metadata,
         )
