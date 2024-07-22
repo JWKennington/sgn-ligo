@@ -17,7 +17,6 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
-
 def lloid(
     pipeline,
     sorted_bank,
@@ -27,6 +26,9 @@ def lloid(
     device,
     dtype,
 ):
+    ArrayOps.DEVICE = device
+    ArrayOps.DTYPE = dtype
+
     output_source_links = {}
 
     bank_metadata = sorted_bank.bank_metadata
@@ -43,7 +45,7 @@ def lloid(
             source_pad_names=tuple(ifos),
             adapter_config=AdapterConfig(stride=num_samples),
             backend="torch",
-            dtype="float32",
+            dtype=dtype,
             device=device,
         ),
     )
