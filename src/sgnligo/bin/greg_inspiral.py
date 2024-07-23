@@ -11,7 +11,6 @@ from sgnts.sinks import DumpSeriesSink, FakeSeriesSink
 from sgnts.transforms import Threshold
 
 from sgnligo.cbc.sort_bank import group_and_read_banks, SortedBank
-from sgnligo.base import ArrayOps
 from sgnligo.sources import FrameReader
 from sgnligo.sinks import ImpulseSink, StrikeSink
 from sgnligo.transforms import (
@@ -190,9 +189,6 @@ def main():
         impulse = True
     else:
         impulse = False
-
-    ArrayOps.DEVICE = options.torch_device
-    ArrayOps.DTYPE = dtype
 
     # read in the svd banks
     banks = group_and_read_banks(
