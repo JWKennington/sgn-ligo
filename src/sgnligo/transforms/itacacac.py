@@ -4,7 +4,7 @@ from typing import Any
 import torch
 
 from sgnts.base import Offset
-from ..base import SeriesBuffer, TSFrame, TSTransform, AdapterConfig, Time, ArrayOps
+from ..base import SeriesBuffer, TSFrame, TSTransform, AdapterConfig, ArrayOps
 import math
 
 import lal
@@ -383,9 +383,9 @@ class Itacacac(TSTransform):
 
     def cluster_coincs(self, ifo_combs, all_network_snr, template_ids, triggers, snrs):
         clustered_snr, max_locations = torch.max(all_network_snr, dim=-1)
-        clustered_ifo_combs = ifo_combs[range(self.nsubbank), max_locations]
-        clustered_template_ids = template_ids[range(self.nsubbank), max_locations]
+        clustered_ifo_combs = ifo_combs.gather(1,max_locations.unsqueeze(1)).squeeze()
         max_locations = max_locations.to("cpu").numpy()
+        clustered_template_ids = template_ids[range(self.nsubbank), max_locations]
         sngls = {}
         for ifo, trig in triggers.items():
             sngls[ifo] = {}
@@ -397,7 +397,7 @@ class Itacacac(TSTransform):
                 np.round(
                     (Offset.fromsamples(peak_locations, self.rate) + self.offset)
                     / Offset.OFFSET_RATE
-                    * Time.SECONDS
+                    * 1_000_000_000
                 ).astype(int)
                 + Offset.offset_ref_t0
                 + self.end_times
@@ -420,19 +420,20 @@ class Itacacac(TSTransform):
         # FIXME: is stacking then copying to cpu faster?
         return [clustered_template_ids, clustered_ifo_combs, clustered_snr, sngls]
 
-    # @torch.compile
+    #@torch.compile
     def itacacac(self, snrs):
         triggers = self.find_peaks_and_calculate_chisqs(snrs)
 
         # FIXME: consider edge effects
         ifo_combs, all_network_snr, single_masks = self.make_coincs(triggers)
 
+        # FIXME: this part and clustered_coinc is lowering the GPU utilization
         for ifo in triggers.keys():
             for i in range(len(triggers[ifo])):
                 triggers[ifo][i] = triggers[ifo][i].to("cpu").numpy()
 
         clustered_coinc = self.cluster_coincs(
-            ifo_combs, all_network_snr, self.template_ids, triggers, snrs
+            ifo_combs, all_network_snr, self.template_ids_np, triggers, snrs
         )
 
         return triggers, ifo_combs, all_network_snr, single_masks, clustered_coinc
@@ -460,14 +461,17 @@ class Itacacac(TSTransform):
                 self.itacacac(snrs)
             )
 
-            for j in range(len(clustered_coinc) - 1):
+            for j in range(1, len(clustered_coinc) - 1):
                 clustered_coinc[j] = clustered_coinc[j].to("cpu").numpy()
 
+            # Populate background snr, chisq, time for each bank, ifo
             # FIXME: is stacking then copying to cpu faster?
             # FIXME: do we only need snr chisq for singles?
             background = {}
+            # loop over banks
             for bankid, ids in self.bankids_map.items():
                 background[bankid] = {}
+                # loop over ifos
                 for ifo in triggers.keys():
                     background[bankid][ifo] = {}
                     background[bankid][ifo]["time"] = []
@@ -476,28 +480,30 @@ class Itacacac(TSTransform):
                     background[bankid][ifo]["template_ids"] = []
                     if ifo in single_masks:
                         smask0 = single_masks[ifo].to("cpu").numpy()
-                        for i in ids:
-                            smask = smask0[i]
-                            time = triggers[ifo][0][i][smask]
-                            time = (
-                                np.round(
-                                    (Offset.fromsamples(time, self.rate) + self.offset)
-                                    / Offset.OFFSET_RATE
-                                    * Time.SECONDS
-                                ).astype(int)
-                                + Offset.offset_ref_t0
-                                + np.expand_dims(self.end_times, 1)
-                            )
-                            background[bankid][ifo]["time"].append(time)
-                            background[bankid][ifo]["snrs"].append(
-                                triggers[ifo][1][i][smask]
-                            )
-                            background[bankid][ifo]["chisqs"].append(
-                                triggers[ifo][2][i][smask]
-                            )
-                            background[bankid][ifo]["template_ids"].append(
-                                self.template_ids_np[i][smask]
-                            )
+                        if True in smask0:
+                            # loop over subbank ids in this bank
+                            for i in ids:
+                                smask = smask0[i]
+                                time = triggers[ifo][0][i][smask]
+                                time = (
+                                    np.round(
+                                        (Offset.fromsamples(time, self.rate) + self.offset)
+                                        / Offset.OFFSET_RATE
+                                        * 1_000_000_000
+                                    ).astype(int)
+                                    + Offset.offset_ref_t0
+                                    + self.end_times[i]
+                                )
+                                background[bankid][ifo]["time"].append(time)
+                                background[bankid][ifo]["snrs"].append(
+                                    triggers[ifo][1][i][smask]
+                                )
+                                background[bankid][ifo]["chisqs"].append(
+                                    triggers[ifo][2][i][smask]
+                                )
+                                background[bankid][ifo]["template_ids"].append(
+                                    self.template_ids_np[i][smask]
+                                )
 
             metadata["coincs"] = {
                 "template_ids": clustered_coinc[0],
