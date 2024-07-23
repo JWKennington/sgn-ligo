@@ -147,7 +147,7 @@ class StrikeSink(SinkElement):
                     "".join(self.ifos)
                     + "-"
                     + "{:04d}".format(int(bankid))
-                    + "_LnLikelihoodRatio_dummy.xml.gz"
+                    + "_LnLikelihoodRatio.xml.gz"
                 )
 
                 # write coincs file
@@ -184,9 +184,10 @@ class StrikeSink(SinkElement):
                         ):
                             # loop over triggers in subbanks
                             for t, s, c, tid in zip(time0, snr0, chisq0, templateid0):
+                                # FIXME: is end time in seconds??
                                 event = event_dummy(
                                     ifo=ifo,
-                                    end=t,
+                                    end=t/1_000_000_000,
                                     snr=s,
                                     chisq=c,
                                     combochisq=c,
