@@ -24,16 +24,23 @@ class Converter(TSTransform):
             if self.device != "cpu":
                 raise ValueError("Converting to numpy only supports device as cpu")
         elif self.backend == "torch":
-            if self.dtype == "float64":
-                self.dtype = torch.float64
-            elif self.dtype == "float32":
-                self.dtype = torch.float32
-            elif self.dtype == "float16":
-                self.dtype = torch.float16
+            if isinstance(self.dtype, str):
+                if self.dtype == "float64":
+                    self.dtype = torch.float64
+                elif self.dtype == "float32":
+                    self.dtype = torch.float32
+                elif self.dtype == "float16":
+                    self.dtype = torch.float16
+                else:
+                    raise ValueError(
+                        "Supported torch data types: float64, float32, float16"
+                    )
+            elif isinstance(self.dtype, torch.dtype):
+                pass
             else:
                 raise ValueError(
-                    "Supported torch data types: float64, float32, float16"
-                )
+                        "Unknown dtype"
+                    )
         else:
             raise ValueError("Supported backends: 'numpy' or 'torch'")
 
