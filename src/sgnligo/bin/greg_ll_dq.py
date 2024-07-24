@@ -52,12 +52,6 @@ def parse_command_line():
         help='Set the string to identify the analysis in which this job is part of. Used when --output-kafka-server is set. May not contain "." nor "-". Default is test.',
     )
     parser.add_option(
-        "--injection-channel",
-        metavar="tag",
-        action="store_true",
-        help="if True, compute noise and range history from injection channels.",
-    )
-    parser.add_option(
         "--reference-psd",
         metavar="filename",
         help="Load spectrum from this LIGO light-weight XML file. The noise spectrum will be measured and tracked starting from this reference. (optional).",
@@ -109,6 +103,13 @@ def parse_command_line():
         type=int,
         default=60,
         help="Time to wait for new files in seconds before throwing an error. In online mode, new files should always arrive every second, unless there are problems. Default wait time is 60 seconds.",
+    )
+    parser.add_option(
+        "--kafka-reduce-time",
+        metavar="seconds",
+        type=int,
+        default=1,
+        help="Time to reduce data to send to kafka.",
     )
 
     options, filenames = parser.parse_args()
@@ -205,23 +206,14 @@ def main():
         KafkaSink(
             name="HorizonSnk",
             sink_pad_names=("horizon",),
-            output_kafka_server="rtdb-01.gwave.ics.psu.edu:9196",
-            topic='gstlal.greg_test.H1_range_history',
+            output_kafka_server=options.output_kafka_server,
+            topic="gstlal."+options.analysis_tag+"."+options.instrument+"_range_history",
             route='range_history',
             metadata_key='range',
-            tags=[],
+            tags=[options.instrument,],
+            reduce_time=options.kafka_reduce_time,
             verbose=True
         ),
-        #InfluxSink(
-        #    name="HorizonSnk",
-        #    sink_pad_names=("horizon",),
-        #    metadata_key='range',
-        #    scald_config='range.yml',
-        #    route='range_history',
-        #    instrument=options.instrument,
-        #    verbose=True,
-        #),
-
     )
 
     pipeline.insert(
