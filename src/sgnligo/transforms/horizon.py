@@ -32,6 +32,7 @@ class HorizonDistance(TSTransform):
     eccentricity: int = 0
     inclination: int = 0
     approximant: str = "IMRPhenomD"
+    range: bool = False
     snr: int = 8
 
     def __post_init__(self):
@@ -118,6 +119,7 @@ class HorizonDistance(TSTransform):
         outbufs = []
         frame = self.preparedframes[self.sink_pads[0]]
         EOS = frame.EOS
+        metadata = frame.metadata
         shape = frame.shape
         offset = frame.offset
         metadata = frame.metadata
@@ -137,12 +139,13 @@ class HorizonDistance(TSTransform):
         outbuf = SeriesBuffer(
             offset=offset, sample_rate=frame.sample_rate, data=None, shape=shape
         )
+        metadata["psd_name"] = "'%s'" % pad.name
+        metadata["horizon"] =  dist
+        if self.range and dist is not None:
+            metadata["range"] = dist/2.25
 
         return TSFrame(
             buffers=[outbuf],
-            metadata= {
-                "name": "'%s'" % pad.name,
-                "horizon": dist,
-            },
+            metadata=metadata,
             EOS=EOS,
         )
