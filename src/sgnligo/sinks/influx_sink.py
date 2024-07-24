@@ -47,8 +47,9 @@ class InfluxSink(TSSink):
             self.last_t0 = bufs[0].t0
 
         if self.metadata_key in bufs.metadata:
-            self.timedeq.append(int(bufs[0].t0))
-            self.datadeq[self.route].append(bufs.metadata[self.metadata_key])
+            # FIXME: only works when data are integers?? if float, I get `urllib3 response status: 400 | response reason: Bad Request`
+            self.timedeq.append(int(bufs[0].t0/1_000_000_000))
+            self.datadeq[self.route].append(int(bufs.metadata[self.metadata_key]))
 
         data = {self.route: {self.instrument: {'time': list(self.timedeq), 'fields': {'data': list(self.datadeq[self.route])}}}}
         if bufs[0].t0 - self.last_t0 >= int(self.wait_time*1_000_000_000):
