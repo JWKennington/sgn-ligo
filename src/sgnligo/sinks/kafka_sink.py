@@ -11,6 +11,23 @@ from ligo.scald.io import kafka
 class KafkaSink(TSSink):
     """
     Push data to kafka
+
+    Parameters:
+    -----------
+    output_kafka_server: str
+        The kafka server to write data to
+    topic: str
+        The kafka topic to write data to
+    metadata_key: str
+        The dictionary key of the frame metadata to retrieve the data
+    route:
+        The route of the kafka data
+    tags: str
+        The tags to write the kafka data
+    verbose: bool
+        Be verbose
+    reduce_time: float
+        Will reduce data every reduce_time, in seconds
     """
     output_kafka_server: str = None
     topic: str = None
@@ -18,7 +35,7 @@ class KafkaSink(TSSink):
     route: str = None
     tags: list = None
     verbose: bool = False
-    wait_time: float = 2
+    reduce_time: float = 2
 
     def __post_init__(self):
         assert isinstance(self.output_kafka_server, str)
@@ -38,25 +55,23 @@ class KafkaSink(TSSink):
         getting the buffer on the pad just modifies the name to show this final
         graph point and the prints it to prove it all works.
         """
-        #super().pull(pad, bufs)
-        #bufs = self.preparedframes[pad]
         self.cnt[pad] += 1
+        bufst0 = bufs[0].t0/1_000_000_000
         if self.last_t0 is None:
-            self.last_t0 = bufs[0].t0
+            self.last_t0 = bufst0
 
+        # append data to deque
         if self.metadata_key in bufs.metadata:
-            self.kafka_data[self.route]['time'].append(bufs[0].t0)
+            self.kafka_data[self.route]['time'].append(bufst0)
             self.kafka_data[self.route]['data'].append(bufs.metadata[self.metadata_key])
 
-        if bufs[0].t0 - self.last_t0 >= int(self.wait_time*1_000_000_000):
-            print('Writing out to kafka')
-
-            self.client.write(self.topic, self.kafka_data, )
+        # write to kafka
+        if bufst0 - self.last_t0 >= self.reduce_time:
+            self.client.write(self.topic, self.kafka_data[self.route], tags=self.tags)
             self.kafka_data[self.route]['time'] = []
             self.kafka_data[self.route]['data'] = []
 
-            self.last_t0 = bufs[0].t0
-
+            self.last_t0 = bufst0
         
         if bufs.EOS:
             self.mark_eos(pad)
