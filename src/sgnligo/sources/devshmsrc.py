@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import inotify.adapters
 import inotify.constants
 from inotify_simple import INotify, flags
-from gwpy.timeseries import TimeSeries
+from gwpy.timeseries import TimeSeries, StateVector
 import numpy as np
 import os
 
@@ -48,6 +48,7 @@ class DevShmSrc(TSSource):
     shared_memory_dir: str = None
     wait_time: int = 60
     watch_suffix: str = ".gwf"
+    state_vector_on_bits: int = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -65,6 +66,9 @@ class DevShmSrc(TSSource):
         # late data and to track discontinuities
         self.last_buffer = LastBuffer(int(now()), False)
         print(f"Start up t0: {self.last_buffer.t0}")
+
+        # set state vector on bits
+        self.bitmask = state_vector_on_off_bits(self.state_vector_on_bits)
 
         # Create the inotify handler
         self.observer = threading.Thread(
@@ -151,33 +155,66 @@ class DevShmSrc(TSSource):
 
                 # update last buffer
                 self.last_buffer.t0 = t0
-                self.last_buffer.is_gap = True
         else:
-            # load data from the file using gwpy
-            data = TimeSeries.read(next_file, f"{self.instrument}:{self.channel_name}")
-            t0 = data.t0.value
-            duration = data.duration.value
+            # first check the state
+            statedata = StateVector.read(next_file, f"{self.instrument}:GDS-CALIB_STATE_VECTOR")
 
-            # check sample rate and duration matches what we expect
-            assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
-            assert duration == self.buffer_duration, "File duration ({duration} sec) does not match assumed buffer duration ({self.buffer_duration} sec)."
+            state_data = np.array(statedata.data)
+            state_t0 = statedata.t0.value
+            state_duration = statedata.duration.value
+            state_sample_rate = statedata.sample_rate.value
 
-            data = np.array(data)
+            state_times = np.arange(state_t0, state_t0 + state_duration, statedata.dt.value)
+            bits = np.array(statedata)
 
-            if self.last_buffer.is_gap:
-                # FIXME: how do we want to pass on info to downstream elements that
-                # there was a discontinuity? Do we actually need to?
-                print("LAST BUFFER WAS GAP, SET DISCONT FLAG")
+            state_flags = []
+            for b in bits:
+                b = state_vector_on_off_bits(b)
+                if b & self.bitmask == self.bitmask:
+                    state_flags.append(True)
+                else:
+                    state_flags.append(False)
 
-            outbuf = SeriesBuffer(
-                offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
-            )
+            if not any(state_flags):
+                # return gap of buffer duration
+                print(f"{self.instrument}: OFF at {t0}")
 
-            print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0:.3e} | Discont: {self.last_buffer.is_gap}")
+                data = None
+                t0 = state_t0
+                shape = (self.rate * self.buffer_duration,)
+
+                outbuf = SeriesBuffer(
+                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=shape
+                )
+
+            else:
+                # load data from the file using gwpy
+                data = TimeSeries.read(next_file, f"{self.instrument}:{self.channel_name}")
+                t0 = data.t0.value
+                duration = data.duration.value
+
+                # check sample rate and duration matches what we expect
+                assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
+                assert duration == self.buffer_duration, "File duration ({duration} sec) does not match assumed buffer duration ({self.buffer_duration} sec)."
+
+                data = np.array(data)
+
+                if all(state_flags):
+                    print(f"{self.instrument}: ON at {t0}")
+                    outbuf = SeriesBuffer(
+                        offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
+                    )
+
+                else:
+                    # we need to slice the buffer to replace data with gaps
+                    # for segments where state bits dont match self.bitmask
+                    print(f"{self.instrument}: state transition at {t0}")
+
+
+            print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0:.3e}")
 
             # update last buffer
             self.last_buffer.t0 = t0
-            self.last_buffer.is_gap = False
 
         # online data is never EOS
         # FIXME but maybe there should be some kind of graceful shutdown
