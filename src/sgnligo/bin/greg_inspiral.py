@@ -11,8 +11,8 @@ from sgnts.sinks import DumpSeriesSink, FakeSeriesSink
 from sgnts.transforms import Threshold
 
 from sgnligo.cbc.sort_bank import group_and_read_banks, SortedBank
-from sgnligo.sources import FrameReader
-from sgnligo.sinks import ImpulseSink, StrikeSink
+from sgnligo.sources import FrameReader, DevShmSrc
+from sgnligo.sinks import ImpulseSink, StrikeSink, KafkaSink
 from sgnligo.transforms import (
     lloid,
     Whiten,
@@ -29,6 +29,18 @@ def parse_command_line():
         action="store",
         default="frames",
         help="The type of the input source.",
+    )
+    parser.add_option(
+        "--shared-memory-dir",
+        metavar="directory",
+        help="Set the name of the shared memory directory.",
+    )
+    parser.add_option(
+        "--wait-time",
+        metavar="seconds",
+        type=int,
+        default=60,
+        help="Time to wait for new files in seconds before throwing an error. In online mode, new files should always arrive every second, unless there are problems. Default wait time is 60 seconds.",
     )
     parser.add_option(
         "--num-buffers",
@@ -165,6 +177,17 @@ def parse_command_line():
         default=-1,
         help="The sample point to put the impulse at. If -1, place randomly.",
     )
+    parser.add_option(
+        "--output-kafka-server",
+        metavar="addr",
+        help="Set the server address and port number for output data. Optional",
+    )
+    parser.add_option(
+        "--analysis-tag",
+        metavar="tag",
+        default="test",
+        help='Set the string to identify the analysis in which this job is part of. Used when --output-kafka-server is set. May not contain "." nor "-". Default is test.',
+    )
 
     options, args = parser.parse_args()
 
@@ -217,21 +240,37 @@ def main():
     lloid_input_source_link = {}
     for ifo in ifos:
         # Build pipeline
-        if options.data_source == "frames":
+        if options.data_source == "frames" or options.data_source == "devshm":
+            if options.data_source == "frames":
+                pipeline.insert(
+                    FrameReader(
+                        name=ifo + "_Source",
+                        source_pad_names=(ifo,),
+                        rate=options.sample_rate,
+                        num_samples=options.num_samples,
+                        framecache=options.frame_cache,
+                        channel_name=options.channel_name,
+                        instrument=ifo,
+                        gps_start_time=options.gps_start_time,
+                        gps_end_time=options.gps_end_time,
+                    ),
+                )
+            else:
+                pipeline.insert(
+                    DevShmSrc(
+                        name=ifo + "_Source",
+                        source_pad_names=(ifo,),
+                        rate=16384,
+                        num_samples=16384,
+                        channel_name=options.channel_name,
+                        instrument=ifo,
+                        shared_memory_dir=options.shared_memory_dir,
+                        wait_time=options.wait_time,
+                    ),
+                )
             pipeline.insert(
-                FrameReader(
-                    name=ifo + "_FrameReader",
-                    source_pad_names=(ifo,),
-                    rate=options.sample_rate,
-                    num_samples=options.num_samples,
-                    framecache=options.frame_cache,
-                    channel_name=options.channel_name,
-                    instrument=ifo,
-                    gps_start_time=options.gps_start_time,
-                    gps_end_time=options.gps_end_time,
-                ),
                 Resampler(
-                    name=ifo + "_FrameResampler",
+                    name=ifo + "_SourceResampler",
                     sink_pad_names=(ifo,),
                     source_pad_names=(ifo,),
                     inrate=options.sample_rate,
@@ -261,11 +300,11 @@ def main():
             pipeline.insert(
                 link_map={
                     ifo
-                    + "_FrameResampler:sink:"
+                    + "_SourceResampler:sink:"
                     + ifo: ifo
-                    + "_FrameReader:src:"
+                    + "_Source:src:"
                     + ifo,
-                    ifo + "_Whitener:sink:" + ifo: ifo + "_FrameResampler:src:" + ifo,
+                    ifo + "_Whitener:sink:" + ifo: ifo + "_SourceResampler:src:" + ifo,
                     ifo + "_Threshold:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
                 }
             )
@@ -332,6 +371,7 @@ def main():
                 template_ids=sorted_bank.template_ids,
                 bankids_map=sorted_bank.bankids_map,
                 end_times=sorted_bank.end_times,
+                kafka=True,
                 device=options.torch_device,
             ),
             StrikeSink(
@@ -344,7 +384,21 @@ def main():
                 subbankids=sorted_bank.subbankids,
                 template_sngls=sorted_bank.sngls,
             ),
-            link_map={"StrikeSnk:sink:trigs": "itacacac:src:trigs"},
+            KafkaSink(
+                name="KafkaSnk",
+                sink_pad_names=("kafka",),
+                output_kafka_server=options.output_kafka_server,
+                #topic="gstlal."+options.analysis_tag+"."+options.instrument+"_range_history",
+                topic="gstlal.greg_test.H1_snr_history",
+                routes="H1_snr_history",
+                metadata_key="H1_snr_history",
+                #tags=[options.instrument,],
+                #reduce_time=options.kafka_reduce_time,
+                reduce_time=1,
+                verbose=True
+            ),
+            link_map={"StrikeSnk:sink:trigs": "itacacac:src:trigs",
+            "KafkaSnk:sink:kafka": "itacacac:src:trigs"},
         )
 
     # link output of lloid
