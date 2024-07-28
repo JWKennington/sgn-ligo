@@ -18,7 +18,9 @@ from ..base import Offset
 from sgnts.transforms.resampler import UP_HALF_LENGTH, DOWN_HALF_LENGTH
 
 
-def group_and_read_banks(svd_bank, nbank_pretend=0, nslice=-1, verbose=False):
+def group_and_read_banks(
+    svd_bank, source_ifos=None, nbank_pretend=0, nslice=-1, verbose=False
+):
     """
     Read a list of svd banks file names into bank objects,
     group by ifo and bankid
@@ -40,7 +42,11 @@ def group_and_read_banks(svd_bank, nbank_pretend=0, nslice=-1, verbose=False):
     if len(ifoset) != 1:
         raise ValueError("The ifos have different sets of svd bank files provided.")
 
-    ifos = list(ifoset)[0]
+    ifos = list(list(ifoset)[0])
+    if source_ifos and ifos != source_ifos:
+        raise ValueError(
+            f"Data source ifos must be the same as svd bank ifos. {source_ifos} {ifos}"
+        )
 
     banks = {ifo: [] for ifo in ifos}
     if nbank_pretend:
