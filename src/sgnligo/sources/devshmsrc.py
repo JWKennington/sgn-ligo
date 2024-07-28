@@ -13,7 +13,7 @@ from .. base import *
 
 import threading
 
-from .utils import *
+from ..base.utils import *
 
 from sgnts.base.buffer import *
 from sgnts.base import Offset, SeriesBuffer, TSFrame, TSSource, TSSlice, TSSlices
