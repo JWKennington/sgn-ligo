@@ -46,6 +46,8 @@ class StrikeSink(SinkElement):
     subbankids: Sequence[Any] = None
     template_sngls: list[dict] = None
     verbose: bool = False
+    trigger_output: list[str] = None
+    ranking_stat_output: list[str] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -141,26 +143,17 @@ class StrikeSink(SinkElement):
         if bufs.EOS:
             self.mark_eos(pad)
 
-            for bankid in self.bankids_map:
+            for i, bankid in enumerate(self.bankids_map):
+                # FIXME correct file name assignment
                 # write ranking stats file
-                self.ranking_stats[bankid].save(
-                    "".join(self.ifos)
-                    + "-"
-                    + "{:04d}".format(int(bankid))
-                    + "_LnLikelihoodRatio.xml.gz"
-                )
+                self.ranking_stats[bankid].save(self.ranking_stat_output[i])
 
                 # write coincs file
-                output_file = (
-                    "".join(self.ifos)
-                    + "-"
-                    + "{:04d}".format(int(bankid))
-                    + "_TRIGGERS.xml.gz"
-                )
+                output_file = self.trigger_output[i]
                 utils.write_filename(self.coinc_outdocs[bankid], output_file)
 
         if self.verbose is True:
-            print(self.cnt[pad], bufs.metadata)
+            print(self.cnt[pad], bufs)
 
         metadata = bufs.metadata
         if "background" in metadata:
