@@ -1,0 +1,59 @@
+from . import Whiten, HorizonDistance
+from sgnts.transforms import Resampler, Threshold
+
+
+def condition(pipeline, options, ifos, maxrate, input_links):
+    condition_out_links = {ifo: None for ifo in ifos}
+    horizon_out_links = {ifo: None for ifo in ifos}
+    for ifo in ifos:
+        pipeline.insert(
+            Resampler(
+                name=ifo + "_SourceResampler",
+                sink_pad_names=(ifo,),
+                source_pad_names=(ifo,),
+                inrate=options.sample_rate,
+                outrate=maxrate,
+            ),
+            Whiten(
+                name=ifo + "_Whitener",
+                sink_pad_names=(ifo,),
+                source_pad_names=(ifo, "spectrum_" + ifo),
+                instrument=ifo,
+                sample_rate=maxrate,
+                fft_length=options.psd_fft_length,
+                whitening_method=options.whitening_method,
+                reference_psd=options.reference_psd,
+                psd_pad_name=ifo + "_Whitener:src:spectrum_" + ifo,
+            ),
+            Threshold(
+                name=ifo + "_Threshold",
+                source_pad_names=(ifo,),
+                sink_pad_names=(ifo,),
+                threshold=options.ht_gate_threshold,
+                startwn=maxrate // 2,
+                stopwn=maxrate // 2,
+                invert=True,
+            ),
+            HorizonDistance(
+                name=ifo + "_Horizon",
+                source_pad_names=(ifo,),
+                sink_pad_names=(ifo,),
+                m1=1.4,
+                m2=1.4,
+                fmin=10.0,
+                fmax=1000.0,
+                delta_f=1 / 16.0,
+            ),
+        )
+        pipeline.insert(
+            link_map={
+                ifo + "_SourceResampler:sink:" + ifo: input_links[ifo],
+                ifo + "_Whitener:sink:" + ifo: ifo + "_SourceResampler:src:" + ifo,
+                ifo + "_Threshold:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
+                ifo + "_Horizon:sink:" + ifo: ifo + "_Whitener:src:spectrum_" + ifo,
+            }
+        )
+        condition_out_links[ifo] = ifo + "_Threshold:src:" + ifo
+        horizon_out_links[ifo] = ifo + "_Horizon:src:" + ifo
+
+    return condition_out_links, horizon_out_links
