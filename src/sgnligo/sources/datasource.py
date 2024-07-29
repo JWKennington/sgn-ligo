@@ -32,6 +32,7 @@ def datasource(pipeline, options, ifos):
                     instrument=ifo,
                     shared_memory_dir=shared_memory_dict[ifo],
                     wait_time=options.wait_time,
+                    verbose=options.verbose,
                 ),
             )
         else:
