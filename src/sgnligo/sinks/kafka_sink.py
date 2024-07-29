@@ -65,8 +65,6 @@ class KafkaSink(TSSink):
                 t = topic.split(".")[-1]
                 if t in mkafka:
                     self.client.write(topic, mkafka[t], tags=self.tags)
-                else:
-                    raise ValueError(f"{t} not in metadata")
 
             self.last_t0 = bufst0
 
