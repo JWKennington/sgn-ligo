@@ -1,10 +1,11 @@
-from . import Whiten, HorizonDistance
+from . import Whiten, HorizonDistance, Latency
 from sgnts.transforms import Resampler, Threshold
 
 
 def condition(pipeline, options, ifos, maxrate, input_links):
     condition_out_links = {ifo: None for ifo in ifos}
     horizon_out_links = {ifo: None for ifo in ifos}
+    latency_out_links = {ifo: None for ifo in ifos}
     for ifo in ifos:
         pipeline.insert(
             Resampler(
@@ -44,6 +45,12 @@ def condition(pipeline, options, ifos, maxrate, input_links):
                 fmax=1000.0,
                 delta_f=1 / 16.0,
             ),
+            Latency(
+                name=ifo + "_Latency",
+                source_pad_names=(ifo,),
+                sink_pad_names=(ifo,),
+                route=ifo+"_whitening_latency",
+            )
         )
         pipeline.insert(
             link_map={
@@ -51,9 +58,11 @@ def condition(pipeline, options, ifos, maxrate, input_links):
                 ifo + "_Whitener:sink:" + ifo: ifo + "_SourceResampler:src:" + ifo,
                 ifo + "_Threshold:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
                 ifo + "_Horizon:sink:" + ifo: ifo + "_Whitener:src:spectrum_" + ifo,
+                ifo + "_Latency:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
             }
         )
         condition_out_links[ifo] = ifo + "_Threshold:src:" + ifo
         horizon_out_links[ifo] = ifo + "_Horizon:src:" + ifo
+        latency_out_links[ifo] = ifo + "_Latency:src:" + ifo
 
-    return condition_out_links, horizon_out_links
+    return condition_out_links, horizon_out_links, latency_out_links
