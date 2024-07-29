@@ -131,7 +131,6 @@ class HorizonDistance(TSTransform):
             assert isinstance(psd, lal.REAL8FrequencySeries)
 
             dist = self.compute_horizon(psd)
-            print(f"Horizon distance: {dist} Mpc | Range = {dist / 2.25} Mpc")
         else:
             dist = None
 
