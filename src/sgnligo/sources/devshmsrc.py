@@ -9,7 +9,7 @@ import os
 
 from sgn.sources import *
 from sgnts.sources import *
-from .. base import *
+from ..base import *
 
 import threading
 
@@ -22,10 +22,12 @@ import queue
 
 import time
 
+
 @dataclass
 class LastBuffer:
     t0: int
     is_gap: bool
+
 
 @dataclass
 class DevShmSrc(TSSource):
@@ -49,6 +51,7 @@ class DevShmSrc(TSSource):
     wait_time: int = 60
     watch_suffix: str = ".gwf"
     state_vector_on_bits: int = None
+    verbose: bool = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -72,8 +75,7 @@ class DevShmSrc(TSSource):
 
         # Create the inotify handler
         self.observer = threading.Thread(
-            target=self.monitor_dir,
-            args=(self.queue, self.shared_memory_dir)
+            target=self.monitor_dir, args=(self.queue, self.shared_memory_dir)
         )
 
         # Start the observer and set the stop attribute
@@ -138,7 +140,9 @@ class DevShmSrc(TSSource):
         except queue.Empty:
             if now() - self.last_buffer.t0 >= self.wait_time:
                 self.observer.stop = True
-                raise ValueError(f"Reached {self.wait_time} seconds with no new files in {self.shared_memory_dir}, exiting.")
+                raise ValueError(
+                    f"Reached {self.wait_time} seconds with no new files in {self.shared_memory_dir}, exiting."
+                )
             else:
                 # send a gap buffer
                 if self.cnt[pad] == 1:
@@ -148,10 +152,15 @@ class DevShmSrc(TSSource):
                     # send subsequent gaps at self.buffer_duration intervals
                     t0 = self.last_buffer.t0 + self.buffer_duration
                 shape = (int(self.rate * self.buffer_duration),)
-                print(f"Queue is empty, sending a gap buffer at t0: {t0}")
-                outbufs = [SeriesBuffer(
-                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=None, shape=shape
-                )]
+                print(
+                    f"Queue is empty, sending a gap buffer at t0: {t0} | ifo: {self.instrument}"
+                )
+                outbuf = SeriesBuffer(
+                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
+                    sample_rate=self.rate,
+                    data=None,
+                    shape=shape,
+                )
 
                 # update last buffer
                 self.last_buffer.t0 = t0
@@ -165,6 +174,14 @@ class DevShmSrc(TSSource):
             state_duration = statedata.duration.value
             state_sample_rate = statedata.sample_rate.value
             state_nsamples = int(self.rate * statedata.dt.value)
+
+            # check sample rate and duration matches what we expect
+            assert (
+                int(data.sample_rate.value) == self.rate
+            ), "Data rate does not match requested sample rate."
+            assert (
+                duration == self.buffer_duration
+            ), "File duration ({duration} sec) does not match assumed buffer duration ({self.buffer_duration} sec)."
 
             state_times = np.arange(state_t0, state_t0 + state_duration, statedata.dt.value)
             bits = np.array(statedata)
@@ -244,7 +261,10 @@ class DevShmSrc(TSSource):
                         outbufs.append(SeriesBuffer(
                             offset=buf_offset0, sample_rate=self.rate, data=None, shape=(num_samples,)))
 
-            print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0:.3e}")
+            if self.verbose:
+                print(
+                    f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0:.3e} | Discont: {self.last_buffer.is_gap}"
+                )
 
             # update last buffer
             self.last_buffer.t0 = t0
