@@ -1,4 +1,6 @@
 import torch
+import os
+import sys
 
 from optparse import OptionGroup, OptionParser
 
@@ -18,6 +20,7 @@ from sgnligo.transforms import (
     condition,
     lloid,
     Itacacac,
+    Latency,
 )
 
 
@@ -377,7 +380,7 @@ def main():
     # Data source
     source_out_links = datasource(pipeline, options, ifos)
     if options.data_source != "impulse":
-        source_out_links, horizon_out_links = condition(
+        source_out_links, horizon_out_links, whiten_latency_out_links = condition(
             pipeline, options, ifos, maxrate, source_out_links
         )
     else:
@@ -445,6 +448,16 @@ def main():
                 }
             )
 
+        pipeline.insert(
+            Latency(
+                name="itacacac_latency",
+                sink_pad_names=("data",),
+                source_pad_names=("latency",),
+                route="latency_history",
+            ),
+            link_map={"itacacac_latency:sink:data": "itacacac:src:trigs"},
+        )
+
         # Connect sink
         if options.fake_sink:
             pipeline.insert(
@@ -459,19 +472,45 @@ def main():
             pipeline.insert(
                 KafkaSink(
                     name="KafkaSnk",
-                    sink_pad_names=("kafka",),
+                    sink_pad_names=(
+                        "kafka",
+                        "itacacac_latency",
+                    )
+                    + tuple(ifo + "_whiten_latency" for ifo in ifos),
                     output_kafka_server=options.output_kafka_server,
                     topics=[
                         "gstlal." + options.analysis_tag + "." + ifo + "_snr_history"
+                        for ifo in ifos
+                    ]
+                    + [
+                        "gstlal." + options.analysis_tag + ".latency_history",
+                    ]
+                    + [
+                        "gstlal."
+                        + options.analysis_tag
+                        + "."
+                        + ifo
+                        + "_whitening_latency"
                         for ifo in ifos
                     ],
                     # topic="gstlal.greg_test.H1_snr_history",
                     routes=[ifo + "_snr_history" for ifo in ifos],
                     reduce_time=1,
-                    verbose=True,
+                    verbose=options.verbose,
                 ),
-                link_map={"KafkaSnk:sink:kafka": "itacacac:src:trigs"},
+                link_map={
+                    "KafkaSnk:sink:kafka": "itacacac:src:trigs",
+                    "KafkaSnk:sink:itacacac_latency": "itacacac_latency:src:latency",
+                },
             )
+            for ifo in ifos:
+                pipeline.insert(
+                    link_map={
+                        "KafkaSnk:sink:"
+                        + ifo
+                        + "_whiten_latency": whiten_latency_out_links[ifo],
+                    }
+                )
         else:
             pipeline.insert(
                 StrikeSink(
@@ -504,6 +543,20 @@ def main():
 
     # Run pipeline
     pipeline.run()
+
+    #
+    # Cleanup template bank temp files
+    #
+
+    print("shutdown: template bank cleanup", flush=True, file=sys.stderr)
+    for ifo in banks:
+        for bank in banks[ifo]:
+            if options.verbose:
+                print("removing file: ", bank.template_bank_filename, file=sys.stderr)
+            os.remove(bank.template_bank_filename)
+
+    print("shutdown: del bank", flush=True, file=sys.stderr)
+    del bank
 
 
 if __name__ == "__main__":
