@@ -147,7 +147,7 @@ class DevShmSrc(TSSource):
                 else:
                     # send subsequent gaps at self.buffer_duration intervals
                     t0 = self.last_buffer.t0 + self.buffer_duration
-                shape = (self.rate * self.buffer_duration,)
+                shape = (int(self.rate * self.buffer_duration),)
                 print(f"Queue is empty, sending a gap buffer at t0: {t0}")
                 outbuf = SeriesBuffer(
                     offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=None, shape=shape
@@ -181,12 +181,11 @@ class DevShmSrc(TSSource):
 
                 data = None
                 t0 = state_t0
-                shape = (self.rate * self.buffer_duration,)
+                shape = (int(self.rate * self.buffer_duration),)
 
                 outbuf = SeriesBuffer(
                     offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=shape
                 )
-
             else:
                 # load data from the file using gwpy
                 data = TimeSeries.read(next_file, f"{self.instrument}:{self.channel_name}")
