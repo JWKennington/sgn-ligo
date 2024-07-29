@@ -149,9 +149,9 @@ class DevShmSrc(TSSource):
                     t0 = self.last_buffer.t0 + self.buffer_duration
                 shape = (int(self.rate * self.buffer_duration),)
                 print(f"Queue is empty, sending a gap buffer at t0: {t0}")
-                outbuf = SeriesBuffer(
+                outbufs = [SeriesBuffer(
                     offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=None, shape=shape
-                )
+                )]
 
                 # update last buffer
                 self.last_buffer.t0 = t0
@@ -161,8 +161,10 @@ class DevShmSrc(TSSource):
 
             state_data = np.array(statedata.data)
             state_t0 = statedata.t0.value
+            state_offset0 = Offset.fromsec(state_t0 - Offset.offset_ref_t0/1_000_000_000)
             state_duration = statedata.duration.value
             state_sample_rate = statedata.sample_rate.value
+            state_nsamples = int(self.rate * statedata.dt.value)
 
             state_times = np.arange(state_t0, state_t0 + state_duration, statedata.dt.value)
             bits = np.array(statedata)
@@ -183,9 +185,9 @@ class DevShmSrc(TSSource):
                 t0 = state_t0
                 shape = (int(self.rate * self.buffer_duration),)
 
-                outbuf = SeriesBuffer(
+                outbufs = [SeriesBuffer(
                     offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=shape
-                )
+                )]
             else:
                 # load data from the file using gwpy
                 data = TimeSeries.read(next_file, f"{self.instrument}:{self.channel_name}")
@@ -200,15 +202,47 @@ class DevShmSrc(TSSource):
 
                 if all(state_flags):
                     print(f"{self.instrument}: ON at {t0}")
-                    outbuf = SeriesBuffer(
+                    outbufs = [SeriesBuffer(
                         offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
-                    )
+                    )]
 
                 else:
                     # we need to slice the buffer to replace data with gaps
                     # for segments where state bits dont match self.bitmask
                     print(f"{self.instrument}: state transition at {t0}")
 
+                    outbufs = []
+                    state0 = state_flags[0]
+                    buf_offset0 = state_offset0
+                    n0 = 0
+                    num_samples = state_nsamples
+                    for state in state_flags[1:]:
+                        if state is state0:
+                            num_samples += state_nsamples
+                            continue
+                        else:
+                            # There is a state change
+                            # Create the buffer for the previous state
+                            shape = (num_samples,)
+                            if state0 is True:
+                                outbufs.append(SeriesBuffer(
+                                    offset=buf_offset0, sample_rate=self.rate, data=data[n0:n0+num_samples], shape=shape))
+                            else:
+                                outbufs.append(SeriesBuffer(
+                                    offset=buf_offset0, sample_rate=self.rate, data=None, shape=shape))
+                            # reset
+                            state0 = state
+                            buf_offset0 += Offset.fromsamples(num_samples, self.rate)
+                            n0 += num_samples
+                            num_samples = state_nsamples
+
+                    # make the last buffer
+                    if state0 is True:
+                        outbufs.append(SeriesBuffer(
+                            offset=buf_offset0, sample_rate=self.rate, data=data[n0:n0+num_samples], shape=(num_samples,)))
+                    else:
+                        outbufs.append(SeriesBuffer(
+                            offset=buf_offset0, sample_rate=self.rate, data=None, shape=(num_samples,)))
 
             print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0:.3e}")
 
@@ -220,7 +254,7 @@ class DevShmSrc(TSSource):
         EOS = False
 
         return TSFrame(
-            buffers=[outbuf],
+            buffers=outbufs,
             metadata={"cnt": self.cnt, "name": "'%s'" % pad.name},
             EOS=EOS,
         )
