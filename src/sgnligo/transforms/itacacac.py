@@ -462,6 +462,23 @@ class Itacacac(TSTransform):
                 self.itacacac(snrs)
             )
 
+            if self.kafka:
+                maxsnrs = {}
+            for ifo in triggers.keys():
+                snrs = triggers[ifo][1]
+                if self.kafka:
+                    maxsnr_id = np.unravel_index(np.argmax(snrs), snrs.shape)
+                    maxsnrs[ifo+"_snr_history"] = {"time":
+                                [(np.round(
+                                    (Offset.fromsamples(triggers[ifo][0][maxsnr_id], self.rate) + self.offset)
+                                    / Offset.OFFSET_RATE
+                                    * 1_000_000_000
+                                ).astype(int)
+                                + Offset.offset_ref_t0
+                                + self.end_times[maxsnr_id[0]])/1_000_000_000,]
+                            , "data": [triggers[ifo][1][maxsnr_id].item(),]}
+
+
             for j in range(1, len(clustered_coinc) - 1):
                 clustered_coinc[j] = clustered_coinc[j].to("cpu").numpy()
 
@@ -469,8 +486,6 @@ class Itacacac(TSTransform):
             # FIXME: is stacking then copying to cpu faster?
             # FIXME: do we only need snr chisq for singles?
             background = {}
-            if self.kafka:
-                maxsnrs = {}
             # loop over banks
             for bankid, ids in self.bankids_map.items():
                 background[bankid] = {}
@@ -481,18 +496,6 @@ class Itacacac(TSTransform):
                     background[bankid][ifo]["snrs"] = []
                     background[bankid][ifo]["chisqs"] = []
                     background[bankid][ifo]["template_ids"] = []
-                    snrs = triggers[ifo][1]
-                    if self.kafka:
-                        maxsnr_id = np.unravel_index(np.argmax(snrs), snrs.shape)
-                        maxsnrs[ifo+"_snr_history"] = {"time": 
-                                    [(np.round(
-                                        (Offset.fromsamples(triggers[ifo][0][maxsnr_id], self.rate) + self.offset)
-                                        / Offset.OFFSET_RATE
-                                        * 1_000_000_000
-                                    ).astype(int)
-                                    + Offset.offset_ref_t0
-                                    + self.end_times[maxsnr_id[0]])/1_000_000_000,]
-                                , "data": [triggers[ifo][1][maxsnr_id].item(),]}
 
                     if ifo in single_masks:
                         smask0 = single_masks[ifo].to("cpu").numpy()
