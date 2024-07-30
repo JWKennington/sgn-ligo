@@ -157,7 +157,7 @@ class DevShmSrc(TSSource):
                 self.last_buffer.t0 = t0
         else:
             # first check the state
-            statedata = StateVector.read(next_file, f"{self.instrument}:GDS-CALIB_STATE_VECTOR")
+            statedata = StateVector.read(next_file, f"{self.instrument}:"+self.channel_name)
 
             state_data = np.array(statedata.data)
             state_t0 = statedata.t0.value
