@@ -4,8 +4,12 @@ from sgnts.transforms import Resampler, Threshold
 
 def condition(pipeline, options, ifos, maxrate, input_links):
     condition_out_links = {ifo: None for ifo in ifos}
-    horizon_out_links = {ifo: None for ifo in ifos}
-    latency_out_links = {ifo: None for ifo in ifos}
+    if options.data_source == "devshm":
+        latency_out_links = {ifo: None for ifo in ifos}
+        horizon_out_links = None
+    else:
+        latency_out_links = None
+        horizon_out_links = {ifo: None for ifo in ifos}
     for ifo in ifos:
         pipeline.insert(
             Resampler(
@@ -35,34 +39,46 @@ def condition(pipeline, options, ifos, maxrate, input_links):
                 stopwn=maxrate // 2,
                 invert=True,
             ),
-            HorizonDistance(
-                name=ifo + "_Horizon",
-                source_pad_names=(ifo,),
-                sink_pad_names=(ifo,),
-                m1=1.4,
-                m2=1.4,
-                fmin=10.0,
-                fmax=1000.0,
-                delta_f=1 / 16.0,
-            ),
-            Latency(
-                name=ifo + "_Latency",
-                source_pad_names=(ifo,),
-                sink_pad_names=(ifo,),
-                route=ifo+"_whitening_latency",
-            )
         )
+        if options.data_source == "devshm":
+            pipeline.insert(
+                Latency(
+                    name=ifo + "_Latency",
+                    source_pad_names=(ifo,),
+                    sink_pad_names=(ifo,),
+                    route=ifo+"_whitening_latency",
+                ),
+                link_map={
+                    ifo + "_Latency:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
+                }
+            )
+        else:
+            pipeline.insert(
+                HorizonDistance(
+                    name=ifo + "_Horizon",
+                    source_pad_names=(ifo,),
+                    sink_pad_names=(ifo,),
+                    m1=1.4,
+                    m2=1.4,
+                    fmin=10.0,
+                    fmax=1000.0,
+                    delta_f=1 / 16.0,
+                ),
+                link_map={
+                    ifo + "_Horizon:sink:" + ifo: ifo + "_Whitener:src:spectrum_" + ifo,
+                }
+            )
         pipeline.insert(
             link_map={
                 ifo + "_SourceResampler:sink:" + ifo: input_links[ifo],
                 ifo + "_Whitener:sink:" + ifo: ifo + "_SourceResampler:src:" + ifo,
                 ifo + "_Threshold:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
-                ifo + "_Horizon:sink:" + ifo: ifo + "_Whitener:src:spectrum_" + ifo,
-                ifo + "_Latency:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
             }
         )
         condition_out_links[ifo] = ifo + "_Threshold:src:" + ifo
-        horizon_out_links[ifo] = ifo + "_Horizon:src:" + ifo
-        latency_out_links[ifo] = ifo + "_Latency:src:" + ifo
+        if options.data_source == "devshm":
+            latency_out_links[ifo] = ifo + "_Latency:src:" + ifo
+        else:
+            horizon_out_links[ifo] = ifo + "_Horizon:src:" + ifo
 
     return condition_out_links, horizon_out_links, latency_out_links
