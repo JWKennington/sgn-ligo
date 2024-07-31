@@ -4,7 +4,7 @@ from typing import Any
 import torch
 
 from sgnts.base import Offset
-from ..base import SeriesBuffer, TSFrame, TSTransform, AdapterConfig, ArrayOps
+from ..base import SeriesBuffer, TSFrame, TSTransform, AdapterConfig, ArrayOps, now
 import math
 
 import lal
@@ -464,9 +464,11 @@ class Itacacac(TSTransform):
 
             if self.kafka:
                 maxsnrs = {}
-            for ifo in triggers.keys():
-                snrs = triggers[ifo][1]
-                if self.kafka:
+                maxlatency = {"time": None, "data": None}
+                ifos = triggers.keys()
+                mincoinc_time = min(float(np.min(clustered_coinc[3][ifo]["time"])) for ifo in ifos)
+                for ifo in ifos:
+                    snrs = triggers[ifo][1]
                     maxsnr_id = np.unravel_index(np.argmax(snrs), snrs.shape)
                     maxsnrs[ifo+"_snr_history"] = {"time":
                                 [(np.round(
@@ -477,7 +479,8 @@ class Itacacac(TSTransform):
                                 + Offset.offset_ref_t0
                                 + self.end_times[maxsnr_id[0]])/1_000_000_000,]
                             , "data": [triggers[ifo][1][maxsnr_id].item(),]}
-
+                maxlatency["time"] = [mincoinc_time/1_000_000_000]
+                maxlatency["data"] = [(now().ns() - mincoinc_time)/1_000_000_000]
 
             for j in range(1, len(clustered_coinc) - 1):
                 clustered_coinc[j] = clustered_coinc[j].to("cpu").numpy()
@@ -535,6 +538,7 @@ class Itacacac(TSTransform):
             metadata["background"] = background
             if self.kafka:
                 metadata["kafka"] = maxsnrs
+                metadata["kafka"]["latency_history"] = maxlatency
 
         outbuf = SeriesBuffer(
             offset=self.preparedoutoffsets[self.sink_pads[0]][0]["offset"],
