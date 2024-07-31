@@ -4,6 +4,7 @@ from lal import LIGOTimeGPS
 import os
 
 import time
+import types
 
 def now():
     """
