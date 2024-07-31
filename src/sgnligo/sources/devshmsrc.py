@@ -68,7 +68,8 @@ class DevShmSrc(TSSource):
         # buffer sent. this will be used to make sure we dont resend
         # late data and to track discontinuities
         self.last_buffer = LastBuffer(int(now()), False)
-        print(f"Start up t0: {self.last_buffer.t0}")
+        if self.verbose:
+            print(f"Start up t0: {self.last_buffer.t0}")
 
         # set state vector on bits
         self.bitmask = state_vector_on_off_bits(self.state_vector_on_bits)
@@ -155,12 +156,12 @@ class DevShmSrc(TSSource):
                 print(
                     f"Queue is empty, sending a gap buffer at t0: {t0} | ifo: {self.instrument}"
                 )
-                outbuf = SeriesBuffer(
+                outbufs = [SeriesBuffer(
                     offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
                     sample_rate=self.rate,
                     data=None,
                     shape=shape,
-                )
+                )]
 
                 # update last buffer
                 self.last_buffer.t0 = t0
@@ -175,14 +176,6 @@ class DevShmSrc(TSSource):
             state_sample_rate = statedata.sample_rate.value
             state_nsamples = int(self.rate * statedata.dt.value)
 
-            # check sample rate and duration matches what we expect
-            assert (
-                int(data.sample_rate.value) == self.rate
-            ), "Data rate does not match requested sample rate."
-            assert (
-                duration == self.buffer_duration
-            ), "File duration ({duration} sec) does not match assumed buffer duration ({self.buffer_duration} sec)."
-
             state_times = np.arange(state_t0, state_t0 + state_duration, statedata.dt.value)
             bits = np.array(statedata)
 
@@ -196,7 +189,8 @@ class DevShmSrc(TSSource):
 
             if not any(state_flags):
                 # return gap of buffer duration
-                print(f"{self.instrument}: OFF at {t0}")
+                if self.verbose:
+                    print(f"{self.instrument}: OFF at {t0}")
 
                 data = None
                 t0 = state_t0
@@ -218,7 +212,8 @@ class DevShmSrc(TSSource):
                 data = np.array(data)
 
                 if all(state_flags):
-                    print(f"{self.instrument}: ON at {t0}")
+                    if self.verbose:
+                        print(f"{self.instrument}: ON at {t0}")
                     outbufs = [SeriesBuffer(
                         offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
                     )]
@@ -226,7 +221,8 @@ class DevShmSrc(TSSource):
                 else:
                     # we need to slice the buffer to replace data with gaps
                     # for segments where state bits dont match self.bitmask
-                    print(f"{self.instrument}: state transition at {t0}")
+                    if self.verbose:
+                        print(f"{self.instrument}: state transition at {t0}")
 
                     outbufs = []
                     state0 = state_flags[0]
