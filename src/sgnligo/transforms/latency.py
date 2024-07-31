@@ -32,7 +32,7 @@ class Latency(TSTransform):
             metadata["kafka"] = {}
         metadata["kafka"][self.route] = {
             "time": [
-                time / 1_000_000_000,
+                frame.buffers[0].t0 / 1_000_000_000,
             ],
             "data": [
                 latency,
