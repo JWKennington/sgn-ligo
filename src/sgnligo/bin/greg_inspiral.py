@@ -74,10 +74,17 @@ def parse_command_line():
     )
     group.add_option(
         "--shared-memory-dir",
-        metavar="directory",
+        metavar="ifo=directory",
         action="append",
         help="Set the name of the shared memory directory. "
         "Can be given multiple times as --shared-memory-dir=IFO=DIR-NAME",
+    )
+    group.add_option(
+        "--state-vector-on-bits",
+        metavar="ifo=number",
+        action="append",
+        help="Set the state vector on bits. "
+        "Can be given multiple times as --state-vector-on-bits=IFO=NUMBER",
     )
     group.add_option(
         "--wait-time",
@@ -437,7 +444,7 @@ def main():
                 template_ids=sorted_bank.template_ids,
                 bankids_map=sorted_bank.bankids_map,
                 end_times=sorted_bank.end_times,
-                kafka=True,
+                kafka=options.data_source == "devshm",
                 device=options.torch_device,
             ),
         )
@@ -447,16 +454,16 @@ def main():
                     "itacacac:sink:" + ifo: lloid_output_source_link[ifo],
                 }
             )
-
-        pipeline.insert(
-            Latency(
-                name="itacacac_latency",
-                sink_pad_names=("data",),
-                source_pad_names=("latency",),
-                route="latency_history",
-            ),
-            link_map={"itacacac_latency:sink:data": "itacacac:src:trigs"},
-        )
+        if options.data_source == "devshm":
+            pipeline.insert(
+                Latency(
+                    name="itacacac_latency",
+                    sink_pad_names=("data",),
+                    source_pad_names=("latency",),
+                    route="all_itacacac_latency",
+                ),
+                link_map={"itacacac_latency:sink:data": "itacacac:src:trigs"},
+            )
 
         # Connect sink
         if options.fake_sink:
@@ -484,6 +491,9 @@ def main():
                     ]
                     + [
                         "gstlal." + options.analysis_tag + ".latency_history",
+                    ]
+                    + [
+                        "gstlal." + options.analysis_tag + ".all_itacacac_latency",
                     ]
                     + [
                         "gstlal."
