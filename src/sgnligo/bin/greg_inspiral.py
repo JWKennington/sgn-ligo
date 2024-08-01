@@ -37,7 +37,7 @@ def parse_command_line():
     )
     group.add_option(
         "--channel-name",
-        metavar="channel",
+        metavar="ifo=channel-name",
         action="append",
         help="Name of the data channel to analyze. Can be given multiple times as "
         "--channel-name=IFO=CHANNEL-NAME",
@@ -78,6 +78,13 @@ def parse_command_line():
         action="append",
         help="Set the name of the shared memory directory. "
         "Can be given multiple times as --shared-memory-dir=IFO=DIR-NAME",
+    )
+    group.add_option(
+        "--state-channel-name",
+        metavar="ifo=channel-name",
+        action="append",
+        help="Set the state vector channel name. "
+        "Can be given multiple times as --state-channel-name=IFO=CHANNEL-NAME",
     )
     group.add_option(
         "--state-vector-on-bits",
