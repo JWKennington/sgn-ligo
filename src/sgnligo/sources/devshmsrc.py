@@ -40,12 +40,15 @@ class DevShmSrc(TSSource):
         instrument, should be one to one with channel names
     channel_name: tuple
         channel name of the data
+    state_channel_name: tuple
+        channel name of the state vector
     watch_suffix: str
         Filename suffix to watch for.
     """
 
     rate: int = 2048
     channel_name: tuple = ()
+    state_channel_name: tuple = ()
     instrument: tuple = ()
     shared_memory_dir: str = None
     wait_time: int = 60
@@ -167,7 +170,7 @@ class DevShmSrc(TSSource):
                 self.last_buffer.t0 = t0
         else:
             # first check the state
-            statedata = StateVector.read(next_file, f"{self.instrument}:"+self.channel_name)
+            statedata = StateVector.read(next_file, f"{self.instrument}:"+self.state_channel_name)
 
             state_data = np.array(statedata.data)
             state_t0 = statedata.t0.value
