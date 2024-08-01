@@ -4,6 +4,7 @@ from sgnligo.sources import FrameReader, DevShmSrc
 def datasource(pipeline, options, ifos):
     source_out_links = {ifo: None for ifo in ifos}
     channel_dict = parse_list_to_dict(options.channel_name)
+    state_channel_dict = parse_list_to_dict(options.state_channel_name)
     state_vector_on_dict = parse_list_to_dict(options.state_vector_on_bits)
     shared_memory_dict = parse_list_to_dict(options.shared_memory_dir)
     for ifo in ifos:
@@ -32,6 +33,7 @@ def datasource(pipeline, options, ifos):
                     rate=16384,
                     num_samples=16384,
                     channel_name=channel_dict[ifo],
+                    state_channel_name=state_channel_dict[ifo],
                     instrument=ifo,
                     shared_memory_dir=shared_memory_dict[ifo],
                     state_vector_on_bits=int(state_vector_on_dict[ifo]),
