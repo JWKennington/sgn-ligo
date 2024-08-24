@@ -461,11 +461,11 @@ class Itacacac(TSTransform):
             triggers, ifo_combs, all_network_snr, single_masks, clustered_coinc = (
                 self.itacacac(snrs)
             )
+            ifos = triggers.keys()
 
             if self.kafka:
                 maxsnrs = {}
                 maxlatency = {"time": None, "data": None}
-                ifos = triggers.keys()
                 mincoinc_time = min(float(np.min(clustered_coinc[3][ifo]["time"])) for ifo in ifos)
                 for ifo in ifos:
                     snrs = triggers[ifo][1]
@@ -488,21 +488,19 @@ class Itacacac(TSTransform):
             # Populate background snr, chisq, time for each bank, ifo
             # FIXME: is stacking then copying to cpu faster?
             # FIXME: do we only need snr chisq for singles?
-            background = {}
+            background = {bankid: {ifo: None} for bankid, ids in self.bankids_map.items() for ifo in ifos}
             # loop over banks
             for bankid, ids in self.bankids_map.items():
-                background[bankid] = {}
                 # loop over ifos
-                for ifo in triggers.keys():
-                    background[bankid][ifo] = {}
-                    background[bankid][ifo]["time"] = []
-                    background[bankid][ifo]["snrs"] = []
-                    background[bankid][ifo]["chisqs"] = []
-                    background[bankid][ifo]["template_ids"] = []
+                for ifo in ifos:
+                    times = []
+                    snrs = []
+                    chisqs = []
+                    template_ids = []
 
                     if ifo in single_masks:
-                        smask0 = single_masks[ifo].to("cpu").numpy()
-                        if True in smask0:
+                        if True in single_masks[ifo]:
+                            smask0 = single_masks[ifo].to("cpu").numpy()
                             # loop over subbank ids in this bank
                             for i in ids:
                                 smask = smask0[i]
@@ -516,16 +514,12 @@ class Itacacac(TSTransform):
                                     + Offset.offset_ref_t0
                                     + self.end_times[i]
                                 )
-                                background[bankid][ifo]["time"].append(time)
-                                background[bankid][ifo]["snrs"].append(
-                                    triggers[ifo][1][i][smask]
-                                )
-                                background[bankid][ifo]["chisqs"].append(
-                                    triggers[ifo][2][i][smask]
-                                )
-                                background[bankid][ifo]["template_ids"].append(
-                                    self.template_ids_np[i][smask]
-                                )
+                                times.append(time)
+                                snrs.append(triggers[ifo][1][i][smask])
+                                chisqs.append(triggers[ifo][2][i][smask])
+                                template_ids.append(self.template_ids_np[i][smask])
+
+                    background[bankid][ifo] = {"time": times, "snrs": snrs, "chisqs": chisqs, "template_ids": template_ids}
 
             metadata["coincs"] = {
                 "template_ids": clustered_coinc[0],
