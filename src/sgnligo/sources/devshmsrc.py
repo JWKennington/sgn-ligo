@@ -9,11 +9,11 @@ import os
 
 from sgn.sources import *
 from sgnts.sources import *
-from .. base import *
+from ..base import *
 
 import threading
 
-from .utils import *
+from ..base.utils import *
 
 from sgnts.base.buffer import *
 from sgnts.base import Offset, SeriesBuffer, TSFrame, TSSource, TSSlice, TSSlices
@@ -22,10 +22,12 @@ import queue
 
 import time
 
+
 @dataclass
 class LastBuffer:
     t0: int
     is_gap: bool
+
 
 @dataclass
 class DevShmSrc(TSSource):
@@ -38,17 +40,21 @@ class DevShmSrc(TSSource):
         instrument, should be one to one with channel names
     channel_name: tuple
         channel name of the data
+    state_channel_name: tuple
+        channel name of the state vector
     watch_suffix: str
         Filename suffix to watch for.
     """
 
     rate: int = 2048
     channel_name: tuple = ()
+    state_channel_name: tuple = ()
     instrument: tuple = ()
     shared_memory_dir: str = None
     wait_time: int = 60
     watch_suffix: str = ".gwf"
     state_vector_on_bits: int = None
+    verbose: bool = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -65,15 +71,15 @@ class DevShmSrc(TSSource):
         # buffer sent. this will be used to make sure we dont resend
         # late data and to track discontinuities
         self.last_buffer = LastBuffer(int(now()), False)
-        print(f"Start up t0: {self.last_buffer.t0}")
+        if self.verbose:
+            print(f"Start up t0: {self.last_buffer.t0}")
 
         # set state vector on bits
         self.bitmask = state_vector_on_off_bits(self.state_vector_on_bits)
 
         # Create the inotify handler
         self.observer = threading.Thread(
-            target=self.monitor_dir,
-            args=(self.queue, self.shared_memory_dir)
+            target=self.monitor_dir, args=(self.queue, self.shared_memory_dir)
         )
 
         # Start the observer and set the stop attribute
@@ -138,7 +144,9 @@ class DevShmSrc(TSSource):
         except queue.Empty:
             if now() - self.last_buffer.t0 >= self.wait_time:
                 self.observer.stop = True
-                raise ValueError(f"Reached {self.wait_time} seconds with no new files in {self.shared_memory_dir}, exiting.")
+                raise ValueError(
+                    f"Reached {self.wait_time} seconds with no new files in {self.shared_memory_dir}, exiting."
+                )
             else:
                 # send a gap buffer
                 if self.cnt[pad] == 1:
@@ -148,16 +156,21 @@ class DevShmSrc(TSSource):
                     # send subsequent gaps at self.buffer_duration intervals
                     t0 = self.last_buffer.t0 + self.buffer_duration
                 shape = (int(self.rate * self.buffer_duration),)
-                print(f"Queue is empty, sending a gap buffer at t0: {t0}")
+                print(
+                    f"Queue is empty, sending a gap buffer at t0: {t0} | ifo: {self.instrument}"
+                )
                 outbufs = [SeriesBuffer(
-                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=None, shape=shape
+                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
+                    sample_rate=self.rate,
+                    data=None,
+                    shape=shape,
                 )]
 
                 # update last buffer
                 self.last_buffer.t0 = t0
         else:
             # first check the state
-            statedata = StateVector.read(next_file, f"{self.instrument}:"+self.channel_name)
+            statedata = StateVector.read(next_file, f"{self.instrument}:"+self.state_channel_name)
 
             state_data = np.array(statedata.data)
             state_t0 = statedata.t0.value
@@ -179,7 +192,8 @@ class DevShmSrc(TSSource):
 
             if not any(state_flags):
                 # return gap of buffer duration
-                print(f"{self.instrument}: OFF at {t0}")
+                if self.verbose:
+                    print(f"{self.instrument}: OFF at {t0}")
 
                 data = None
                 t0 = state_t0
@@ -201,7 +215,8 @@ class DevShmSrc(TSSource):
                 data = np.array(data)
 
                 if all(state_flags):
-                    print(f"{self.instrument}: ON at {t0}")
+                    if self.verbose:
+                        print(f"{self.instrument}: ON at {t0}")
                     outbufs = [SeriesBuffer(
                         offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
                     )]
@@ -209,7 +224,8 @@ class DevShmSrc(TSSource):
                 else:
                     # we need to slice the buffer to replace data with gaps
                     # for segments where state bits dont match self.bitmask
-                    print(f"{self.instrument}: state transition at {t0}")
+                    if self.verbose:
+                        print(f"{self.instrument}: state transition at {t0}")
 
                     outbufs = []
                     state0 = state_flags[0]
@@ -244,7 +260,10 @@ class DevShmSrc(TSSource):
                         outbufs.append(SeriesBuffer(
                             offset=buf_offset0, sample_rate=self.rate, data=None, shape=(num_samples,)))
 
-            print(f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0:.3e}")
+            if self.verbose:
+                print(
+                    f"Buffer t0: {t0} | Time Now: {now()} | Time delay: {float(now()) - t0:.3e} | Discont: {self.last_buffer.is_gap}"
+                )
 
             # update last buffer
             self.last_buffer.t0 = t0
