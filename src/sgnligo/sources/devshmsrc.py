@@ -1,26 +1,19 @@
+import os
+import queue
+import threading
 from dataclasses import dataclass
 
-import inotify.adapters
-import inotify.constants
-from inotify_simple import INotify, flags
-from gwpy.timeseries import TimeSeries, StateVector
-import numpy as np
-import os
+import numpy
+from gwpy.timeseries import StateVector, TimeSeries
 
-from sgn.sources import *
-from sgnts.sources import *
-from ..base import *
+try:
+    from inotify_simple import INotify, flags
+except ImportError:
+    INotify = flags = None
 
-import threading
-
-from ..base.utils import *
-
-from sgnts.base.buffer import *
-from sgnts.base import Offset, SeriesBuffer, TSFrame, TSSource, TSSlice, TSSlices
-
-import queue
-
-import time
+from sgnligo.base import from_T050017, now, state_vector_on_off_bits
+from sgnts.base import Offset, SeriesBuffer, TSFrame
+from sgnts.sources import TSSource
 
 
 @dataclass
@@ -91,6 +84,9 @@ class DevShmSrc(TSSource):
         poll directory for new files with inotify
         """
         # init inotify watcher on shared memory dir
+        if INotify is None:
+            raise ImportError("inotify_simple is required for DevShmSrc source.")
+
         i = INotify()
         i.add_watch(watch_dir, flags.CLOSE_WRITE | flags.MOVED_TO)
 
@@ -159,28 +155,36 @@ class DevShmSrc(TSSource):
                 print(
                     f"Queue is empty, sending a gap buffer at t0: {t0} | ifo: {self.instrument}"
                 )
-                outbufs = [SeriesBuffer(
-                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
-                    sample_rate=self.rate,
-                    data=None,
-                    shape=shape,
-                )]
+                outbufs = [
+                    SeriesBuffer(
+                        offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
+                        sample_rate=self.rate,
+                        data=None,
+                        shape=shape,
+                    )
+                ]
 
                 # update last buffer
                 self.last_buffer.t0 = t0
         else:
             # first check the state
-            statedata = StateVector.read(next_file, f"{self.instrument}:"+self.state_channel_name)
+            statedata = StateVector.read(
+                next_file, f"{self.instrument}:" + self.state_channel_name
+            )
 
-            state_data = np.array(statedata.data)
+            state_data = numpy.array(statedata.data)
             state_t0 = statedata.t0.value
-            state_offset0 = Offset.fromsec(state_t0 - Offset.offset_ref_t0/1_000_000_000)
+            state_offset0 = Offset.fromsec(
+                state_t0 - Offset.offset_ref_t0 / 1_000_000_000
+            )
             state_duration = statedata.duration.value
             state_sample_rate = statedata.sample_rate.value
             state_nsamples = int(self.rate * statedata.dt.value)
 
-            state_times = np.arange(state_t0, state_t0 + state_duration, statedata.dt.value)
-            bits = np.array(statedata)
+            state_times = numpy.arange(
+                state_t0, state_t0 + state_duration, statedata.dt.value
+            )
+            bits = numpy.array(statedata)
 
             state_flags = []
             for b in bits:
@@ -199,27 +203,43 @@ class DevShmSrc(TSSource):
                 t0 = state_t0
                 shape = (int(self.rate * self.buffer_duration),)
 
-                outbufs = [SeriesBuffer(
-                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=shape
-                )]
+                outbufs = [
+                    SeriesBuffer(
+                        offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
+                        sample_rate=self.rate,
+                        data=data,
+                        shape=shape,
+                    )
+                ]
             else:
                 # load data from the file using gwpy
-                data = TimeSeries.read(next_file, f"{self.instrument}:{self.channel_name}")
+                data = TimeSeries.read(
+                    next_file, f"{self.instrument}:{self.channel_name}"
+                )
                 t0 = data.t0.value
                 duration = data.duration.value
 
                 # check sample rate and duration matches what we expect
-                assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
-                assert duration == self.buffer_duration, "File duration ({duration} sec) does not match assumed buffer duration ({self.buffer_duration} sec)."
+                assert (
+                    int(data.sample_rate.value) == self.rate
+                ), "Data rate does not match requested sample rate."
+                assert (
+                    duration == self.buffer_duration
+                ), "File duration ({duration} sec) does not match assumed buffer duration ({self.buffer_duration} sec)."
 
-                data = np.array(data)
+                data = numpy.array(data)
 
                 if all(state_flags):
                     if self.verbose:
                         print(f"{self.instrument}: ON at {t0}")
-                    outbufs = [SeriesBuffer(
-                        offset=Offset.fromsec(t0 - Offset.offset_ref_t0), sample_rate=self.rate, data=data, shape=data.shape
-                    )]
+                    outbufs = [
+                        SeriesBuffer(
+                            offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
+                            sample_rate=self.rate,
+                            data=data,
+                            shape=data.shape,
+                        )
+                    ]
 
                 else:
                     # we need to slice the buffer to replace data with gaps
@@ -241,11 +261,23 @@ class DevShmSrc(TSSource):
                             # Create the buffer for the previous state
                             shape = (num_samples,)
                             if state0 is True:
-                                outbufs.append(SeriesBuffer(
-                                    offset=buf_offset0, sample_rate=self.rate, data=data[n0:n0+num_samples], shape=shape))
+                                outbufs.append(
+                                    SeriesBuffer(
+                                        offset=buf_offset0,
+                                        sample_rate=self.rate,
+                                        data=data[n0 : n0 + num_samples],
+                                        shape=shape,
+                                    )
+                                )
                             else:
-                                outbufs.append(SeriesBuffer(
-                                    offset=buf_offset0, sample_rate=self.rate, data=None, shape=shape))
+                                outbufs.append(
+                                    SeriesBuffer(
+                                        offset=buf_offset0,
+                                        sample_rate=self.rate,
+                                        data=None,
+                                        shape=shape,
+                                    )
+                                )
                             # reset
                             state0 = state
                             buf_offset0 += Offset.fromsamples(num_samples, self.rate)
@@ -254,11 +286,23 @@ class DevShmSrc(TSSource):
 
                     # make the last buffer
                     if state0 is True:
-                        outbufs.append(SeriesBuffer(
-                            offset=buf_offset0, sample_rate=self.rate, data=data[n0:n0+num_samples], shape=(num_samples,)))
+                        outbufs.append(
+                            SeriesBuffer(
+                                offset=buf_offset0,
+                                sample_rate=self.rate,
+                                data=data[n0 : n0 + num_samples],
+                                shape=(num_samples,),
+                            )
+                        )
                     else:
-                        outbufs.append(SeriesBuffer(
-                            offset=buf_offset0, sample_rate=self.rate, data=None, shape=(num_samples,)))
+                        outbufs.append(
+                            SeriesBuffer(
+                                offset=buf_offset0,
+                                sample_rate=self.rate,
+                                data=None,
+                                shape=(num_samples,),
+                            )
+                        )
 
             if self.verbose:
                 print(

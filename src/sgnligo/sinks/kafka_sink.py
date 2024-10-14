@@ -1,10 +1,8 @@
 from dataclasses import dataclass
-from collections import deque, defaultdict
-
-import numpy as np
-from sgnts.base import TSSink
 
 from ligo.scald.io import kafka
+
+from sgnts.base import TSSink
 
 
 @dataclass

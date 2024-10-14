@@ -1,14 +1,12 @@
-from sgn.sinks import *
-from sgnts.sinks import *
-from .kafka_sink import *
-from .influx_sink import *
-from sgnts.base import Audioadapter, TSSink, Offset
-from ..base import ArrayOps
 import h5py
-from scipy.signal import correlate
-import torch
 import matplotlib.pyplot as plt
+from scipy.signal import correlate
+
+from sgnts.base import Audioadapter, Offset, TSSink
+from .influx_sink import *
+from .kafka_sink import *
 from .strike_sink import StrikeSink
+from ..base import ArrayOps
 
 
 @dataclass
