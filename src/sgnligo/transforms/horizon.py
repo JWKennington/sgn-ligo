@@ -3,6 +3,7 @@ from lal import LIGOTimeGPS
 import lalsimulation
 
 import math
+import yaml
 
 from sgn.transforms import *
 from sgnts.transforms import *
@@ -12,6 +13,7 @@ from sgnts.base import (
     TSTransform,
     AdapterConfig,
 )
+from sgnevent.base import EventFrame, EventBuffer, dtype_from_config
 
 import numpy as np
 
@@ -34,6 +36,8 @@ class HorizonDistance(TSTransform):
     approximant: str = "IMRPhenomD"
     range: bool = False
     snr: int = 8
+    ifo: str = None
+    event_config: str = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -73,6 +77,11 @@ class HorizonDistance(TSTransform):
             length = hp.data.length
         )
         self.model.data.data[:] = np.abs(hp.data.data)**2.
+
+        if self.event_config is not None:
+            with open(self.event_config) as f:
+                config = yaml.safe_load(f)
+            self.event_dtypes = {n: dtype_from_config(config[n]) for n in ["data",]}
 
     def compute_horizon(self, psd):
         """
@@ -124,6 +133,9 @@ class HorizonDistance(TSTransform):
         offset = frame.offset
         metadata = frame.metadata
 
+        ts = Offset.tons(offset)
+        te = Offset.tons(offset + Offset.fromsamples(shape[-1],frame.sample_rate))
+
         # get spectrum from metadata
         # FIXME: this is a hack since the PSD is a frequency series.
         psd = metadata["psd"]
@@ -131,8 +143,15 @@ class HorizonDistance(TSTransform):
             assert isinstance(psd, lal.REAL8FrequencySeries)
 
             dist = self.compute_horizon(psd)
+            #data=np.zeros((1),self.event_dtypes["data"])
+            data={}
+            data["ifo"] = self.ifo
+            data["horizon"] = dist
+            data["time"] = ts
+
         else:
             dist = None
+            data = None
 
         # send buffer with no data, put horizon history in metadata
         outbuf = SeriesBuffer(
@@ -143,8 +162,10 @@ class HorizonDistance(TSTransform):
         if self.range and dist is not None:
             metadata["range"] = dist/2.25
 
-        return TSFrame(
-            buffers=[outbuf],
+        events={"data": EventBuffer(ts, te, data)}
+
+        return EventFrame(
+            events=events,
             metadata=metadata,
             EOS=EOS,
         )
