@@ -5,7 +5,7 @@ from scipy.signal import correlate
 from sgnts.base import Audioadapter, Offset, TSSink
 from .influx_sink import *
 from .kafka_sink import *
-from .strike_sink import StrikeSink
+#from .strike_sink import StrikeSink
 from ..base import ArrayOps
 
 
