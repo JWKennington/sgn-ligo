@@ -15,6 +15,7 @@ def condition_from_options(pipeline: Pipeline, options, ifos):
         whitening_method=options.whitening_method,
         reference_psd=options.reference_psd,
         ht_gate_threshold=options.ht_gate_threshold,
+        event_config=options.event_config,
     )
 
 
@@ -29,6 +30,7 @@ def condition(
     whitening_method=None,
     reference_psd=None,
     ht_gate_threshold=None,
+    event_config=None,
 ):
     condition_out_links = {ifo: None for ifo in ifos}
     if data_source == "devshm":
@@ -90,6 +92,8 @@ def condition(
                     fmin=10.0,
                     fmax=1000.0,
                     delta_f=1 / 16.0,
+                    ifo=ifo,
+                    event_config=event_config,
                 ),
                 link_map={
                     ifo + "_Horizon:sink:" + ifo: ifo + "_Whitener:src:spectrum_" + ifo,
