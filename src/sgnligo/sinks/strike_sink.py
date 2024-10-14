@@ -1,23 +1,13 @@
+import time
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Any
+
+from lal import UTCToGPS
+from ligo.lw import ligolw, lsctables, utils
+from strike.stats import likelihood_ratio
 
 from sgn.sinks import *
 from sgnts.sinks import *
-from sgnts.base import Offset
-from ..base import ArrayOps
-import h5py
-import torch
-from strike.stats import likelihood_ratio
-
-from ligo.lw import lsctables
-from ligo.lw import ligolw
-from ligo.lw import utils
-
-from lal import GreenwichMeanSiderealTime
-from lal import UTCToGPS
-
-import time
 
 
 class DefaultContentHandler(lsctables.ligolw.LIGOLWContentHandler):

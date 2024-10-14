@@ -3,19 +3,39 @@ requires = [
     "setuptools>=42",
     "setuptools_scm[toml]>=3.4.3",
     "wheel",
+    "pyproject-flake8",
 ]
 build-backend = "setuptools.build_meta"
 
-
 [project]
 name = "sgn-ligo"
-version = "0.0.1"
-authors = [
-  { name="Becca Ewing", email="ree55@psu.edu" },
+dynamic = ["version"]
+dependencies = [
+    # External dependencies
+#    "torch",
+
+    # SGN dependencies
+    "sgn",
+    "sgn-ts",
+
+    # LIGO dependencies
+#    "lalsuite",  # Try removing temporarily
+    "ligo-scald",
+    "confluent-kafka",
+    "python-ligo-lw",
+
+    # Problematic dependencies
+    "inotify-simple",  # TODO: note this is LINUX only, should remove
 ]
-description = "Streaming Graph Navigator - LIGO."
-readme = "README.md"
 requires-python = ">=3.9"
+authors = [
+    { name = "Chad Hanna", email = "crh184@psu.edu" },
+    { name = "Yun-Jing Huang", email = "yzh5436@psu.edu" },
+    { name = "James Kennington", email = "jmk7376@psu.edu" },
+]
+description = "LIGO Extensions for the SGN Framework"
+readme = "README.md"
+license = { text = "MPL-2.0" }
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
@@ -24,4 +44,88 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://git.ligo.org/greg/sgn-ligo"
+Documentation = "https://docs.ligo.org/greg/sgn-ligo"
 Issues = "https://git.ligo.org/greg/sgn-ligo/issues"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "lalsuite",
+    "torch",
+    "gwpy",
+]
+docs = [
+    "furo",
+    "myst-parser",
+    "sphinx",
+]
+lint = [
+    "black",
+    "flake8",
+    "flake8-bandit",
+    "flake8-black",
+    "flake8-bugbear",
+    "flake8-future-annotations",
+    "flake8-isort",
+    "flake8-logging-format",
+    "isort",
+    "mypy",
+    "mypy-extensions",
+]
+dev = [
+    "sgn-ligo[docs]",
+    "sgn-ligo[lint]",
+    "sgn-ligo[test]",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sgnl = [
+    "py.typed",
+]
+
+[tool.setuptools_scm]
+write_to = "src/sgnligo/_version.py"
+
+[tool.coverage.paths]
+source = [
+    "src/sgnligo/",
+    "*/sgnligo/",
+]
+
+[tool.coverage.report]
+omit = ["_version.py", "tests/*", "examples/*", "setup.py", "*/__init__.py"]
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+ignore_missing_imports = true
+exclude = [
+    "build",
+    "docs",
+]
+
+[tool.pytest]
+#addopts = "-p no:warnings --cov=sgnligo"
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = [
+    "E203",
+    "S101",
+]
+per-file-ignores = [
+    "__init__.py:F401",
+    "_version.py:BLK100",
+    "docs/conf.py:E501",
+    "tests/*.py:E731",
+]
+exclude = [
+    "build",
+    "docs",
+    "_version.py",
+]
