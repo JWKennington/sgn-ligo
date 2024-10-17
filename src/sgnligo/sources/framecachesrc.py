@@ -1,6 +1,6 @@
 import sys
 
-from .. base import *
+from ..base import *
 
 from decimal import Decimal
 
@@ -33,7 +33,6 @@ class FrameReader(TSSource):
         GPS end time to analyze
     """
 
-    rate: int = 2048
     channel_name: str = ""
     instrument: str = ""
     framecache: str = ""
@@ -44,8 +43,13 @@ class FrameReader(TSSource):
         super().__post_init__()
         self.cnt = {p: 0 for p in self.source_pads}
 
+        self.rate = None
+        self.num_samples = None
+
         # init analysis segment
-        self.analysis_seg = segments.segment(LIGOTimeGPS(self.gps_start_time), LIGOTimeGPS(self.gps_end_time))
+        self.analysis_seg = segments.segment(
+            LIGOTimeGPS(self.gps_start_time), LIGOTimeGPS(self.gps_end_time)
+        )
 
         # load the cache file
         print(f"Loading {self.framecache}...")
@@ -67,12 +71,15 @@ class FrameReader(TSSource):
         # make sure it is sorted by gps time
         self.cache.sort(key=lambda x: x.segment[0])
 
-        # init arrays for time and data
-        self.offsets = np.array([])
-        self.data = np.array([])
-
         # keep track of buffer epochs
         self.last_epoch = None
+
+        # load first segment of data to read sample rate
+        self.offsets, self.data = self.load_gwf_data(self.cache[0])
+
+        # now that we have loaded data from this frame,
+        # remove it from the cache
+        self.cache.pop(0)
 
     @staticmethod
     def ifo_strings(ifo):
@@ -97,8 +104,17 @@ class FrameReader(TSSource):
         start = intersection[0]
         end = intersection[1]
 
-        data = TimeSeries.read(frame.path, f"{self.instrument}:{self.channel_name}", start = start, end = end)
-        assert int(data.sample_rate.value) == self.rate, "Data rate does not match requested sample rate."
+        data = TimeSeries.read(
+            frame.path, f"{self.instrument}:{self.channel_name}", start=start, end=end
+        )
+
+        if self.rate is None:
+            self.rate = int(data.sample_rate.value)
+            self.num_samples = Offset.sample_stride(self.rate)
+        else:
+            assert (
+                int(data.sample_rate.value) == self.rate
+            ), "Data rate does not match requested sample rate."
 
         # reconstruct gps times with nanosecond precision and convert to offsets
         dt = Offset.fromsec(data.dt.value)
@@ -107,7 +123,11 @@ class FrameReader(TSSource):
         gps_end = int(end.gpsSeconds * 10**9)
         gps_end_ns = int(end.gpsNanoSeconds)
 
-        offsets = np.arange(Offset.fromns(gps_start + gps_start_ns - Offset.offset_ref_t0), Offset.fromns(gps_end + gps_end_ns - Offset.offset_ref_t0), dt)
+        offsets = np.arange(
+            Offset.fromns(gps_start + gps_start_ns - Offset.offset_ref_t0),
+            Offset.fromns(gps_end + gps_end_ns - Offset.offset_ref_t0),
+            dt,
+        )
 
         data = np.array(data)
 
@@ -123,18 +143,18 @@ class FrameReader(TSSource):
         # load next frame of data from disk when we have less than
         # one buffer length of data left
         if (self.data.size <= self.num_samples) and self.cache:
-             offsets, data = self.load_gwf_data(self.cache[0])
+            offsets, data = self.load_gwf_data(self.cache[0])
 
-             self.offsets = np.concatenate((self.offsets, offsets))
-             self.data = np.concatenate((self.data, data))
+            self.offsets = np.concatenate((self.offsets, offsets))
+            self.data = np.concatenate((self.data, data))
 
-             # now that we have loaded data from this frame,
-             # remove it from the cache
-             self.cache.pop(0)
+            # now that we have loaded data from this frame,
+            # remove it from the cache
+            self.cache.pop(0)
 
         # outdata is the first self.num_samples of data in the frame
-        outdata = self.data[:self.num_samples]
-        outoffsets = self.offsets[:self.num_samples]
+        outdata = self.data[: self.num_samples]
+        outoffsets = self.offsets[: self.num_samples]
 
         epoch = int(outoffsets[0])
         outbuf = SeriesBuffer(
@@ -142,8 +162,8 @@ class FrameReader(TSSource):
         )
 
         # remove the used data
-        self.data = self.data[self.num_samples:]
-        self.offsets = self.offsets[self.num_samples:]
+        self.data = self.data[self.num_samples :]
+        self.offsets = self.offsets[self.num_samples :]
 
         # update last buffer epoch
         self.last_epoch = epoch
@@ -157,6 +177,5 @@ class FrameReader(TSSource):
         return TSFrame(
             buffers=[outbuf],
             metadata={"cnt": self.cnt, "name": "'%s'" % pad.name},
-            EOS=EOS
+            EOS=EOS,
         )
-
