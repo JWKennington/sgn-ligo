@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 from typing import Optional
 
 from sgn import Pipeline
-from sgnts.sources import FakeSeriesSrc
+from sgnts.sources import FakeSeriesSrc, SegmentSrc
 from sgnts.transforms import Gate
 
 from sgnligo.base import parse_list_to_dict
@@ -232,7 +232,19 @@ def datasource(
                 end=gps_end_time,
             )
             input_sample_rate = next(iter(frame_reader.rates.values()))
-            pipeline.insert(frame_reader)
+            pipeline.insert(frame_reader,
+                SegmentSrc(
+                    name=ifo + "_SegmentSource",
+                    source_pad_names=(ifo,),
+                    end=gps_end_time,
+                ),
+                Gate(
+                    name=ifo + "_Gate",
+                    sink_pad_names=("frame", "control"),
+                    source_pad_names=(ifo,),
+                    control="control",
+                ),
+                )
         elif data_source == "devshm":
             pad_names[ifo] = ifo
             source_name = "_Gate"
@@ -288,7 +300,7 @@ def datasource(
                 signal_type = "sin"
             pipeline.insert(
                 FakeSeriesSrc(
-                    name=ifo + source_name,
+                    name=ifo + "_FakeSource",
                     source_pad_names=source_pad_names,
                     rate=input_sample_rate,
                     signal_type=signal_type,
@@ -297,6 +309,23 @@ def datasource(
                     t0=gps_start_time,
                     end=gps_end_time,
                 ),
+                SegmentSrc(
+                    name=ifo + "_SegmentSource",
+                    source_pad_names=(ifo,),
+                    num_samples=sample_rate,
+                    segments=[(5_000_000_000, 6_000_000_000)],
+                    end=100.0*1_000_000_000,
+                ),
+                Gate(
+                    name=ifo + "_Gate",
+                    sink_pad_names=("frame", "control"),
+                    source_pad_names=(ifo,),
+                    control="control",
+                ),
+                link_map={
+                    ifo + "_Gate:sink:frame": ifo + "_FakeSource:src:" + ifo,
+                    ifo + "_Gate:sink:control": ifo + "_SegmentSource:src:" + ifo,
+                },
             )
         source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
 
