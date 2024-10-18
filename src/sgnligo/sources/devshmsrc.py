@@ -39,7 +39,6 @@ class DevShmSrc(TSSource):
         Filename suffix to watch for.
     """
 
-    rate: int = 2048
     channel_name: tuple = ()
     state_channel_name: tuple = ()
     instrument: tuple = ()
@@ -52,13 +51,17 @@ class DevShmSrc(TSSource):
     def __post_init__(self):
         super().__post_init__()
         self.cnt = {p: 0 for p in self.source_pads}
-        self.shape = (self.num_samples,)
-        self.queue = queue.Queue()
-
+        self.rate = 16384  # FIXME: do we need to consider other rates?
+        self.num_samples = Offset.sample_stride(self.rate)
         # set assumed buffer duration based on sample rate
         # and num samples per buffer. Will fail if this does
         # not match the file duration
         self.buffer_duration = self.num_samples / self.rate
+        if self.buffer_duration != 1:
+            raise ValueError("Buffer duration must be 1 second.")
+
+        self.shape = (self.num_samples,)
+        self.queue = queue.Queue()
 
         # initialize a named tuple to track info about the previous
         # buffer sent. this will be used to make sure we dont resend

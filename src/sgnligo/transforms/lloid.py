@@ -17,11 +17,11 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+
 def lloid(
     pipeline,
     sorted_bank,
     input_source_links: dict[str, str],
-    num_samples: int,
     nslice: int,
     device,
     dtype,
@@ -43,7 +43,7 @@ def lloid(
             name="converter1",
             sink_pad_names=tuple(ifos),
             source_pad_names=tuple(ifos),
-            adapter_config=AdapterConfig(stride=num_samples),
+            adapter_config=AdapterConfig(stride=Offset.sample_stride(maxrate)),
             backend="torch",
             dtype=dtype,
             device=device,
