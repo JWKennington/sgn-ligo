@@ -94,7 +94,7 @@ def linkcode_resolve(domain, info) -> str:
     if not fn:
         return
 
-    fn = os.path.relpath(fn, start=os.path.dirname(__import__("sgn").__file__))
+    fn = os.path.relpath(fn, start=os.path.dirname(__import__("sgnligo").__file__))
 
     # Try to get line number
     try:
