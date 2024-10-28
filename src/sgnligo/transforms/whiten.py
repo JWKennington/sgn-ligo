@@ -1,25 +1,17 @@
+import os
 from collections import deque
-
-from sgn.transforms import *
-from sgnts.transforms import *
-from sgnts.base import (
-    SeriesBuffer,
-    TSFrame,
-    TSTransform,
-    AdapterConfig,
-)
-
-from gwpy.timeseries import TimeSeries
 
 import lal
 import lal.series
-from ligo.lw import utils as ligolw_utils
-
 import numpy as np
-import os
-from sympy import EulerGamma
-from scipy.special import loggamma
+from gwpy.timeseries import TimeSeries
+from ligo.lw import utils as ligolw_utils
 from scipy import interpolate
+from scipy.special import loggamma
+from sgn.transforms import *
+from sgnts.base import AdapterConfig, SeriesBuffer, TSFrame, TSTransform
+from sgnts.transforms import *
+from sympy import EulerGamma
 
 EULERGAMMA = float(EulerGamma.evalf())
 
@@ -143,6 +135,7 @@ class Whiten(TSTransform):
         self.adapter_config = AdapterConfig()
         self.adapter_config.overlap = (0, overlap)
         self.adapter_config.stride = self.hann_length // 2
+        self.adapter_config.skip_gaps = True
 
         super().__post_init__()
 
@@ -447,14 +440,31 @@ class Whiten(TSTransform):
         # if audioadapter hasn't given us a frame, then we have to wait for more
         # data before we can whiten. send a gap buffer
         if frame.is_gap:
-            outbufs.append(
-                SeriesBuffer(
-                    offset=outoffset,
-                    sample_rate=self.sample_rate,
-                    data=None,
-                    shape=shape,
+            if (
+                outoffsets[0]["noffset"] != 0
+                and self.prev_data is not None
+                and self.prev_data.shape[-1] > 0
+            ):
+                # drain the output history
+                data = self.prev_data[: self.adapter_config.stride]
+                self.prev_data = self.prev_data[self.adapter_config.stride :]
+                outbufs.append(
+                    SeriesBuffer(
+                        offset=outoffset,
+                        sample_rate=self.sample_rate,
+                        data=data,
+                    )
                 )
-            )
+                self.prev_data
+            else:
+                outbufs.append(
+                    SeriesBuffer(
+                        offset=outoffset,
+                        sample_rate=self.sample_rate,
+                        data=None,
+                        shape=shape,
+                    )
+                )
         else:
             # retrieve samples from the deque
             assert len(frame.buffers) == 1, "Multiple buffers not implemented yet."
@@ -528,7 +538,7 @@ class Whiten(TSTransform):
                 # accounts for overlap by summing with prev_data over the
                 # stride of the adapter
                 if self.prev_data is not None:
-                    whitened_data[: -self.adapter_config.stride] += self.prev_data
+                    whitened_data[: self.prev_data.shape[-1]] += self.prev_data
                 self.prev_data = whitened_data[self.adapter_config.stride :]
 
             # FIXME: haven't tested whether this works for gwpy method

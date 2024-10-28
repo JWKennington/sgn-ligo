@@ -1,10 +1,10 @@
-from . import *
-from ..base import *
 from typing import Any
+
+from sgnts.base import TSTransform
 from torch.nn.functional import conv1d as Fconv1d
 
-import torch
-from sgnts.base import TSTransform
+from ..base import *
+from . import *
 
 
 @dataclass
@@ -63,7 +63,8 @@ class LLOIDCorrelate(TSTransform):
                 else:
                     this_segment1 = buf.end_offset + self.downpad
                 this_segment0 = this_segment1
-                outbufs.append(SeriesBuffer(
+                outbufs.append(
+                    SeriesBuffer(
                         offset=this_segment0 + self.uppad,
                         sample_rate=buf.sample_rate,
                         data=None,
@@ -73,7 +74,9 @@ class LLOIDCorrelate(TSTransform):
             else:
                 this_segment1 = buf.end_offset + self.downpad
                 if self.startup:
-                    this_segment0 = this_segment1 - (buf.end_offset - buf.offset) - self.downpad
+                    this_segment0 = (
+                        this_segment1 - (buf.end_offset - buf.offset) - self.downpad
+                    )
                     self.startup = False
                 else:
                     this_segment0 = this_segment1 - (buf.end_offset - buf.offset)
@@ -83,7 +86,7 @@ class LLOIDCorrelate(TSTransform):
                 A.push(buf)
 
                 outs_map = {}
-                # Only do the copy for unique delays 
+                # Only do the copy for unique delays
                 copied_data = False
                 earliest = []
 
@@ -91,11 +94,30 @@ class LLOIDCorrelate(TSTransform):
                 for delay in self.unique_delays:
                     # find the segment to copy out
                     cp_segment1 = this_segment1 + self.uppad - delay
-                    cp_segment0 = cp_segment1 - (this_segment1 - this_segment0) - Offset.fromsamples(self.shape[-1] - 1, buf.sample_rate)
+                    cp_segment0 = (
+                        cp_segment1
+                        - (this_segment1 - this_segment0)
+                        - Offset.fromsamples(self.shape[-1] - 1, buf.sample_rate)
+                    )
                     earliest.append(cp_segment0)
                     if cp_segment1 > A.offset and not A.is_gap():
                         if A.data_all is None:
-                            A.concatenate_data()
+                            A.concatenate_data(
+                                (
+                                    max(
+                                        this_segment0
+                                        + self.uppad
+                                        - max(self.unique_delays)
+                                        - Offset.fromsamples(
+                                            self.shape[-1] - 1, buf.sample_rate
+                                        ),
+                                        A.offset,
+                                    ),
+                                    this_segment1
+                                    + self.uppad
+                                    - min(self.unique_delays),
+                                )
+                            )
                         cp_segment = (max(A.offset, cp_segment0), cp_segment1)
                         # We need to do a copy
                         out = A.copy_samples_by_offset_segment(cp_segment)
@@ -120,8 +142,12 @@ class LLOIDCorrelate(TSTransform):
                         for delay in self.delays:
                             out = outs_map[delay]
                             if out is None:
-                               out = self.lib.zeros_func(
-                                    (Offset.tosamples(cp_segment1 - cp_segment0, buf.sample_rate),)
+                                out = self.lib.zeros_func(
+                                    (
+                                        Offset.tosamples(
+                                            cp_segment1 - cp_segment0, buf.sample_rate
+                                        ),
+                                    )
                                 )
                             outs.append(out)
                         outs = self.lib.stack_func(outs)
@@ -142,7 +168,12 @@ class LLOIDCorrelate(TSTransform):
                         offset=this_segment[0] + self.uppad,
                         sample_rate=buf.sample_rate,
                         data=outs,
-                        shape=self.shape[:-1] + (Offset.tosamples(this_segment1 - this_segment0, buf.sample_rate),),
+                        shape=self.shape[:-1]
+                        + (
+                            Offset.tosamples(
+                                this_segment1 - this_segment0, buf.sample_rate
+                            ),
+                        ),
                     )
                 )
         return TSFrame(buffers=outbufs, EOS=frame.EOS, metadata=frame.metadata)
