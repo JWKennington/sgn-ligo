@@ -1,0 +1,7 @@
+# Build requirements for SGN family of packages
+
+stillsuit @ git+https://git.ligo.org/greg/stillsuit.git@main
+strike @ git+https://git.ligo.org/greg/strike.git@main
+sgn @ git+https://git.ligo.org/greg/sgn.git@main
+sgn-event @ git+https://git.ligo.org/greg/sgn-event.git@main
+sgn-ts @ git+https://git.ligo.org/greg/sgn-ts.git@main

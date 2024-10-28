@@ -16,6 +16,7 @@ dependencies = [
 
     # SGN dependencies
     "sgn",
+    "sgn-event",
     "sgn-ts",
 
     # LIGO dependencies
@@ -51,6 +52,7 @@ Issues = "https://git.ligo.org/greg/sgn-ligo/issues"
 test = [
     "pytest",
     "pytest-cov",
+    "graphviz",
     "lalsuite",
     "torch",
     "gwpy",
@@ -109,8 +111,8 @@ exclude = [
     "docs",
 ]
 
-[tool.pytest]
-#addopts = "-p no:warnings --cov=sgnligo"
+[tool.pytest.ini_options]
+addopts = "-p no:warnings --cov=sgnligo"
 
 [tool.flake8]
 max-line-length = 88
