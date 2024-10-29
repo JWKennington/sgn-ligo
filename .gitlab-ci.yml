@@ -43,3 +43,20 @@ python_test:
     - echo "Installing SGN Family libraries"
     - |
       pip install -r build_requirements.txt
+
+
+flake8-code_quality:
+  image: python:3.12
+  before_script:
+    - echo "Manually installing system dependencies"
+    - |
+      apt-get update
+      apt-get install -yqq graphviz
+    - echo "Manually installing pip dependencies"
+    - |
+      pip install lalsuite
+      pip install torch
+      pip install gwpy
+    - echo "Installing SGN Family libraries"
+    - |
+      pip install -r build_requirements.txt
