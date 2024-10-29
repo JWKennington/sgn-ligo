@@ -12,21 +12,18 @@ name = "sgn-ligo"
 dynamic = ["version"]
 dependencies = [
     # External dependencies
-#    "torch",
-
+    "lalsuite",
+    "gwpy",
     # SGN dependencies
     "sgn",
     "sgn-event",
-    "sgn-ts",
-
+    "sgn-ts[torch]",
     # LIGO dependencies
-#    "lalsuite",  # Try removing temporarily
     "ligo-scald",
     "confluent-kafka",
     "python-ligo-lw",
-
     # Problematic dependencies
-    "inotify-simple",  # TODO: note this is LINUX only, should remove
+    "inotify-simple", # TODO: note this is LINUX only, should remove
 ]
 requires-python = ">=3.9"
 authors = [
