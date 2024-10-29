@@ -7,6 +7,5 @@ from .resampler import *
 from .correlate import *
 from .matmul import *
 from .sumindex import *
-from .lloid import *
 from .latency import *
 from .condition import condition
