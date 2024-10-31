@@ -12,8 +12,7 @@ except ImportError:
     INotify = flags = None
 
 from sgnligo.base import from_T050017, now, state_vector_on_off_bits
-from sgnts.base import Offset, SeriesBuffer, TSFrame
-from sgnts.sources import TSSource
+from sgnts.base import Offset, SeriesBuffer, TSFrame, TSSource
 
 
 @dataclass
