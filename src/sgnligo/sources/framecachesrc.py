@@ -1,68 +1,79 @@
-import sys
+from dataclasses import dataclass
+from typing import Optional
 
-from ..base import *
-
-from decimal import Decimal
-
-from gwpy.timeseries import TimeSeries
-
+import numpy as np
+from gwpy.timeseries import TimeSeriesDict
 from lal import LIGOTimeGPS
 from lal.utils import CacheEntry
 from ligo import segments
-
-import numpy as np
-
-from sgn.sources import *
-from sgnts.base import Offset, SeriesBuffer, TSFrame, TSSource, TSSlice, TSSlices
-from sgnts.base.buffer import *
-from sgnts.sources import *
+from sgn.base import InternalPad, SourcePad
+from sgnts.base import TSFrame, TSSource
 
 
 @dataclass
 class FrameReader(TSSource):
-    """
-    channel_name: tuple
-        channel names of the data
-    instrument: str
-        instrument, should be one to one with channel names
-    framecache: path
-        cache file to read data from
-    gps_start_time: int
-        GPS start time to analyze
-    gps_end_time: int
-        GPS end time to analyze
+    """Read GW frame files from a frame cache file
+
+    Args:
+        channel_names:
+            list[str], a list of channel names of the data, e.g.,
+            ["L1:GWOSC-16KHZ_R1_STRAIN", "L1:GWOSC-16KHZ_R1_DQMASK"]. Source pads will
+            be automatically generated for each channel, with channel name as pad name.
+        framecache:
+            str, cache file to read data from
+        instrument:
+            str, optional, only read gwf files from this instrument
     """
 
-    channel_name: str = ""
-    instrument: str = ""
-    framecache: str = ""
-    gps_start_time: int = None
-    gps_end_time: int = None
+    channel_names: Optional[list[str]] = None
+    framecache: Optional[str] = None
+    instrument: Optional[str] = None
 
     def __post_init__(self):
+        if len(self.source_pad_names) > 0:
+            if self.source_pad_names != tuple(self.channel_names):
+                raise ValueError("Expected source pad names to match channel names")
+        else:
+            print(f"Generating source pads from channel names {self.channel_names}...")
+            self.source_pad_names = tuple(self.channel_names)
+
+        # Sanity check
+        assert isinstance(self.channel_names, list)
+        assert isinstance(self.framecache, str)
+
         super().__post_init__()
         self.cnt = {p: 0 for p in self.source_pads}
 
-        self.rate = None
-        self.num_samples = None
+        self.last_epoch = self.t0
+
+        if self.instrument is not None:
+            for c in self.channel_names:
+                assert (
+                    self.instrument in c
+                ), "instrument provided does not match channel name"
 
         # init analysis segment
         self.analysis_seg = segments.segment(
-            LIGOTimeGPS(self.gps_start_time), LIGOTimeGPS(self.gps_end_time)
+            LIGOTimeGPS(self.t0), LIGOTimeGPS(self.end)
         )
 
         # load the cache file
         print(f"Loading {self.framecache}...")
         cache = list(map(CacheEntry, open(self.framecache)))
 
-        # only keep files with the correct instrument
-        cache = [c for c in cache if c.observatory in self.ifo_strings(self.instrument)]
+        if self.instrument is not None:
+            # only keep files with the correct instrument
+            # sometimes there are frame files with multiple instruments, in that case
+            # don't filter by instrument
+            cache = [
+                c for c in cache if c.observatory in self.ifo_strings(self.instrument)
+            ]
 
         # only keep files that intersect the analysis segment
         self.cache = []
         for c in cache:
             try:
-                intersection = self.analysis_seg & c.segment
+                self.analysis_seg & c.segment
             except ValueError:
                 continue
             else:
@@ -71,111 +82,145 @@ class FrameReader(TSSource):
         # make sure it is sorted by gps time
         self.cache.sort(key=lambda x: x.segment[0])
 
-        # keep track of buffer epochs
-        self.last_epoch = None
-
         # load first segment of data to read sample rate
-        self.offsets, self.data = self.load_gwf_data(self.cache[0])
+        self.rates = {}
+        self.data_dict = self.load_gwf_data(self.cache[0])
+        print(f"Sample rate per channel: {self.rates}")
+
+        # FIXME: support multiple pads with different sample rates
+        # FIXME: do we want multiple channels in one buffer?
+        for pad in self.source_pads:
+            self.setup_buffers_on_pad(
+                channels=(), rate=self.rates[self.rsrcs[pad]], pad=pad
+            )
 
         # now that we have loaded data from this frame,
         # remove it from the cache
         self.cache.pop(0)
 
     @staticmethod
-    def ifo_strings(ifo):
-        """
-        I dont know if the given self.instrument will be in the form of
-        e.g., "H" or "H1", just make a tuple of both options for string comparison
+    def ifo_strings(ifo: str) -> tuple[str, str]:
+        """Make a tuple of possible ifo strings, with and without the "1" at the end.
+        I dont know if the given self.instrument will be in the form of e.g., "H" or
+        "H1", just make a tuple of both options for string comparison
+
+        Args:
+            ifo:
+                str, the ifo name, e.g., "H" or "H1"
+
+        Returns:
+            tuple[str, str], a tuple of the ifo name with and without the "1" at the end
         """
         if ifo[-1] == "1":
             return (ifo[0], ifo)
         else:
             return (ifo, ifo + "1")
 
-    def load_gwf_data(self, frame):
-        """
-        load timeseries data from a gwf frame file
+    def load_gwf_data(self, frame_file: CacheEntry) -> dict[str, np.ndarray]:
+        """Load timeseries data from a gwf frame file.
+
+        Args:
+            frame_file:
+                CacheEntry, the gwf frame file to read timeseries data from
+
+        Returns:
+            dict[str, np.ndarray], a dictionary with channel names as keys and
+            numpy arrays of timeseries data as values
         """
 
         # get first cache entry
-        segment = frame.segment
+        segment = frame_file.segment
 
         intersection = self.analysis_seg & segment
         start = intersection[0]
         end = intersection[1]
 
-        data = TimeSeries.read(
-            frame.path, f"{self.instrument}:{self.channel_name}", start=start, end=end
+        if self.last_epoch != start:
+            raise ValueError(f"Unepected epoch: {start}, expected: {self.last_epoch}")
+
+        # FIXME: check for gaps
+        data_dict = TimeSeriesDict.read(
+            frame_file.path, self.channel_names, start=start, end=end
         )
 
-        if self.rate is None:
-            self.rate = int(data.sample_rate.value)
-            self.num_samples = Offset.sample_stride(self.rate)
-        else:
-            assert (
-                int(data.sample_rate.value) == self.rate
-            ), "Data rate does not match requested sample rate."
+        if len(self.rates) == 0:
+            for channel, data in data_dict.items():
+                self.rates[channel] = int(data.sample_rate.value)
 
-        # reconstruct gps times with nanosecond precision and convert to offsets
-        dt = Offset.fromsec(data.dt.value)
-        gps_start = int(start.gpsSeconds * 10**9)
-        gps_start_ns = int(start.gpsNanoSeconds)
-        gps_end = int(end.gpsSeconds * 10**9)
-        gps_end_ns = int(end.gpsNanoSeconds)
+        for channel, data in data_dict.items():
+            data_dict[channel] = np.array(data)
 
-        offsets = np.arange(
-            Offset.fromns(gps_start + gps_start_ns - Offset.offset_ref_t0),
-            Offset.fromns(gps_end + gps_end_ns - Offset.offset_ref_t0),
-            dt,
-        )
+        self.last_epoch = end
 
-        data = np.array(data)
+        return data_dict
 
-        return offsets, data
+    def internal(self, pad: InternalPad) -> None:
+        """Check if we need to read the next gw frame file in the cache. All channels
+        are read at once.
 
-    def new(self, pad):
+        Args:
+            pad:
+                InternalPad
         """
-        New buffers are created on "pad" with an instance specific count and a
-        name derived from the pad name. "EOS" is set once we have procssed all data
-        in the cache within the analysis segment.
-        """
-        self.cnt[pad] += 1
+
         # load next frame of data from disk when we have less than
         # one buffer length of data left
-        if (self.data.size <= self.num_samples) and self.cache:
-            offsets, data = self.load_gwf_data(self.cache[0])
+        read_new = False
+        for channel, data in self.data_dict.items():
+            if data.size < self.num_samples(self.rates[channel]):
+                read_new = True
+                break
 
-            self.offsets = np.concatenate((self.offsets, offsets))
-            self.data = np.concatenate((self.data, data))
+        if read_new and self.cache:
+            # Read multiple channels at once
+            data_dict = self.load_gwf_data(self.cache[0])
+
+            for channel, data in data_dict.items():
+                if self.data_dict[channel].size > 0:
+                    self.data_dict[channel] = np.concatenate(
+                        (self.data_dict[channel], data)
+                    )
+                else:
+                    self.data_dict[channel] = data
 
             # now that we have loaded data from this frame,
             # remove it from the cache
             self.cache.pop(0)
 
-        # outdata is the first self.num_samples of data in the frame
-        outdata = self.data[: self.num_samples]
-        outoffsets = self.offsets[: self.num_samples]
+    def new(self, pad: SourcePad) -> TSFrame:
+        """New frames are created on "pad" with an instance specific count and a name
+        derived from the channel name. "EOS" is set once we have procssed all data in
+        the cache within the analysis segment.
 
-        epoch = int(outoffsets[0])
-        outbuf = SeriesBuffer(
-            offset=epoch, sample_rate=self.rate, data=outdata, shape=outdata.shape
-        )
+        Args:
+            pad:
+                SourcePad, the pad for which to produce a new TSFrame
 
-        # remove the used data
-        self.data = self.data[self.num_samples :]
-        self.offsets = self.offsets[self.num_samples :]
+        Returns:
+            TSFrame, the TSFrame that carries a list of SeriesBuffers
+        """
 
-        # update last buffer epoch
-        self.last_epoch = epoch
+        self.cnt[pad] += 1
+
+        channel = self.rsrcs[pad]
 
         # EOS condition is when we have processed all data intersecting
         # the analysis segment in every frame in the cache
         # set this condition on second to last buffer so it can propagate to
         # downstream elements
-        EOS = (self.data.size <= self.num_samples) and (len(self.cache) == 0)
+        EOS = (
+            self.data_dict[channel].size <= self.num_samples(self.rates[channel])
+        ) and (len(self.cache) == 0)
 
-        return TSFrame(
-            buffers=[outbuf],
-            metadata={"cnt": self.cnt, "name": "'%s'" % pad.name},
-            EOS=EOS,
-        )
+        metadata = {"cnt": self.cnt[pad], "name": "'%s'" % pad.name}
+
+        frame = self.prepare_frame(pad, EOS=EOS, metadata=metadata)
+
+        for buf in frame:
+            # output the first buf.samples of data in the frame file
+            buf.set_data(self.data_dict[channel][: buf.samples])
+
+            # remove the used data
+            self.data_dict[channel] = self.data_dict[channel][buf.samples :]
+
+        return frame

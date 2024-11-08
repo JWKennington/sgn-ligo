@@ -1,3 +1,3 @@
-from sgnligo.sources.framecachesrc import FrameReader
+from sgnligo.sources.datasource import datasource, parse_command_line_datasource
 from sgnligo.sources.devshmsrc import DevShmSrc
-from sgnligo.sources.datasource import datasource
+from sgnligo.sources.framecachesrc import FrameReader
