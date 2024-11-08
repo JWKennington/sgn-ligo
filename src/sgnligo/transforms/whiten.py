@@ -131,9 +131,14 @@ class Whiten(TSTransform):
 
         # init audio addapter
         self.adapter_config = AdapterConfig()
-        self.adapter_config.overlap = (0, overlap)
-        self.adapter_config.stride = self.hann_length // 2
+        self.adapter_config.overlap = (0, Offset.fromsamples(overlap, self.sample_rate))
+        self.adapter_config.stride = Offset.fromsamples(
+            self.hann_length // 2, self.sample_rate
+        )
         self.adapter_config.skip_gaps = True
+        self.stride_samples = Offset.tosamples(
+            self.adapter_config.stride, self.sample_rate
+        )
 
         super().__post_init__()
 
@@ -442,8 +447,8 @@ class Whiten(TSTransform):
                 and self.prev_data.shape[-1] > 0
             ):
                 # drain the output history
-                data = self.prev_data[: self.adapter_config.stride]
-                self.prev_data = self.prev_data[self.adapter_config.stride :]
+                data = self.prev_data[: self.stride_samples]
+                self.prev_data = self.prev_data[self.stride_samples :]
                 outbufs.append(
                     SeriesBuffer(
                         offset=outoffset,
@@ -536,7 +541,7 @@ class Whiten(TSTransform):
                 # stride of the adapter
                 if self.prev_data is not None:
                     whitened_data[: self.prev_data.shape[-1]] += self.prev_data
-                self.prev_data = whitened_data[self.adapter_config.stride :]
+                self.prev_data = whitened_data[self.stride_samples :]
 
             # FIXME: haven't tested whether this works for gwpy method
             # FIXME: can we make this more general?
@@ -545,7 +550,7 @@ class Whiten(TSTransform):
                 # calculation
                 outdata = None
             else:
-                outdata = whitened_data[: self.adapter_config.stride]
+                outdata = whitened_data[: self.stride_samples]
 
             # only output data up till the length of the adapter stride
             outbufs.append(
