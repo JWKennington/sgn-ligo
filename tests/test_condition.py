@@ -3,12 +3,12 @@
 import pathlib
 
 import pytest
-
 from sgn import NullSink
 from sgn.apps import Pipeline
-from sgnligo.transforms import Whiten
 from sgnts.sources import FakeSeriesSrc
 from sgnts.transforms import Resampler, Threshold
+
+from sgnligo.transforms import Whiten
 
 PATH_DATA = pathlib.Path(__file__).parent / "data"
 PATH_PSD = PATH_DATA / "H1L1-GSTLAL-MEDIAN.xml.gz"
@@ -25,11 +25,11 @@ def build_pipeline(
         FakeSeriesSrc(
             name=f"{instrument}_white",
             source_pad_names=("frsrc",),
-            num_buffers=10,
             rate=sample_rate,
             signal_type="white",
             impulse_position=None,
             verbose=False,
+            end=10,
         ),
         Resampler(
             name="Resampler",

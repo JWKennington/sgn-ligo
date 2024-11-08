@@ -1,5 +1,7 @@
-from . import *
-from ..base import *
+from dataclasses import dataclass
+
+import torch
+from sgnts.transforms import Resampler
 from torch.nn.functional import conv1d as Fconv1d
 
 

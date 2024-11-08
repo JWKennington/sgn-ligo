@@ -1,16 +1,66 @@
+from argparse import ArgumentParser
+from typing import Optional
+
 from sgn import Pipeline
 from sgnts.transforms import Resampler, Threshold
-from . import HorizonDistance, Latency, Whiten
+
+from sgnligo.transforms.latency import Latency
+from sgnligo.transforms.whiten import Whiten
 
 
-def condition_from_options(pipeline: Pipeline, options, ifos):
+def parse_command_line_condition(parser: Optional[ArgumentParser] = None):
+    if parser is None:
+        parser = ArgumentParser()
+
+    group = parser.add_argument_group(
+        "PSD Options", "Adjust noise spectrum estimation parameters"
+    )
+    group.add_argument(
+        "--whitening-method",
+        metavar="algorithm",
+        default="gstlal",
+        help="Algorithm to use for whitening the data. Supported options are 'gwpy' "
+        "or 'gstlal'. Default is gstlal.",
+    )
+    group.add_argument(
+        "--psd-fft-length",
+        action="store",
+        type=int,
+        default=8,
+        help="The fft length for psd estimation.",
+    )
+    group.add_argument(
+        "--reference-psd",
+        metavar="file",
+        help="load the spectrum from this LIGO light-weight XML file (optional).",
+    )
+    group.add_argument(
+        "--track-psd",
+        action="store_true",
+        help="Enable dynamic PSD tracking.  Always enabled if --reference-psd is not "
+        "given.",
+    )
+
+    group = parser.add_argument_group("Data Qualtiy", "Adjust data quality handling")
+    group.add_argument(
+        "--ht-gate-threshold",
+        action="store",
+        type=float,
+        default=float("+inf"),
+        help="The gating threshold. Data above this value will be gated out.",
+    )
+
+    return parser
+
+
+def condition_from_options(pipeline: Pipeline, options, ifos: list[str]):
     return condition(
         pipeline=pipeline,
         ifos=ifos,
-        maxrate=options.maxrate,
+        whiten_sample_rate=options.whiten_sample_rate,
         input_links=options.input_links,
         data_source=options.data_source,
-        sample_rate=options.sample_rate,
+        input_sample_rate=options.input_sample_rate,
         psd_fft_length=options.psd_fft_length,
         whitening_method=options.whitening_method,
         reference_psd=options.reference_psd,
@@ -20,38 +70,61 @@ def condition_from_options(pipeline: Pipeline, options, ifos):
 
 def condition(
     pipeline: Pipeline,
-    ifos,
-    maxrate,
-    input_links,
-    data_source=None,
-    sample_rate=None,
-    psd_fft_length=None,
-    whitening_method=None,
-    reference_psd=None,
-    ht_gate_threshold=None,
+    data_source: str,
+    input_sample_rate: int,
+    whiten_sample_rate: int,
+    ifos: list[str],
+    input_links: list[str],
+    psd_fft_length: int = 8,
+    whitening_method: str = "gstlal",
+    ht_gate_threshold: float = float("+inf"),
+    reference_psd: Optional[str] = None,
 ):
+    """Condition the data with whitening and gating
+
+    Args:
+        pipeline:
+            Pipeline: the sgn pipeline
+        data_source:
+            str, the data source for the pipeline
+        input_sample_rate:
+            int, the sample rate of the data
+        whiten_sample_rate:
+            int, the sample rate to perform the whitening
+        ifos:
+            list[str], the ifo names
+        input_links:
+            the src pad names to link to this element
+        psd_fft_length:
+            int, the fft length for the psd calculation, in seconds
+        whitening_method:
+            str, the whitening method, must be either 'gwpy' or 'gstlal'
+        ht_gate_threshold:
+            float, the threshold above which to gate out data
+        reference_psd:
+            str, the filename for the reference psd used in the Whiten element
+    """
     condition_out_links = {ifo: None for ifo in ifos}
+    spectrum_out_links = {ifo: None for ifo in ifos}
     if data_source == "devshm":
         latency_out_links = {ifo: None for ifo in ifos}
-        horizon_out_links = None
     else:
         latency_out_links = None
-        horizon_out_links = {ifo: None for ifo in ifos}
     for ifo in ifos:
         pipeline.insert(
             Resampler(
                 name=ifo + "_SourceResampler",
                 sink_pad_names=(ifo,),
                 source_pad_names=(ifo,),
-                inrate=sample_rate,
-                outrate=maxrate,
+                inrate=input_sample_rate,
+                outrate=whiten_sample_rate,
             ),
             Whiten(
                 name=ifo + "_Whitener",
                 sink_pad_names=(ifo,),
                 source_pad_names=(ifo, "spectrum_" + ifo),
                 instrument=ifo,
-                sample_rate=maxrate,
+                sample_rate=whiten_sample_rate,
                 fft_length=psd_fft_length,
                 whitening_method=whitening_method,
                 reference_psd=reference_psd,
@@ -62,8 +135,8 @@ def condition(
                 source_pad_names=(ifo,),
                 sink_pad_names=(ifo,),
                 threshold=ht_gate_threshold,
-                startwn=maxrate // 2,
-                stopwn=maxrate // 2,
+                startwn=whiten_sample_rate // 2,
+                stopwn=whiten_sample_rate // 2,
                 invert=True,
             ),
         )
@@ -79,22 +152,6 @@ def condition(
                     ifo + "_Latency:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
                 },
             )
-        else:
-            pipeline.insert(
-                HorizonDistance(
-                    name=ifo + "_Horizon",
-                    source_pad_names=(ifo,),
-                    sink_pad_names=(ifo,),
-                    m1=1.4,
-                    m2=1.4,
-                    fmin=10.0,
-                    fmax=1000.0,
-                    delta_f=1 / 16.0,
-                ),
-                link_map={
-                    ifo + "_Horizon:sink:" + ifo: ifo + "_Whitener:src:spectrum_" + ifo,
-                },
-            )
         pipeline.insert(
             link_map={
                 ifo + "_SourceResampler:sink:" + ifo: input_links[ifo],
@@ -103,9 +160,8 @@ def condition(
             }
         )
         condition_out_links[ifo] = ifo + "_Threshold:src:" + ifo
+        spectrum_out_links[ifo] = ifo + "_Whitener:src:spectrum_" + ifo
         if data_source == "devshm":
             latency_out_links[ifo] = ifo + "_Latency:src:" + ifo
-        else:
-            horizon_out_links[ifo] = ifo + "_Horizon:src:" + ifo
 
-    return condition_out_links, horizon_out_links, latency_out_links
+    return condition_out_links, spectrum_out_links, latency_out_links
