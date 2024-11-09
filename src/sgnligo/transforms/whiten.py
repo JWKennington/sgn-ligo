@@ -1,5 +1,5 @@
-import os
 from collections import deque
+from dataclasses import dataclass
 
 import lal
 import lal.series
@@ -8,9 +8,7 @@ from gwpy.timeseries import TimeSeries
 from ligo.lw import utils as ligolw_utils
 from scipy import interpolate
 from scipy.special import loggamma
-from sgn.transforms import *
-from sgnts.base import AdapterConfig, SeriesBuffer, TSFrame, TSTransform
-from sgnts.transforms import *
+from sgnts.base import AdapterConfig, Offset, SeriesBuffer, TSFrame, TSTransform
 from sympy import EulerGamma
 
 EULERGAMMA = float(EulerGamma.evalf())
@@ -215,8 +213,6 @@ class Whiten(TSTransform):
 
         transition_length = round(beta * length)
 
-        n = (transition_length + 1) // 2
-
         out = np.ones(length)
         for i in range((transition_length + 1) // 2):
             o = np.cos(np.pi / 2 * Y(transition_length, i)) ** 2
@@ -323,7 +319,7 @@ class Whiten(TSTransform):
         arithmetic_mean_square_data = ref_psd_data / self.lal_normalization_constant
 
         # populate the buffer history with the ref psd
-        for i in range(self.nmed):
+        for _i in range(self.nmed):
             self.square_data_bufs.append(arithmetic_mean_square_data)
 
         self.geometric_mean_square = np.log(arithmetic_mean_square_data) - EULERGAMMA
@@ -331,10 +327,10 @@ class Whiten(TSTransform):
 
     def transform(self, pad):
         """
-        Whiten incoming data in segments of fft-length seconds overlapped by fft-length * 3/4
-        If the data segment has N samples, we apply a zero-padded Hann window on the data with
-        zero-padding of Z = N/4 samples. The Hann window length is then N - 2 * Z. The output
-        stride is hann_length / 2.
+        Whiten incoming data in segments of fft-length seconds overlapped by fft-length
+        * 3/4. If the data segment has N samples, we apply a zero-padded Hann window on
+        the data with zero-padding of Z = N/4 samples. The Hann window length is then
+        N - 2 * Z. The output stride is hann_length / 2.
 
         Example:
         --------
@@ -525,7 +521,8 @@ class Whiten(TSTransform):
 
                 # Fourier Transform back to the time domain
                 # # see arxiv: 1604.04324 (13)
-                # self.delta_f scaling https://lscsoft.docs.ligo.org/lalsuite/lal/_time_freq_f_f_t_8c_source.html#l00183
+                # self.delta_f scaling https://lscsoft.docs.ligo.org/lalsuite/lal/
+                # _time_freq_f_f_t_8c_source.html#l00183
                 whitened_data = (
                     np.fft.irfft(freq_data_whitened, self.n, norm="forward")
                     * self.delta_f
@@ -544,7 +541,8 @@ class Whiten(TSTransform):
             # FIXME: haven't tested whether this works for gwpy method
             # FIXME: can we make this more general?
             if padded_data_offset < self.first_output_offset:
-                # output a gap buffer during the startup period of the whitening calculation
+                # output a gap buffer during the startup period of the whitening
+                # calculation
                 outdata = None
             else:
                 outdata = whitened_data[: self.adapter_config.stride]
