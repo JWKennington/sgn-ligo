@@ -1,15 +1,26 @@
 from dataclasses import dataclass
 
-from ..base import SeriesBuffer, TSFrame, TSTransform
-
-import torch
 import numpy as np
+import torch
+from sgnts.base import SeriesBuffer, TSFrame, TSTransform
 
 
 @dataclass
 class Converter(TSTransform):
-    """
-    Change the data type or the device of the data
+    """Change the data type or the device of the data.
+
+    Args:
+        backend:
+            str, the backend to convert the data to. Supported backends:
+            ['numpy'|'torch']
+        dtype:
+            str, the data type to convert the data to. Supported dtypes:
+            ['float32'|'float16']
+        device:
+            str, the device to convert the data to. Suppored devices:
+            if backend = 'numpy', only supports device = 'cpu', if backend = 'torch',
+            supports device = ['cpu'|'cuda'|'cuda:<GPU number>'] where <GPU number> is
+            the GPU device number.
     """
 
     backend: str = "numpy"
@@ -38,9 +49,7 @@ class Converter(TSTransform):
             elif isinstance(self.dtype, torch.dtype):
                 pass
             else:
-                raise ValueError(
-                        "Unknown dtype"
-                    )
+                raise ValueError("Unknown dtype")
         else:
             raise ValueError("Supported backends: 'numpy' or 'torch'")
 

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-import torch
 
-from ..base import SeriesBuffer, TSFrame, TSTransform
+import torch
+from sgnts.base import SeriesBuffer, TSFrame, TSTransform
 
 
 @dataclass
