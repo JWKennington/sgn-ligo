@@ -1,32 +1,42 @@
-from typing import Any
+from dataclasses import dataclass
 
-from sgnts.base import TSTransform
+from sgn.base import SourcePad
+from sgnts.base import (
+    Array,
+    ArrayBackend,
+    Audioadapter,
+    NumpyBackend,
+    Offset,
+    SeriesBuffer,
+    TSFrame,
+    TSTransform,
+)
 from torch.nn.functional import conv1d as Fconv1d
-
-from ..base import *
-from . import *
 
 
 @dataclass
 class LLOIDCorrelate(TSTransform):
+    """Correlates input data with filters, with certain time delays, and padding for
+    upsampling and downsampling
+
+    Args:
+        filters:
+            Array, the filter to correlate over
+        backend:
+            type[ArrayBackend], the wrapper around array operations
+        uppad:
+            int, the upsampling padding, in offsets
+        downpad:
+            int, the downsampling padding, in offsets
+        delays:
+            list[int], a list of time delays for each time slice, in offsets
     """
-    Correlates input data with filters
 
-    Parameters:
-    -----------
-    filters: Sequence[Any]
-        the filter to correlate over
-
-    Assumptions:
-    ------------
-    - There is only one sink pad and one source pad
-    """
-
-    filters: Sequence[Any] = None
-    lib: int = None
-    uppad: int = None
-    downpad: int = None
-    delays: int = None
+    filters: Array = None
+    backend: type[ArrayBackend] = NumpyBackend
+    uppad: int = 0
+    downpad: int = 0
+    delays: list[int] = None
 
     def __post_init__(self):
         assert self.filters is not None
@@ -37,18 +47,34 @@ class LLOIDCorrelate(TSTransform):
             len(self.sink_pads) == 1 and len(self.source_pads) == 1
         ), "only one sink_pad and one source_pad is allowed"
 
-        self.audioadapter = Audioadapter(self.lib)
+        self.audioadapter = Audioadapter(self.backend)
         self.unique_delays = sorted(set(self.delays))
         self.startup = True
 
-    def corr(self, data):
+    def corr(self, data: Array) -> Array:
+        """Correlate the data with filters.
+
+        Args:
+            data:
+                Array, the data to correlate with the filters
+
+        Returns:
+            Array, the output of the correlation
+        """
+        # FIXME: try supporing numpy?
         return Fconv1d(data, self.filters, groups=data.shape[-2]).view(
             self.shape[:-1] + (-1,)
         )
 
-    def transform(self, pad):
-        """
-        Correlates data with filters
+    def transform(self, pad: SourcePad) -> TSFrame:
+        """Correlates incoming frames with filters.
+
+        Args:
+            pad:
+                SourcePad, the source pad to produce the transformed frames
+
+        Returns:
+            TSFrame, the output TSFrame
         """
         A = self.audioadapter
         frame = self.preparedframes[self.sink_pads[0]]
@@ -81,7 +107,6 @@ class LLOIDCorrelate(TSTransform):
                 else:
                     this_segment0 = this_segment1 - (buf.end_offset - buf.offset)
                 this_segment = (this_segment0, this_segment1)
-                nthis_segment = this_segment1 - this_segment0
 
                 A.push(buf)
 
@@ -126,7 +151,7 @@ class LLOIDCorrelate(TSTransform):
                             pad_length = Offset.tosamples(
                                 A.offset - cp_segment0, buf.sample_rate
                             )
-                            out = self.lib.pad_func(out, (pad_length, 0))
+                            out = self.backend.pad(out, (pad_length, 0))
                         copied_data = True
                     else:
                         out = None
@@ -142,7 +167,7 @@ class LLOIDCorrelate(TSTransform):
                         for delay in self.delays:
                             out = outs_map[delay]
                             if out is None:
-                                out = self.lib.zeros_func(
+                                out = self.backend.zeros(
                                     (
                                         Offset.tosamples(
                                             cp_segment1 - cp_segment0, buf.sample_rate
@@ -150,7 +175,7 @@ class LLOIDCorrelate(TSTransform):
                                     )
                                 )
                             outs.append(out)
-                        outs = self.lib.stack_func(outs)
+                        outs = self.backend.stack(outs)
                 else:
                     outs = None
 
