@@ -1,6 +1,8 @@
 """Datasource element utilities for LIGO pipelines
 """
 
+from __future__ import annotations
+
 from argparse import ArgumentParser
 from typing import Optional
 
@@ -96,6 +98,11 @@ def parse_command_line_datasource(parser: Optional[ArgumentParser] = None):
         action="store",
         help="The sample point to put the impulse at.",
     )
+    group.add_argument(
+        "--verbose-datasource",
+        action="store_true",
+        help="Be verbose.",
+    )
 
     return parser
 
@@ -114,7 +121,7 @@ def datasource_from_options(pipeline: Pipeline, options):
         wait_time=options.wait_time,
         input_sample_rate=options.input_sample_rate,
         impulse_position=options.impulse_position,
-        verbose=options.verbose,
+        verbose=options.verbose_datasource,
     )
 
 
@@ -238,8 +245,7 @@ def datasource(
                 instrument=ifo,
                 shared_memory_dir=shared_memory_dict[ifo],
                 wait_time=wait_time,
-                # verbose=verbose,
-                verbose=True,
+                verbose=verbose,
             )
             bit_mask = BitMask(
                 name=ifo + "_Mask",
@@ -265,7 +271,7 @@ def datasource(
                     + ifo: ifo
                     + "_Devshm:src:"
                     + state_channel_name_ifo,
-                    ifo + "_Gate:sink:control": ifo + "_Mask:src:" + ifo,
+                    ifo + "_Gate:sink:state_vector": ifo + "_Mask:src:" + ifo,
                 },
             )
         else:
