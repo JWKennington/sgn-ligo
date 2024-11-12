@@ -4,15 +4,12 @@ import os
 from optparse import OptionParser
 
 import pytest
-
 from sgn.apps import Pipeline
-
-from sgnts.sources import FakeSeriesSrc
 from sgnts.sinks import DumpSeriesSink
-from sgnligo.transforms import Whiten, HorizonDistance
-from sgnligo.sources import FrameReader
 from sgnts.transforms import Resampler
-import os
+
+from sgnligo.sources import FrameReader
+from sgnligo.transforms import HorizonDistance, Whiten
 
 
 def parse_command_line():
@@ -60,7 +57,8 @@ def parse_command_line():
         "--whitening-method",
         metavar="algorithm",
         default="gstlal",
-        help="Algorithm to use for whitening the data. Supported options are 'gwpy' or 'gstlal'. Default is gstlal.",
+        help="Algorithm to use for whitening the data. Supported options are 'gwpy' or"
+        " 'gstlal'. Default is gstlal.",
     )
     parser.add_option(
         "--reference-psd",
@@ -70,7 +68,8 @@ def parse_command_line():
     parser.add_option(
         "--track-psd",
         action="store_true",
-        help="Enable dynamic PSD tracking.  Always enabled if --reference-psd is not given.",
+        help="Enable dynamic PSD tracking.  Always enabled if --reference-psd is not"
+        " given.",
     )
 
     options, args = parser.parse_args()
