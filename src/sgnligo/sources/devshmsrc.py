@@ -77,7 +77,11 @@ class DevShmSrc(TSSource):
 
         self.cnt = {p: 0 for p in self.source_pads}
         # FIXME: do we need to consider other rates?
-        self.rate_dict = {self.channel_name: 16384, self.state_channel_name: 16}
+        # FIXME: make this more general
+        if self.instrument == "V1":
+            self.rate_dict = {self.channel_name: 16384, self.state_channel_name: 1}
+        else:
+            self.rate_dict = {self.channel_name: 16384, self.state_channel_name: 16}
         # set assumed buffer duration based on sample rate
         # and num samples per buffer. Will fail if this does
         # not match the file duration
@@ -186,10 +190,10 @@ class DevShmSrc(TSSource):
                 #    f"{self.shared_memory_dir}, exiting."
                 # )
                 self.send_gap = True
-                self.send_gap_duration = self.wait_time
+                self.send_gap_duration = self.buffer_duration
                 # update last buffer
                 self.last_buffer.t0 = self.last_buffer.end
-                self.last_buffer.end = self.last_buffer.end + self.wait_time
+                self.last_buffer.end = self.last_buffer.end + self.buffer_duration
                 self.last_buffer.is_gap = True
             else:
                 # send a gap buffer
@@ -224,7 +228,7 @@ class DevShmSrc(TSSource):
         if self.send_gap:
             if self.verbose:
                 print(
-                    f"Queue is empty, sending a gap buffer at t0: "
+                    f"{self.instrument} Queue is empty, sending a gap buffer at t0: "
                     f"{self.last_buffer.end} | Time now: {now()} | ifo: "
                     f"{self.instrument}",
                     flush=True,
@@ -244,9 +248,10 @@ class DevShmSrc(TSSource):
 
             # check sample rate and duration matches what we expect
             duration = data.duration.value
-            assert (
-                int(data.sample_rate.value) == self.rate_dict[channel]
-            ), "Data rate does not match requested sample rate."
+            assert int(data.sample_rate.value) == self.rate_dict[channel], (
+                f"Data rate does not match requested sample rate. Data sample rate:"
+                f" {data.sample_rate.value}, expected {self.rate_dict[channel]}"
+            )
             assert (
                 duration == self.buffer_duration
             ), f"File duration ({duration} sec) does not match assumed buffer duration"
@@ -265,8 +270,8 @@ class DevShmSrc(TSSource):
 
             if self.verbose:
                 print(
-                    f"Buffer t0: {t0} | Time Now: {now()} | Time delay: "
-                    f"{float(now()) - t0:.3e} | Discont: {self.last_buffer.is_gap}",
+                    f"{self.instrument} Buffer t0: {t0} | Time Now: {now()} |"
+                    f" Time delay: {float(now()) - t0:.3e}",
                     flush=True,
                 )
 
