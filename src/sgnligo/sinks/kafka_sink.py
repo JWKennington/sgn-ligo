@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from ligo.scald.io import kafka
-
 from sgnts.base import TSSink
 
 
@@ -71,10 +70,3 @@ class KafkaSink(TSSink):
 
         if self.verbose is True:
             print(self.cnt[pad], bufs)
-
-    @property
-    def EOS(self):
-        """
-        If buffers on any sink pads are End of Stream (EOS), then mark this whole element as EOS
-        """
-        return any(self.at_eos.values())

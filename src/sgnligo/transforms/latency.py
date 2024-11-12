@@ -1,5 +1,7 @@
 from dataclasses import dataclass
-from sgnts.base import TSTransform, SeriesBuffer, TSFrame
+
+from sgnts.base import SeriesBuffer, TSFrame, TSTransform
+
 from ..base import now
 
 

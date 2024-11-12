@@ -1,13 +1,13 @@
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from lal import UTCToGPS
 from ligo.lw import ligolw, lsctables, utils
+from sgn.sinks import SinkElement
+from sgnts.base import Time
 from strike.stats import likelihood_ratio
-
-from sgn.sinks import *
-from sgnts.sinks import *
 
 
 class DefaultContentHandler(lsctables.ligolw.LIGOLWContentHandler):
@@ -170,7 +170,7 @@ class StrikeSink(SinkElement):
                                 # FIXME: is end time in seconds??
                                 event = event_dummy(
                                     ifo=ifo,
-                                    end=t/1_000_000_000,
+                                    end=t / 1_000_000_000,
                                     snr=s,
                                     chisq=c,
                                     combochisq=c,
@@ -206,7 +206,6 @@ class StrikeSink(SinkElement):
                         else:
                             ifo_str += "," + ifo
 
-                        single = sngl[ifo]
                         sngl_row = lsctables.SnglInspiral()
                         sngl_row.ifo = ifo
 
@@ -220,7 +219,8 @@ class StrikeSink(SinkElement):
                         sngl_row.Gamma0 = template_id
                         sngl_row.Gamma1 = int(self.subbankids[i].split("_")[0])
 
-                        # FIXME calculate a chisq weighted SNR and store it in the Gamma2 column
+                        # FIXME calculate a chisq weighted SNR and store it in the
+                        # Gamma2 column
                         sngl_row.Gamma2 = snr / ((1 + max(1.0, chisq) ** 3) / 2.0) ** (
                             1.0 / 5.0
                         )
@@ -229,7 +229,8 @@ class StrikeSink(SinkElement):
                         sngl_row.chisq_dof = 1
 
                         end = sngl[ifo]["time"][i]
-                        # coinc end time is the time of the first ifo in alphabetical order
+                        # coinc end time is the time of the first ifo in alphabetical
+                        # order
                         if coinc_end is None:
                             coinc_end = end
 
@@ -252,7 +253,7 @@ class StrikeSink(SinkElement):
                         sngl_row.template_duration = template_row.template_duration
                         sngl_row.template_id = template_id
                         sngl_row.process_id = 0
-                        sngl_row.eff_distance = float('nan')
+                        sngl_row.eff_distance = float("nan")
                         sngl_row.event_id = self.event_id_counter
                         self.event_id_counter += 1
                         self.sngl_tables[bankid].append(sngl_row)
@@ -280,10 +281,3 @@ class StrikeSink(SinkElement):
                     coinc_row.combined_far = None
                     coinc_row.false_alarm_rate = None
                     self.coinc_tables[bankid].append(coinc_row)
-
-    @property
-    def EOS(self):
-        """
-        If buffers on any sink pads are End of Stream (EOS), then mark this whole element as EOS
-        """
-        return any(self.at_eos.values())
