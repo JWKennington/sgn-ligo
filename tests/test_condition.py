@@ -40,13 +40,14 @@ def build_pipeline(
         ),
         Whiten(
             name="Whitener",
-            source_pad_names=("hoft",),
             sink_pad_names=("resamp",),
             instrument=instrument,
             sample_rate=2048,
             fft_length=4,
             whitening_method=whitening_method,
             reference_psd=PATH_PSD.as_posix(),
+            psd_pad_name="spectrum",
+            whiten_pad_name="hoft",
         ),
         Threshold(
             name="Threshold",
@@ -59,7 +60,7 @@ def build_pipeline(
         ),
         NullSink(
             name="HoftSnk",
-            sink_pad_names=("hoft",),
+            sink_pad_names=("hoft", "spectrum"),
         ),
     )
     pipeline.link(
@@ -68,6 +69,7 @@ def build_pipeline(
             "Whitener:sink:resamp": "Resampler:src:resamp",
             "Threshold:sink:data": "Whitener:src:hoft",
             "HoftSnk:sink:hoft": "Threshold:src:threshold",
+            "HoftSnk:sink:spectrum": "Whitener:src:spectrum",
         }
     )
     return pipeline
@@ -98,6 +100,7 @@ class TestCondition:
             "\tH1_white -> Resampler",
             "\tResampler -> Whitener",
             "\tThreshold -> HoftSnk",
+            "\tWhitener -> HoftSnk",
             "\tWhitener -> Threshold",
             "}",
             "",

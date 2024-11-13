@@ -89,40 +89,47 @@ def interpolate_psd(
 
 @dataclass
 class Whiten(TSTransform):
-    """
-    Whiten input timeseries data
-    Parameters:
-    -----------
-    whitening-method: str
-        currently supported types: (1) 'gwpy', (2) 'gstlal'
-    instrument: str
-        instrument to process. Used if reference-psd is given
-    sample-rate: int
-        sample rate of the data
-    fft-length: int
-        length of fft in seconds used for whitening
-    nmed: int
-        how many previous samples we should account for when calcualting
-        the geometric mean of the psd
-    navg: int
-        changes to the PSD must occur over a time scale of at least
-        navg*(n/2 − z)*(1/sample_rate) *check cody's paper for more info
-    reference_psd: file
-        path to reference psd xml
-    psd_pad_name: str
-        pad name of the psd output source pad
+    """Whiten input timeseries data.
+
+    Args:
+        instrument:
+            str, instrument to process. Used if reference-psd is given
+        whitening-method:
+            str, currently supported types: (1) 'gwpy', (2) 'gstlal'
+        sample-rate:
+            int, sample rate of the data
+        fft-length:
+            int, length of fft in seconds used for whitening
+        nmed:
+            int, how many previous samples we should account for when calcualting the
+            geometric mean of the psd
+        navg:
+            int, changes to the PSD must occur over a time scale of at least
+            navg*(n/2 - z)*(1/sample_rate) *check cody's paper for more info
+        reference_psd:
+            file, path to reference psd xml
+        psd_pad_name:
+            str, pad name of the psd output source pad
     """
 
     instrument: str = None
-    whitening_method: str = "gwpy"
+    psd_pad_name: str = ""
+    whiten_pad_name: str = ""
+    whitening_method: str = "gstlal"
     sample_rate: int = 2048
     fft_length: int = 8
     nmed: int = 7
     navg: int = 64
     reference_psd: str = None
-    psd_pad_name: str = ""
 
     def __post_init__(self):
+        assert len(self.sink_pad_names) == 1, "Only supports one sink pad"
+        assert (
+            len(self.source_pad_names) == 0
+        ), "source_pad_names are derived from whiten_pad_name and psd_pad_name"
+        assert self.whiten_pad_name and self.psd_pad_name
+        self.source_pad_names = (self.whiten_pad_name, self.psd_pad_name)
+
         # define block overlap following arxiv:1604.04324
         self.n = int(self.fft_length * self.sample_rate)
         self.z = int(self.fft_length / 4 * self.sample_rate)
@@ -143,6 +150,7 @@ class Whiten(TSTransform):
         super().__post_init__()
 
         self.latest_psd = None
+        self.output_frames = {p: None for p in self.source_pads}
 
         # set up for gstlal method:
         if self.whitening_method == "gstlal":
@@ -330,7 +338,7 @@ class Whiten(TSTransform):
         self.geometric_mean_square = np.log(arithmetic_mean_square_data) - EULERGAMMA
         self.n_samples = min(weight, self.navg)
 
-    def transform(self, pad):
+    def internal(self, pad):
         """
         Whiten incoming data in segments of fft-length seconds overlapped by fft-length
         * 3/4. If the data segment has N samples, we apply a zero-padded Hann window on
@@ -396,8 +404,8 @@ class Whiten(TSTransform):
         to or after the first input buffer, so the first iteration is a gap buffer.
 
         """
+        super().internal(pad)
         # incoming frame handling
-        outbufs = []
         frame = self.preparedframes[self.sink_pads[0]]
         EOS = frame.EOS
         metadata = frame.metadata
@@ -420,24 +428,6 @@ class Whiten(TSTransform):
             outoffset = padded_data_offset
             shape = (Offset.tosamples(outoffsets[0]["noffset"], self.sample_rate),)
 
-        # passes the spectrum in metadata if the pad is the psd_pad
-        if pad.name == self.psd_pad_name:
-            psd = self.latest_psd
-            metadata["psd"] = psd
-
-            return TSFrame(
-                buffers=[
-                    SeriesBuffer(
-                        offset=outoffset,
-                        sample_rate=self.sample_rate,
-                        data=None,
-                        shape=shape,
-                    )
-                ],
-                EOS=EOS,
-                metadata=metadata,
-            )
-
         # if audioadapter hasn't given us a frame, then we have to wait for more
         # data before we can whiten. send a gap buffer
         if frame.is_gap:
@@ -447,25 +437,10 @@ class Whiten(TSTransform):
                 and self.prev_data.shape[-1] > 0
             ):
                 # drain the output history
-                data = self.prev_data[: self.stride_samples]
+                output_whitened_data = self.prev_data[: self.stride_samples]
                 self.prev_data = self.prev_data[self.stride_samples :]
-                outbufs.append(
-                    SeriesBuffer(
-                        offset=outoffset,
-                        sample_rate=self.sample_rate,
-                        data=data,
-                    )
-                )
-                self.prev_data
             else:
-                outbufs.append(
-                    SeriesBuffer(
-                        offset=outoffset,
-                        sample_rate=self.sample_rate,
-                        data=None,
-                        shape=shape,
-                    )
-                )
+                output_whitened_data = None
         else:
             # retrieve samples from the deque
             assert len(frame.buffers) == 1, "Multiple buffers not implemented yet."
@@ -545,26 +520,41 @@ class Whiten(TSTransform):
 
             # FIXME: haven't tested whether this works for gwpy method
             # FIXME: can we make this more general?
+            # only output data up till the length of the adapter stride
             if padded_data_offset < self.first_output_offset:
                 # output a gap buffer during the startup period of the whitening
                 # calculation
-                outdata = None
+                output_whitened_data = None
             else:
-                outdata = whitened_data[: self.stride_samples]
+                output_whitened_data = whitened_data[: self.stride_samples]
 
-            # only output data up till the length of the adapter stride
-            outbufs.append(
+        # passes the spectrum in metadata if the pad is the psd_pad
+        metadata["psd"] = self.latest_psd
+        self.output_frames[self.srcs[self.psd_pad_name]] = TSFrame(
+            buffers=[
                 SeriesBuffer(
                     offset=outoffset,
                     sample_rate=self.sample_rate,
-                    data=outdata,
+                    data=None,
                     shape=shape,
                 )
-            )
-
-        # return frame with the correct buffers
-        return TSFrame(
-            buffers=outbufs,
+            ],
             EOS=EOS,
             metadata=metadata,
         )
+
+        self.output_frames[self.srcs[self.whiten_pad_name]] = TSFrame(
+            buffers=[
+                SeriesBuffer(
+                    offset=outoffset,
+                    sample_rate=self.sample_rate,
+                    data=output_whitened_data,
+                    shape=shape,
+                )
+            ],
+            EOS=EOS,
+            metadata=metadata,
+        )
+
+    def transform(self, pad):
+        return self.output_frames[pad]

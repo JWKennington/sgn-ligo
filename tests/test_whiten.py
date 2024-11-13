@@ -143,7 +143,8 @@ def test_whitengraph(capsys):
             fft_length=4,
             whitening_method=options.whitening_method,
             reference_psd=options.reference_psd,
-            psd_pad_name="Whitener:src:spectrum",
+            psd_pad_name="spectrum",
+            whiten_pad_name="hoft",
         ),
         HorizonDistance(
             name="Horizon",
