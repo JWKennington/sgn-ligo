@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser
+from math import isinf
 from typing import Optional
 
 from sgn import Pipeline
@@ -41,6 +42,15 @@ def parse_command_line_condition(parser: Optional[ArgumentParser] = None):
         action="store_true",
         help="Enable dynamic PSD tracking.  Always enabled if --reference-psd is not "
         "given.",
+    )
+    group.add_argument(
+        "--whiten-sample-rate",
+        metavar="Hz",
+        action="store",
+        type=int,
+        default=2048,
+        help="Sample rate at which to whiten the data and generate the PSD, default"
+        " 2048 Hz.",
     )
 
     group = parser.add_argument_group("Data Qualtiy", "Adjust data quality handling")
@@ -112,7 +122,10 @@ def condition(
         latency_out_links = {ifo: None for ifo in ifos}
     else:
         latency_out_links = None
+
     for ifo in ifos:
+
+        # Downsample and whiten
         pipeline.insert(
             Resampler(
                 name=ifo + "_SourceResampler",
@@ -124,24 +137,41 @@ def condition(
             Whiten(
                 name=ifo + "_Whitener",
                 sink_pad_names=(ifo,),
-                source_pad_names=(ifo, "spectrum_" + ifo),
                 instrument=ifo,
+                psd_pad_name="spectrum_" + ifo,
+                whiten_pad_name=ifo,
                 sample_rate=whiten_sample_rate,
                 fft_length=psd_fft_length,
                 whitening_method=whitening_method,
                 reference_psd=reference_psd,
-                psd_pad_name=ifo + "_Whitener:src:spectrum_" + ifo,
             ),
-            Threshold(
-                name=ifo + "_Threshold",
-                source_pad_names=(ifo,),
-                sink_pad_names=(ifo,),
-                threshold=ht_gate_threshold,
-                startwn=whiten_sample_rate // 2,
-                stopwn=whiten_sample_rate // 2,
-                invert=True,
-            ),
+            link_map={
+                ifo + "_SourceResampler:sink:" + ifo: input_links[ifo],
+                ifo + "_Whitener:sink:" + ifo: ifo + "_SourceResampler:src:" + ifo,
+            },
         )
+        spectrum_out_links[ifo] = ifo + "_Whitener:src:spectrum_" + ifo
+
+        # Apply htgate
+        if not isinf(ht_gate_threshold):
+            pipeline.insert(
+                Threshold(
+                    name=ifo + "_Threshold",
+                    source_pad_names=(ifo,),
+                    sink_pad_names=(ifo,),
+                    threshold=ht_gate_threshold,
+                    startwn=whiten_sample_rate // 2,
+                    stopwn=whiten_sample_rate // 2,
+                    invert=True,
+                ),
+                link_map={
+                    ifo + "_Threshold:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
+                },
+            )
+            condition_out_links[ifo] = ifo + "_Threshold:src:" + ifo
+        else:
+            condition_out_links[ifo] = ifo + "_Whitener:src:" + ifo
+
         if data_source == "devshm":
             pipeline.insert(
                 Latency(
@@ -154,16 +184,6 @@ def condition(
                     ifo + "_Latency:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
                 },
             )
-        pipeline.insert(
-            link_map={
-                ifo + "_SourceResampler:sink:" + ifo: input_links[ifo],
-                ifo + "_Whitener:sink:" + ifo: ifo + "_SourceResampler:src:" + ifo,
-                ifo + "_Threshold:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
-            }
-        )
-        condition_out_links[ifo] = ifo + "_Threshold:src:" + ifo
-        spectrum_out_links[ifo] = ifo + "_Whitener:src:spectrum_" + ifo
-        if data_source == "devshm":
             latency_out_links[ifo] = ifo + "_Latency:src:" + ifo
 
     return condition_out_links, spectrum_out_links, latency_out_links
