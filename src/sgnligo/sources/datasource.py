@@ -352,9 +352,6 @@ def datasource(
                     t0=gps_start_time,
                     end=gps_end_time,
                 ),
-                link_map={
-                    ifo + "_Gate:sink:frame": ifo + "_FakeSource:src:" + ifo,
-                },
             )
 
         source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
