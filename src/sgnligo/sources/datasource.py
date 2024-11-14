@@ -6,6 +6,10 @@ from __future__ import annotations
 from argparse import ArgumentParser
 from typing import Optional
 
+from lal import LIGOTimeGPS
+from ligo import segments
+from ligo.lw import utils as ligolw_utils
+from ligo.lw.utils import segments as ligolw_segments
 from sgn import Pipeline
 from sgnts.sources import FakeSeriesSrc, SegmentSrc
 from sgnts.transforms import Gate
@@ -53,8 +57,20 @@ def parse_command_line_datasource(parser: Optional[ArgumentParser] = None):
     )
     group.add_argument(
         "--frame-cache",
-        metavar="file",
+        metavar="filename",
         help="Set the path to the frame cache file to analyze.",
+    )
+    group.add_argument(
+        "--frame-segments-file",
+        metavar="filename",
+        help="Set the name of the LIGO light-weight XML file from which to load frame"
+        " segments.",
+    )
+    group.add_argument(
+        "--frame-segments-name",
+        metavar="name",
+        help="Set the name of the segments to extract from the segment tables. Required"
+        " iff --frame-segments-file is given",
     )
     group.add_argument(
         "--state-channel-name",
@@ -115,6 +131,8 @@ def datasource_from_options(pipeline: Pipeline, options):
         gps_start_time=options.gps_start_time,
         gps_end_time=options.gps_end_time,
         frame_cache=options.frame_cache,
+        frame_segments_file=options.frame_segments_file,
+        frame_segments_name=options.frame_segments_name,
         state_channel_name=options.state_channel_name,
         state_vector_on_bits=options.state_vector_on_bits,
         shared_memory_dir=options.shared_memory_dir,
@@ -132,6 +150,8 @@ def datasource(
     gps_start_time: Optional[float] = None,
     gps_end_time: Optional[float] = None,
     frame_cache: Optional[str] = None,
+    frame_segments_file: Optional[str] = None,
+    frame_segments_name: Optional[str] = None,
     state_channel_name: Optional[list[str]] = None,
     state_vector_on_bits: Optional[list[int]] = None,
     shared_memory_dir: Optional[list[str]] = None,
@@ -200,6 +220,11 @@ def datasource(
                 "Must specify gps_start_time and gps_end_time when "
                 f"data_source is one of {fake_datasources} or 'frames'"
             )
+
+        if frame_segments_file is not None and frame_segments_name is None:
+            raise ValueError(
+                "Must specify frame_segmetns_name when frame_segments_file is given."
+            )
         if data_source == "frames":
             if frame_cache is None:
                 raise ValueError("Must specify frame_cache when data_source='frames'")
@@ -214,6 +239,34 @@ def datasource(
 
     channel_dict = parse_list_to_dict(channel_name)
     ifos = list(channel_dict.keys())
+
+    seg = None
+    if gps_start_time is not None:
+        start = LIGOTimeGPS(gps_start_time)
+        end = LIGOTimeGPS(gps_end_time)
+        seg = segments.segment(start, end)
+
+    if frame_segments_file is not None:
+        frame_segments = ligolw_segments.segmenttable_get_by_name(
+            ligolw_utils.load_filename(
+                frame_segments_file, contenthandler=ligolw_segments.LIGOLWContentHandler
+            ),
+            frame_segments_name,
+        ).coalesce()
+        if seg is not None:
+            # Clip frame segments to seek segment if it
+            # exists (not required, just saves some
+            # memory and I/O overhead)
+            frame_segments = segments.segmentlistdict(
+                (ifo, seglist & segments.segmentlist([seg]))
+                for ifo, seglist in frame_segments.items()
+            )
+        for ifo, segs in frame_segments.items():
+            frame_segments[ifo] = [segments.segment(s[0].ns(), s[1].ns()) for s in segs]
+    else:
+        # if no frame segments provided, set them to an empty segment list dictionary
+        frame_segments = segments.segmentlistdict((ifo, None) for ifo in ifos)
+
     source_out_links = {ifo: None for ifo in ifos}
     pad_names = {ifo: None for ifo in ifos}
     for ifo in ifos:
@@ -232,19 +285,9 @@ def datasource(
                 end=gps_end_time,
             )
             input_sample_rate = next(iter(frame_reader.rates.values()))
-            pipeline.insert(frame_reader,
-                SegmentSrc(
-                    name=ifo + "_SegmentSource",
-                    source_pad_names=(ifo,),
-                    end=gps_end_time,
-                ),
-                Gate(
-                    name=ifo + "_Gate",
-                    sink_pad_names=("frame", "control"),
-                    source_pad_names=(ifo,),
-                    control="control",
-                ),
-                )
+            pipeline.insert(
+                frame_reader,
+            )
         elif data_source == "devshm":
             pad_names[ifo] = ifo
             source_name = "_Gate"
@@ -309,24 +352,34 @@ def datasource(
                     t0=gps_start_time,
                     end=gps_end_time,
                 ),
+                link_map={
+                    ifo + "_Gate:sink:frame": ifo + "_FakeSource:src:" + ifo,
+                },
+            )
+
+        source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
+
+        if frame_segments_file is not None:
+            pipeline.insert(
                 SegmentSrc(
                     name=ifo + "_SegmentSource",
                     source_pad_names=(ifo,),
-                    num_samples=sample_rate,
-                    segments=[(5_000_000_000, 6_000_000_000)],
-                    end=100.0*1_000_000_000,
+                    rate=input_sample_rate,
+                    t0=gps_start_time,
+                    end=gps_end_time,
+                    segments=frame_segments[ifo],
                 ),
                 Gate(
                     name=ifo + "_Gate",
-                    sink_pad_names=("frame", "control"),
+                    sink_pad_names=("strain", "control"),
                     source_pad_names=(ifo,),
                     control="control",
                 ),
                 link_map={
-                    ifo + "_Gate:sink:frame": ifo + "_FakeSource:src:" + ifo,
+                    ifo + "_Gate:sink:strain": source_out_links[ifo],
                     ifo + "_Gate:sink:control": ifo + "_SegmentSource:src:" + ifo,
                 },
             )
-        source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
+            source_out_links[ifo] = ifo + "_Gate:src:" + ifo
 
     return source_out_links, input_sample_rate
