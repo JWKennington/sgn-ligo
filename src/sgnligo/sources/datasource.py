@@ -12,7 +12,7 @@ from ligo.lw import utils as ligolw_utils
 from ligo.lw.utils import segments as ligolw_segments
 from sgn import Pipeline
 from sgnts.sources import FakeSeriesSrc, SegmentSrc
-from sgnts.transforms import Gate
+from sgnts.transforms import Adder, Gate
 
 from sgnligo.base import parse_list_to_dict
 from sgnligo.sources.devshmsrc import DevShmSrc
@@ -71,6 +71,20 @@ def parse_command_line_datasource(parser: Optional[ArgumentParser] = None):
         metavar="name",
         help="Set the name of the segments to extract from the segment tables. Required"
         " iff --frame-segments-file is given",
+    )
+    group.add_argument(
+        "--noiseless-inj-frame-cache",
+        metavar="filename",
+        help="Set the name of the LAL cache listing the noiseless LIGO-Virgo injection"
+        " .gwf frame files (optional, must also provide --frame-cache).",
+    )
+    group.add_argument(
+        "--noiseless-inj-channel-name",
+        metavar="name",
+        action="append",
+        help="Set the name of the noiseless injection channels to process. Can be given"
+        " multiple times as --channel-name=IFO=CHANNEL-NAME (optional, must also"
+        " provide --channel-name per ifo)",
     )
     group.add_argument(
         "--state-channel-name",
@@ -152,6 +166,8 @@ def datasource(
     frame_cache: Optional[str] = None,
     frame_segments_file: Optional[str] = None,
     frame_segments_name: Optional[str] = None,
+    noiseless_inj_frame_cache: Optional[str] = None,
+    noiseless_inj_channel_name: Optional[str] = None,
     state_channel_name: Optional[list[str]] = None,
     state_vector_on_bits: Optional[list[int]] = None,
     shared_memory_dir: Optional[list[str]] = None,
@@ -178,6 +194,20 @@ def datasource(
         frame_cache:
             str, the frame cache file to read gwf frame files from. Must be provided
             when data_source is "frames"
+        frame_segments_file:
+            str, the name of the LIGO light-weight XML file from which to load
+            frame segments. Optional iff data_source=frames
+        frame_segments_name:
+            str, the name of the segments to extract from the segment tables. Required
+            iff frame_segments_file is given
+        noiseless_inj_frame_cache:
+            str, the name of the LAL cache listing the noiseless LIGO-Virgo injection
+            .gwf frame files to be added to the strain data in frame_cache. (optional,
+            must be provided with frame_cache)
+        noiseless_inj_channel_name:
+            list[str] or Dict[Detector, HostInfo], the name of the noiseless
+            inj channels to process per detector (optional, must be provided with
+            channel_name)
         state_channel_name:
             list, a list of state vector channel names
         state_vector_on_bits:
@@ -198,6 +228,9 @@ def datasource(
     # sanity check options
     known_datasources = ["white", "sin", "impulse", "frames", "devshm"]
     fake_datasources = ["white", "sin", "impulse"]
+
+    channel_dict = parse_list_to_dict(channel_name)
+    ifos = list(channel_dict.keys())
 
     if data_source == "devshm":
         if shared_memory_dir is None:
@@ -228,6 +261,25 @@ def datasource(
         if data_source == "frames":
             if frame_cache is None:
                 raise ValueError("Must specify frame_cache when data_source='frames'")
+
+            # Validate channel name for each noiseless injection channel name
+            if noiseless_inj_channel_name is not None:
+                noiseless_inj_channel_dict = parse_list_to_dict(
+                    noiseless_inj_channel_name
+                )
+                for ifo in noiseless_inj_channel_dict:
+                    if ifo not in channel_dict:
+                        raise ValueError(
+                            "Must specify one hoft channel_name for each"
+                            " noiseless_inj_channel_name as {Detector:name}"
+                        )
+
+            # Validate noiseless injection frame cache comes with hoft frame cache
+            if noiseless_inj_frame_cache and not frame_cache:
+                raise ValueError(
+                    "Must specify hoft frame_cache to add to noiseless_inj_frame_cache"
+                )
+
         elif data_source in fake_datasources:
             if input_sample_rate is None:
                 raise ValueError(
@@ -236,9 +288,6 @@ def datasource(
                 )
         else:
             raise ValueError(f"Unknown data source, must be one of {known_datasources}")
-
-    channel_dict = parse_list_to_dict(channel_name)
-    ifos = list(channel_dict.keys())
 
     seg = None
     if gps_start_time is not None:
@@ -288,6 +337,38 @@ def datasource(
             pipeline.insert(
                 frame_reader,
             )
+            if noiseless_inj_frame_cache is not None:
+                pipeline.insert(
+                    FrameReader(
+                        name=ifo + "_InjSource",
+                        framecache=noiseless_inj_frame_cache,
+                        channel_names=[ifo + ":" + noiseless_inj_channel_dict[ifo]],
+                        instrument=ifo,
+                        t0=gps_start_time,
+                        end=gps_end_time,
+                    ),
+                    Adder(
+                        name=ifo + "_InjAdd",
+                        sink_pad_names=("frame", "inj"),
+                        source_pad_names=(ifo,),
+                    ),
+                    link_map={
+                        ifo
+                        + "_InjAdd:sink:frame": ifo
+                        + "_FrameSource:src:"
+                        + ifo
+                        + ":"
+                        + channel_dict[ifo],
+                        ifo
+                        + "_InjAdd:sink:inj": ifo
+                        + "_InjSource:src:"
+                        + ifo
+                        + ":"
+                        + noiseless_inj_channel_dict[ifo],
+                    },
+                )
+                source_name = "_InjAdd"
+                pad_names[ifo] = ifo
         elif data_source == "devshm":
             pad_names[ifo] = ifo
             source_name = "_Gate"
