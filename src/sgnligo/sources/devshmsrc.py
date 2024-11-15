@@ -18,24 +18,6 @@ from sgnligo.base import from_T050017, now
 
 
 @dataclass
-class LastBuffer:
-    """Keep a record of the last buffer sent
-
-    Args:
-        t0:
-            int, start time of the buffer, in seconds
-        end:
-            int, end time of the buffer, in seconds
-        is_gap:
-            bool, flag the buffer as gap
-    """
-
-    t0: int
-    end: int
-    is_gap: bool
-
-
-@dataclass
 class DevShmSrc(TSSource):
     """Source element to read low-latency data streamed to /dev/shm in real-time
 
@@ -96,9 +78,10 @@ class DevShmSrc(TSSource):
         # buffer sent. this will be used to make sure we dont resend
         # late data and to track discontinuities
         start = int(now())
-        self.last_buffer = LastBuffer(start, start, False)
+        self.next_buffer_t0 = start
+        self.next_buffer_end = start
         if self.verbose:
-            print(f"Start up t0: {self.last_buffer.t0}", flush=True)
+            print(f"Start up t0: {self.next_buffer_t0}", flush=True)
 
         # Create the inotify handler
         self.observer = threading.Thread(
@@ -146,7 +129,7 @@ class DevShmSrc(TSSource):
                 # parse filename for the t0, we dont want to
                 # add files to the queue if they arrive late
                 _, _, t0, _ = from_T050017(filename)
-                if t0 < self.last_buffer.end:
+                if t0 < self.next_buffer_t0:
                     pass
                 else:
                     # Add the filename to the queue
@@ -165,6 +148,7 @@ class DevShmSrc(TSSource):
         """
         # get next file from queue. if its old, try again until we
         # find a new file or reach the end of the queue
+        self.next_buffer_t0 = self.next_buffer_end
         try:
             while True:
                 # Im not sure what the right timeout here is,
@@ -174,13 +158,13 @@ class DevShmSrc(TSSource):
                 next_file, t0 = self.queue.get(timeout=2)
                 if self.verbose:
                     print(next_file, t0, flush=True)
-                if t0 < self.last_buffer.end:
+                if t0 < self.next_buffer_t0:
                     continue
                 else:
                     break
 
         except queue.Empty:
-            if now() - self.last_buffer.end >= self.wait_time:
+            if now() - self.next_buffer_t0 >= self.wait_time:
                 # FIXME: We should send out a gap buffer instead of stopping
                 # FIXME: Sending out a 60 second gap buffer doesn't seem like
                 #        a good idea, cannot fit tensors in memory
@@ -191,25 +175,16 @@ class DevShmSrc(TSSource):
                 # )
                 self.send_gap = True
                 self.send_gap_duration = self.buffer_duration
-                # update last buffer
-                self.last_buffer.t0 = self.last_buffer.end
-                self.last_buffer.end = self.last_buffer.end + self.buffer_duration
-                self.last_buffer.is_gap = True
             else:
                 # send a gap buffer
                 self.send_gap = True
                 self.send_gap_duration = 0
-                self.last_buffer.is_gap = True
         else:
             self.send_gap = False
             # load data from the file using gwpy
             self.data_dict = TimeSeriesDict.read(
                 next_file, [self.channel_name, self.state_channel_name]
             )
-            # update last buffer
-            self.last_buffer.t0 = self.last_buffer.end
-            self.last_buffer.end = self.last_buffer.t0 + self.buffer_duration
-            self.last_buffer.is_gap = False
 
     def new(self, pad: SourcePad) -> TSFrame:
         """New frames are created on "pad" with an instance specific count and a name
@@ -229,19 +204,18 @@ class DevShmSrc(TSSource):
             if self.verbose:
                 print(
                     f"{self.instrument} Queue is empty, sending a gap buffer at t0: "
-                    f"{self.last_buffer.end} | Time now: {now()} | ifo: "
+                    f"{self.next_buffer_t0} | Time now: {now()} | ifo: "
                     f"{self.instrument}",
                     flush=True,
                 )
             shape = (int(self.send_gap_duration * self.rate_dict[channel]),)
-            outbufs = [
-                SeriesBuffer(
-                    offset=Offset.fromsec(self.last_buffer.end - Offset.offset_ref_t0),
-                    sample_rate=self.rate_dict[channel],
-                    data=None,
-                    shape=shape,
-                )
-            ]
+            outbuf = SeriesBuffer(
+                offset=Offset.fromsec(self.next_buffer_t0 - Offset.offset_ref_t0),
+                sample_rate=self.rate_dict[channel],
+                data=None,
+                shape=shape,
+            )
+            self.next_buffer_end = outbuf.end / 1_000_000_000
         else:
             # Send data!
             data = self.data_dict[channel]
@@ -258,15 +232,14 @@ class DevShmSrc(TSSource):
             f" ({self.buffer_duration} sec)."
 
             t0 = data.t0.value
-            assert t0 == self.last_buffer.t0
-            outbufs = [
-                SeriesBuffer(
-                    offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
-                    sample_rate=self.rate_dict[channel],
-                    data=numpy.array(data),
-                    shape=data.shape,
-                )
-            ]
+            assert t0 == self.next_buffer_t0
+            outbuf = SeriesBuffer(
+                offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
+                sample_rate=self.rate_dict[channel],
+                data=numpy.array(data),
+                shape=data.shape,
+            )
+            self.next_buffer_end = outbuf.end / 1_000_000_000
 
             if self.verbose:
                 print(
@@ -280,7 +253,7 @@ class DevShmSrc(TSSource):
         EOS = False
 
         return TSFrame(
-            buffers=outbufs,
+            buffers=[outbuf],
             metadata={"cnt": self.cnt, "name": "'%s'" % pad.name},
             EOS=EOS,
         )
