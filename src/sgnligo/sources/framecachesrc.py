@@ -68,7 +68,10 @@ class FrameReader(TSSource):
             # sometimes there are frame files with multiple instruments, in that case
             # don't filter by instrument
             cache = [
-                c for c in cache if c.observatory in self.ifo_strings(self.instrument)
+                c
+                for c in cache
+                for o in c.observatory
+                if o in self.ifo_strings(self.instrument)
             ]
 
         # only keep files that intersect the analysis segment

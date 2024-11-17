@@ -1,5 +1,5 @@
 from sgnligo.transforms.bit_mask import BitMask
-from sgnligo.transforms.condition import condition, parse_command_line_condition
+from sgnligo.transforms.condition import ConditionInfo, condition
 from sgnligo.transforms.horizon import HorizonDistance
 from sgnligo.transforms.latency import Latency
 from sgnligo.transforms.whiten import Whiten
