@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
+from argparse import ArgumentParser
+
 import pytest
 from sgn.apps import Pipeline
 from sgnts.sinks import FakeSeriesSink
 from sgnts.transforms import Align
 
-from sgnligo.sources import datasource_from_options, parse_command_line_datasource
+from sgnligo.sources import DataSourceInfo, datasource
 
 
 @pytest.mark.skip(reason="Not currently pytest compatible")
-def test_devshmsrc(capsys):
-    parser = parse_command_line_datasource()
+def test_devshmsrc_multi(capsys):
+    parser = ArgumentParser()
+    DataSourceInfo.append_options(parser)
+    parser.add_argument("-v", "--verbose", action="store_true")
     options = parser.parse_args()
+
+    data_source_info = DataSourceInfo.from_options(options)
 
     pipeline = Pipeline()
 
@@ -34,9 +40,9 @@ def test_devshmsrc(capsys):
     #      |   NullSink |
     #       ------------
 
-    source_out_links, _ = datasource_from_options(pipeline, options)
+    source_out_links = datasource(pipeline, data_source_info, options.verbose)
 
-    ifos = tuple(source_out_links.keys())
+    ifos = data_source_info.ifos
 
     pipeline.insert(
         Align(
@@ -58,4 +64,4 @@ def test_devshmsrc(capsys):
 
 
 if __name__ == "__main__":
-    test_devshmsrc(None)
+    test_devshmsrc_multi(None)
