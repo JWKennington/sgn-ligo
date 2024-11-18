@@ -92,6 +92,7 @@ class DataSourceInfo:
     def __post_init__(self):
         self.channel_dict = parse_list_to_dict(self.channel_name)
         self.ifos = sorted(self.channel_dict.keys())
+        self.seg = None
         self.validate()
 
     def validate(self):
@@ -150,6 +151,10 @@ class DataSourceInfo:
                 )
             elif self.gps_start_time >= self.gps_end_time:
                 raise ValueError("Must specify gps_start_time < gps_end_time")
+            else:
+                self.seg = segments.segment(
+                    LIGOTimeGPS(self.gps_start_time), LIGOTimeGPS(self.gps_end_time)
+                )
 
             if self.frame_segments_file is not None:
                 if self.frame_segments_name is None:
@@ -340,12 +345,6 @@ def datasource(
             options
     """
 
-    seg = None
-    if info.gps_start_time is not None:
-        start = LIGOTimeGPS(info.gps_start_time)
-        end = LIGOTimeGPS(info.gps_end_time)
-        seg = segments.segment(start, end)
-
     if info.frame_segments_file is not None:
         frame_segments = ligolw_segments.segmenttable_get_by_name(
             ligolw_utils.load_filename(
@@ -354,12 +353,12 @@ def datasource(
             ),
             info.frame_segments_name,
         ).coalesce()
-        if seg is not None:
+        if info.seg is not None:
             # Clip frame segments to seek segment if it
             # exists (not required, just saves some
             # memory and I/O overhead)
             frame_segments = segments.segmentlistdict(
-                (ifo, seglist & segments.segmentlist([seg]))
+                (ifo, seglist & segments.segmentlist([info.seg]))
                 for ifo, seglist in frame_segments.items()
             )
         for ifo, segs in frame_segments.items():
