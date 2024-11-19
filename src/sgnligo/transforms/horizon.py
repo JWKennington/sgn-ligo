@@ -5,8 +5,7 @@ import lal
 import lalsimulation
 import numpy as np
 from lal import LIGOTimeGPS
-from sgnevent.base import EventBuffer, EventFrame
-from sgnts.base import Offset, TSTransform
+from sgnts.base import EventBuffer, EventFrame, Offset, TSTransform
 
 
 @dataclass
