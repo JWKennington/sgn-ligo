@@ -28,6 +28,7 @@ class HorizonDistance(TSTransform):
     approximant: str = "IMRPhenomD"
     range: bool = False
     snr: int = 8
+    ifo: str = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -146,6 +147,7 @@ class HorizonDistance(TSTransform):
             data = {}
             data["horizon"] = dist
             data["time"] = ts
+            data["ifo"] = self.ifo
         else:
             dist = None
             data = None

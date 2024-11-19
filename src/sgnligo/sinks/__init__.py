@@ -1,4 +1,3 @@
 from sgnligo.sinks.influx_sink import InfluxSink
 from sgnligo.sinks.kafka_sink import KafkaSink
-
-# from .strike_sink import StrikeSink
+from sgnligo.sinks.strike_sink import StrikeSink
