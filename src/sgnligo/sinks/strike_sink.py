@@ -165,10 +165,12 @@ class StrikeSink(SinkElement):
                         for time0, snr0, chisq0, templateid0 in zip(
                             bgtime, snr, chisq, template_id
                         ):
-                            # loop over triggers in subbanks
+                            # loop over triggers in subbanks, and send them to
+                            # train_noise in a burst
+                            bg_events = []
                             for t, s, c, tid in zip(time0, snr0, chisq0, templateid0):
                                 # FIXME: is end time in seconds??
-                                event = event_dummy(
+                                bg_event = event_dummy(
                                     ifo=ifo,
                                     end=t / 1_000_000_000,
                                     snr=s,
@@ -176,7 +178,8 @@ class StrikeSink(SinkElement):
                                     combochisq=c,
                                     template_id=tid,
                                 )
-                                self.ranking_stats[bankid].train_noise(event)
+                                bg_events.append(bg_event)
+                            self.ranking_stats[bankid].train_noise(bg_events)
             #
             # Coinc triggers
             #
@@ -281,3 +284,26 @@ class StrikeSink(SinkElement):
                     coinc_row.combined_far = None
                     coinc_row.false_alarm_rate = None
                     self.coinc_tables[bankid].append(coinc_row)
+
+        if "horizon" in metadata and "trigs" not in pad.name:  # this is a horizon pad
+            if bufs["data"].data is not None:  # happens for the first few buffers
+                ifo = bufs["data"].data["ifo"]
+                horizon = bufs["data"].data[
+                    "horizon"
+                ]  # can also be accessed via metadata['horizon']
+                horizon_time = (
+                    bufs["data"].data["time"] / 1_000_000_000
+                )  # NOTE: This is the start time. Do we want the end time?
+                # FIXME: We set the same horizon history for every svd bin
+                # since the horizon distance calculation in
+                # sgnligo/transforms/condition.py
+                # uses the same template for every svd bin
+                # When that is changed, this will need to be made
+                # bin dependent as well, which would require
+                # bankid info to be piped along with the horizon distance
+                for bankid in self.bankids_map:
+                    # self.ranking_stats[bankid].horizon_history[ifo][horizon_time]
+                    # = horizon
+                    self.ranking_stats[bankid].terms["P_of_tref_Dh"].horizon_history[
+                        ifo
+                    ][horizon_time] = horizon
