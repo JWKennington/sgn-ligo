@@ -95,8 +95,8 @@ class FrameReader(TSSource):
         # FIXME: support multiple pads with different sample rates
         # FIXME: do we want multiple channels in one buffer?
         for pad in self.source_pads:
-            self.setup_buffers_on_pad(
-                channels=(), rate=self.rates[self.rsrcs[pad]], pad=pad
+            self.set_pad_buffer_params(
+                sample_shape=(), rate=self.rates[self.rsrcs[pad]], pad=pad
             )
 
         # now that we have loaded data from this frame,
