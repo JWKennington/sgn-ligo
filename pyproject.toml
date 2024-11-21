@@ -16,7 +16,6 @@ dependencies = [
     "gwpy",
     # SGN dependencies
     "sgn",
-    "sgn-event",
     "sgn-ts[torch]",
     # LIGO dependencies
     "ligo-scald",
