@@ -25,12 +25,10 @@ class DevShmSrc(TSSource):
         shared_memory_dir:
             str, shared memory directory name (full path). Suggestion:
             /dev/shm/kafka/L1_O3ReplayMDC
-        instrument:
-            str, instrument, should be one to one with channel names
-        channel_name:
-            str, channel name of the data
-        state_channel_name:
-            str, channel name of the state vector
+        channel_names:
+            list[str], a list of channel names of the data, e.g.,
+            ["L1:GDS-CALIB_STRAIN", "L1:GDS-CALIB_STATE_VECTOR"]. Source pads will
+            be automatically generated for each channel, with channel name as pad name.
         wait_time:
             float, time to wait for next file.
         watch_suffix:
@@ -40,38 +38,22 @@ class DevShmSrc(TSSource):
     """
 
     shared_memory_dir: str = ""
-    instrument: str = ""
-    channel_name: str = ""
-    state_channel_name: str = ""
+    channel_names: list[str] = None
     wait_time: float = 60
     watch_suffix: str = ".gwf"
     verbose: bool = False
 
     def __post_init__(self):
-        self.source_pad_names = (self.channel_name, self.state_channel_name)
+        if len(self.source_pad_names) > 0:
+            if self.source_pad_names != tuple(self.channel_names):
+                raise ValueError("Expected source pad names to match channel names")
+        else:
+            print(f"Generating source pads from channel names {self.channel_names}...")
+            self.source_pad_names = tuple(self.channel_names)
         super().__post_init__()
-        assert (
-            self.shared_memory_dir
-            and self.instrument
-            and self.channel_name
-            and self.state_channel_name
-        )
+        assert self.shared_memory_dir and self.channel_names
 
         self.cnt = {p: 0 for p in self.source_pads}
-        # FIXME: do we need to consider other rates?
-        # FIXME: make this more general
-        if self.instrument == "V1":
-            self.rate_dict = {self.channel_name: 16384, self.state_channel_name: 1}
-        else:
-            self.rate_dict = {self.channel_name: 16384, self.state_channel_name: 16}
-        # set assumed buffer duration based on sample rate
-        # and num samples per buffer. Will fail if this does
-        # not match the file duration
-        self.buffer_duration = 1
-        for rate in self.rate_dict.values():
-            if self.num_samples(rate) / rate != 1:
-                raise ValueError("Buffer duration must be 1 second.")
-
         self.queue = queue.Queue()
 
         # initialize a named tuple to track info about the previous
@@ -91,6 +73,29 @@ class DevShmSrc(TSSource):
         # Start the observer and set the stop attribute
         self._stop = False
         self.observer.start()
+
+        # Read in the first gwf file to get the sample rates for each channel name
+        files = os.listdir(self.shared_memory_dir)
+        for f in reversed(files):
+            if f.endswith(self.watch_suffix):
+                file0 = self.shared_memory_dir + "/" + f
+                break
+
+        _data_dict = TimeSeriesDict.read(file0, self.channel_names)
+        self.rates = {c: int(data.sample_rate.value) for c, data in _data_dict.items()}
+
+        # set assumed buffer duration based on sample rate
+        # and num samples per buffer. Will fail if this does
+        # not match the file duration
+        self.buffer_duration = 1
+        for rate in self.rates.values():
+            if self.num_samples(rate) / rate != 1:
+                raise ValueError("Buffer duration must be 1 second.")
+
+        if self.verbose:
+            print("sample rates:", self.rates)
+
+        self.data_dict = {c: None for c in self.channel_names}
 
     def monitor_dir(self, queue: queue.Queue, watch_dir: str) -> None:
         """Poll directory for new files with inotify
@@ -146,21 +151,41 @@ class DevShmSrc(TSSource):
             pad:
                 InternalPad
         """
+        self.next_buffer_t0 = self.next_buffer_end
+        for data in self.data_dict.values():
+            if data is not None:
+                # there is still data
+                if self.file_t0 == self.next_buffer_t0:
+                    self.discont = False
+                    self.send_gap = False
+                elif self.file_t0 > self.next_buffer_t0:
+                    self.discont = True
+                    self.send_gap = True
+                    self.send_gap_duration = self.buffer_duration
+                    pass
+                else:
+                    raise ValueError("wrong t0")
+                return
+
         # get next file from queue. if its old, try again until we
         # find a new file or reach the end of the queue
-        self.next_buffer_t0 = self.next_buffer_end
         try:
             while True:
                 # Im not sure what the right timeout here is,
                 # but I want to avoid a situation where get()
                 # times out just before the new file arrives and
                 # prematurely decides to send a gap buffer
-                next_file, t0 = self.queue.get(timeout=2)
+                next_file, t0 = self.queue.get(timeout=3)
+                self.file_t0 = t0
                 if self.verbose:
                     print(next_file, t0, flush=True)
                 if t0 < self.next_buffer_t0:
                     continue
+                elif t0 == self.next_buffer_t0:
+                    self.discont = False
+                    break
                 else:
+                    self.discont = True
                     break
 
         except queue.Empty:
@@ -173,6 +198,11 @@ class DevShmSrc(TSSource):
                 #    f"Reached {self.wait_time} seconds with no new files in "
                 #    f"{self.shared_memory_dir}, exiting."
                 # )
+                if self.verbose:
+                    print(
+                        "Reached wait time, sending a gap buffer of "
+                        f" {self.buffer_duration}"
+                    )
                 self.send_gap = True
                 self.send_gap_duration = self.buffer_duration
             else:
@@ -180,10 +210,21 @@ class DevShmSrc(TSSource):
                 self.send_gap = True
                 self.send_gap_duration = 0
         else:
-            self.send_gap = False
+            if self.discont:
+                # the new file is later than the next expected t0
+                # start sending gap buffers
+                self.send_gap = True
+                self.send_gap_duration = self.buffer_duration
+                print(
+                    f"discont t0 {t0} | file_t0 {self.file_t0} | next_buffer_t0 "
+                    f"{self.next_buffer_t0}"
+                )
+            else:
+                self.send_gap = False
             # load data from the file using gwpy
             self.data_dict = TimeSeriesDict.read(
-                next_file, [self.channel_name, self.state_channel_name]
+                next_file,
+                self.channel_names,
             )
 
     def new(self, pad: SourcePad) -> TSFrame:
@@ -203,15 +244,15 @@ class DevShmSrc(TSSource):
         if self.send_gap:
             if self.verbose:
                 print(
-                    f"{self.instrument} Queue is empty, sending a gap buffer at t0: "
+                    f"{pad.name} Queue is empty, sending a gap buffer at t0: "
                     f"{self.next_buffer_t0} | Time now: {now()} | ifo: "
-                    f"{self.instrument}",
+                    f"{pad.name}",
                     flush=True,
                 )
-            shape = (int(self.send_gap_duration * self.rate_dict[channel]),)
+            shape = (int(self.send_gap_duration * self.rates[channel]),)
             outbuf = SeriesBuffer(
                 offset=Offset.fromsec(self.next_buffer_t0 - Offset.offset_ref_t0),
-                sample_rate=self.rate_dict[channel],
+                sample_rate=self.rates[channel],
                 data=None,
                 shape=shape,
             )
@@ -222,9 +263,9 @@ class DevShmSrc(TSSource):
 
             # check sample rate and duration matches what we expect
             duration = data.duration.value
-            assert int(data.sample_rate.value) == self.rate_dict[channel], (
+            assert int(data.sample_rate.value) == self.rates[channel], (
                 f"Data rate does not match requested sample rate. Data sample rate:"
-                f" {data.sample_rate.value}, expected {self.rate_dict[channel]}"
+                f" {data.sample_rate.value}, expected {self.rates[channel]}"
             )
             assert (
                 duration == self.buffer_duration
@@ -232,18 +273,22 @@ class DevShmSrc(TSSource):
             f" ({self.buffer_duration} sec)."
 
             t0 = data.t0.value
-            assert t0 == self.next_buffer_t0
+            assert (
+                t0 == self.next_buffer_t0
+            ), f"Name: {self.name} | t0: {t0} | next buffer t0: {self.next_buffer_t0}"
             outbuf = SeriesBuffer(
                 offset=Offset.fromsec(t0 - Offset.offset_ref_t0),
-                sample_rate=self.rate_dict[channel],
+                sample_rate=self.rates[channel],
                 data=numpy.array(data),
                 shape=data.shape,
             )
             self.next_buffer_end = outbuf.end / 1_000_000_000
 
+            self.data_dict[channel] = None
+
             if self.verbose:
                 print(
-                    f"{self.instrument} Buffer t0: {t0} | Time Now: {now()} |"
+                    f"{pad.name} Buffer t0: {t0} | Time Now: {now()} |"
                     f" Time delay: {float(now()) - t0:.3e}",
                     flush=True,
                 )
