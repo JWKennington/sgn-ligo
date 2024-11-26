@@ -430,9 +430,7 @@ def datasource(
             state_channel_name_ifo = f"{ifo}:{info.state_channel_dict[ifo]}"
             devshm = DevShmSrc(
                 name=ifo + "_Devshm",
-                channel_name=channel_name_ifo,
-                state_channel_name=state_channel_name_ifo,
-                instrument=ifo,
+                channel_names=[channel_name_ifo, state_channel_name_ifo],
                 shared_memory_dir=info.shared_memory_dict[ifo],
                 wait_time=info.wait_time,
                 verbose=verbose,
@@ -449,7 +447,7 @@ def datasource(
                 control="state_vector",
                 source_pad_names=(ifo,),
             )
-            info.input_sample_rate = devshm.rate_dict[channel_name_ifo]
+            info.input_sample_rate = devshm.rates[channel_name_ifo]
             pipeline.insert(
                 devshm,
                 bit_mask,
