@@ -63,9 +63,12 @@ class DataSourceInfo:
             int, the bit mask for the state vector data
         shared_memory_dir:
             str, the path to the shared memory directory to read low-latency data from
-        wait_time:
-            float, the time to wait for next file when data_souce is "devshm", in
-            seconds
+        discont_wait_time:
+            float, the time to wait for next file before dropping data when data_souce
+            is "devshm", in seconds
+        queue_timeout:
+            float, the time to wait for next file from the queue before sending a
+            hearbeat buffer when data_souce is "devshm", in seconds
         input_sample_rate:
             int, the sample rate for fake sources [white|sin|impulse]
         impulse_position:
@@ -85,7 +88,8 @@ class DataSourceInfo:
     state_channel_name: Optional[list[str]] = None
     state_vector_on_bits: Optional[list[int]] = None
     shared_memory_dir: Optional[list[str]] = None
-    wait_time: float = 60
+    discont_wait_time: float = 60
+    queue_timeout: float = 1
     input_sample_rate: Optional[int] = None
     impulse_position: int = -1
 
@@ -217,7 +221,8 @@ class DataSourceInfo:
             state_channel_name=options.state_channel_name,
             state_vector_on_bits=options.state_vector_on_bits,
             shared_memory_dir=options.shared_memory_dir,
-            wait_time=options.wait_time,
+            discont_wait_time=options.discont_wait_time,
+            queue_timeout=options.queue_timeout,
             input_sample_rate=options.input_sample_rate,
             impulse_position=options.impulse_position,
         )
@@ -308,13 +313,21 @@ class DataSourceInfo:
             "Can be given multiple times as --shared-memory-dir=IFO=DIR-NAME",
         )
         group.add_argument(
-            "--wait-time",
+            "--discont-wait-time",
             metavar="seconds",
-            type=int,
+            type=float,
             default=60,
-            help="Time to wait for new files in seconds before throwing an error. "
-            "In online mode, new files should always arrive every second, unless "
-            "there are problems. Default wait time is 60 seconds.",
+            help="Time to wait for new files in seconds before dropping data. "
+            "Default wait time is 60 seconds.",
+        )
+        group.add_argument(
+            "--queue-timeout",
+            metavar="seconds",
+            type=float,
+            default=1,
+            help="Time to wait for new files from the queue in seconds before sending "
+            "a hearbeat buffer. In online mode, new files should always arrive every "
+            "second, unless there are problems. Default timeout is 1 second.",
         )
         group.add_argument(
             "--input-sample-rate",
@@ -432,7 +445,8 @@ def datasource(
                 name=ifo + "_Devshm",
                 channel_names=[channel_name_ifo, state_channel_name_ifo],
                 shared_memory_dir=info.shared_memory_dict[ifo],
-                wait_time=info.wait_time,
+                discont_wait_time=info.discont_wait_time,
+                queue_timeout=info.queue_timeout,
                 verbose=verbose,
             )
             bit_mask = BitMask(

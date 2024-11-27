@@ -29,8 +29,10 @@ class DevShmSrc(TSSource):
             list[str], a list of channel names of the data, e.g.,
             ["L1:GDS-CALIB_STRAIN", "L1:GDS-CALIB_STATE_VECTOR"]. Source pads will
             be automatically generated for each channel, with channel name as pad name.
-        wait_time:
-            float, time to wait for next file.
+        discont_wait_time:
+            float, time to wait before dropping data.
+        queue_timeout:
+            float, time to wait for next file from the queue.
         watch_suffix:
             str, filename suffix to watch for.
         verbose:
@@ -39,7 +41,8 @@ class DevShmSrc(TSSource):
 
     shared_memory_dir: str = ""
     channel_names: list[str] = None
-    wait_time: float = 60
+    discont_wait_time: float = 60
+    queue_timeout: float = 1
     watch_suffix: str = ".gwf"
     verbose: bool = False
 
@@ -98,6 +101,7 @@ class DevShmSrc(TSSource):
             print("sample rates:", self.rates)
 
         self.data_dict = {c: None for c in self.channel_names}
+        self.send_gap = False
 
     def monitor_dir(self, queue: queue.Queue, watch_dir: str) -> None:
         """Poll directory for new files with inotify
@@ -177,7 +181,7 @@ class DevShmSrc(TSSource):
                 # but I want to avoid a situation where get()
                 # times out just before the new file arrives and
                 # prematurely decides to send a gap buffer
-                next_file, t0 = self.queue.get(timeout=3)
+                next_file, t0 = self.queue.get(timeout=self.queue_timeout)
                 self.file_t0 = t0
                 if self.verbose:
                     print(next_file, t0, flush=True)
@@ -191,7 +195,7 @@ class DevShmSrc(TSSource):
                     break
 
         except queue.Empty:
-            if now() - self.next_buffer_t0 >= self.wait_time:
+            if now() - self.next_buffer_t0 >= self.discont_wait_time:
                 # FIXME: We should send out a gap buffer instead of stopping
                 # FIXME: Sending out a 60 second gap buffer doesn't seem like
                 #        a good idea, cannot fit tensors in memory
@@ -248,7 +252,7 @@ class DevShmSrc(TSSource):
                 print(
                     f"{pad.name} Queue is empty, sending a gap buffer at t0: "
                     f"{self.next_buffer_t0} | Time now: {now()} | ifo: "
-                    f"{pad.name} | Time delay: {now() - self.next_buffer_t0/1e9}",
+                    f"{pad.name} | Time delay: {now() - self.next_buffer_t0}",
                     flush=True,
                 )
             shape = (int(self.send_gap_duration * self.rates[channel]),)
