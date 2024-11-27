@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from sgnts.base import SeriesBuffer, TSFrame, TSTransform
 
-from ..base import now
+from sgnligo.base import now
 
 
 @dataclass
@@ -21,8 +21,8 @@ class Latency(TSTransform):
     def transform(self, pad):
         frame = self.preparedframes[self.sink_pads[0]]
         metadata = frame.metadata
-        time = now().ns()
-        latency = (time - frame.buffers[0].t0) / 1_000_000_000
+        time = now()
+        latency = time - frame.buffers[0].t0 / 1_000_000_000
 
         outbuf = SeriesBuffer(
             offset=frame.offset,
