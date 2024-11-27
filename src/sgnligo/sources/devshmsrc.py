@@ -67,7 +67,9 @@ class DevShmSrc(TSSource):
 
         # Create the inotify handler
         self.observer = threading.Thread(
-            target=self.monitor_dir, args=(self.queue, self.shared_memory_dir)
+            target=self.monitor_dir,
+            args=(self.queue, self.shared_memory_dir),
+            daemon=True,
         )
 
         # Start the observer and set the stop attribute
@@ -76,7 +78,7 @@ class DevShmSrc(TSSource):
 
         # Read in the first gwf file to get the sample rates for each channel name
         files = os.listdir(self.shared_memory_dir)
-        for f in reversed(files):
+        for f in reversed(sorted(files)):
             if f.endswith(self.watch_suffix):
                 file0 = self.shared_memory_dir + "/" + f
                 break
@@ -246,7 +248,7 @@ class DevShmSrc(TSSource):
                 print(
                     f"{pad.name} Queue is empty, sending a gap buffer at t0: "
                     f"{self.next_buffer_t0} | Time now: {now()} | ifo: "
-                    f"{pad.name}",
+                    f"{pad.name} | Time delay: {now() - self.next_buffer_t0/1e9}",
                     flush=True,
                 )
             shape = (int(self.send_gap_duration * self.rates[channel]),)
