@@ -9,7 +9,7 @@ from lal import LIGOTimeGPS
 from lal.utils import CacheEntry
 from ligo import segments
 from sgn.base import InternalPad, SourcePad
-from sgnts.base import TSFrame, TSSource
+from sgnts.base import Audioadapter, Offset, SeriesBuffer, TSFrame, TSSource
 
 
 @dataclass
@@ -86,10 +86,11 @@ class FrameReader(TSSource):
 
         # make sure it is sorted by gps time
         self.cache.sort(key=lambda x: x.segment[0])
+        self.A = {c: Audioadapter() for c in self.channel_names}
 
         # load first segment of data to read sample rate
         self.rates = {}
-        self.data_dict = self.load_gwf_data(self.cache[0])
+        self.load_gwf_data(self.cache[0])
         print(f"Sample rate per channel: {self.rates}")
 
         # FIXME: support multiple pads with different sample rates
@@ -140,9 +141,6 @@ class FrameReader(TSSource):
         start = intersection[0]
         end = intersection[1]
 
-        if self.last_epoch != start:
-            raise ValueError(f"Unepected epoch: {start}, expected: {self.last_epoch}")
-
         # FIXME: check for gaps
         data_dict = TimeSeriesDict.read(
             frame_file.path, self.channel_names, start=start, end=end
@@ -153,11 +151,33 @@ class FrameReader(TSSource):
                 self.rates[channel] = int(data.sample_rate.value)
 
         for channel, data in data_dict.items():
-            data_dict[channel] = np.array(data)
+            if self.last_epoch < start:
+                print(
+                    f"Unepected epoch: {start}, expected: {self.last_epoch}, sending "
+                    "gap buffer"
+                )
+                self.A[channel].push(
+                    SeriesBuffer(
+                        offset=Offset.fromsec(float(self.last_epoch)),
+                        sample_rate=self.rates[channel],
+                        data=None,
+                        shape=(int((start - self.last_epoch) * self.rates[channel]),),
+                    )
+                )
+            elif self.last_epoch > start:
+                raise ValueError(
+                    f"Unepected epoch: {start}, expected: {self.last_epoch}, sending "
+                    "gap buffer"
+                )
+            self.A[channel].push(
+                SeriesBuffer(
+                    offset=Offset.fromsec(float(start)),
+                    sample_rate=self.rates[channel],
+                    data=np.array(data),
+                )
+            )
 
         self.last_epoch = end
-
-        return data_dict
 
     def internal(self, pad: InternalPad) -> None:
         """Check if we need to read the next gw frame file in the cache. All channels
@@ -171,22 +191,14 @@ class FrameReader(TSSource):
         # load next frame of data from disk when we have less than
         # one buffer length of data left
         read_new = False
-        for channel, data in self.data_dict.items():
-            if data.size < self.num_samples(self.rates[channel]):
+        for channel, adapter in self.A.items():
+            if adapter.size < self.num_samples(self.rates[channel]):
                 read_new = True
                 break
 
         if read_new and self.cache:
             # Read multiple channels at once
-            data_dict = self.load_gwf_data(self.cache[0])
-
-            for channel, data in data_dict.items():
-                if self.data_dict[channel].size > 0:
-                    self.data_dict[channel] = np.concatenate(
-                        (self.data_dict[channel], data)
-                    )
-                else:
-                    self.data_dict[channel] = data
+            self.load_gwf_data(self.cache[0])
 
             # now that we have loaded data from this frame,
             # remove it from the cache
@@ -213,19 +225,18 @@ class FrameReader(TSSource):
         # the analysis segment in every frame in the cache
         # set this condition on second to last buffer so it can propagate to
         # downstream elements
-        EOS = (
-            self.data_dict[channel].size <= self.num_samples(self.rates[channel])
-        ) and (len(self.cache) == 0)
+        EOS = (self.A[channel].size <= self.num_samples(self.rates[channel])) and (
+            len(self.cache) == 0
+        )
 
         metadata = {"cnt": self.cnt[pad], "name": "'%s'" % pad.name}
 
         frame = self.prepare_frame(pad, EOS=EOS, metadata=metadata)
 
-        for buf in frame:
-            # output the first buf.samples of data in the frame file
-            buf.set_data(self.data_dict[channel][: buf.samples])
+        bufs = self.A[channel].get_sliced_buffers((frame.offset, frame.end_offset))
 
-            # remove the used data
-            self.data_dict[channel] = self.data_dict[channel][buf.samples :]
+        frame.set_buffers(bufs)
+
+        self.A[channel].flush_samples_by_end_offset(frame.end_offset)
 
         return frame
