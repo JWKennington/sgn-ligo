@@ -9,7 +9,7 @@ from sgnts.sinks import DumpSeriesSink
 from sgnts.transforms import Resampler
 
 from sgnligo.sources import FrameReader
-from sgnligo.transforms import HorizonDistance, Whiten
+from sgnligo.transforms import Whiten
 
 
 def parse_command_line():
@@ -146,16 +146,6 @@ def test_whitengraph(capsys):
             psd_pad_name="spectrum",
             whiten_pad_name="hoft",
         ),
-        HorizonDistance(
-            name="Horizon",
-            source_pad_names=("horizon",),
-            sink_pad_names=("spectrum",),
-            m1=1.4,
-            m2=1.4,
-            fmin=10.0,
-            fmax=1000.0,
-            delta_f=1 / 16.0,
-        ),
         DumpSeriesSink(
             name="HoftSnk",
             sink_pad_names=("hoft",),
@@ -166,11 +156,6 @@ def test_whitengraph(capsys):
             sink_pad_names=("spectrum",),
             fname=os.path.join(options.output_dir, "psd_out.txt"),
         ),
-        DumpSeriesSink(
-            name="HorizonSnk",
-            sink_pad_names=("horizon",),
-            fname=os.path.join(options.output_dir, "horizon.txt"),
-        ),
     )
 
     pipeline.insert(
@@ -180,10 +165,8 @@ def test_whitengraph(capsys):
         link_map={
             "Resampler:sink:frsrc": "FrameReader:src:frsrc",
             "Whitener:sink:resamp": "Resampler:src:resamp",
-            "Horizon:sink:spectrum": "Whitener:src:spectrum",
             "HoftSnk:sink:hoft": "Whitener:src:hoft",
             "SpectrumSnk:sink:spectrum": "Whitener:src:spectrum",
-            "HorizonSnk:sink:horizon": "Horizon:src:horizon",
             "RawSnk:sink:frsrc": "FrameReader:src:frsrc",
         }
     )
