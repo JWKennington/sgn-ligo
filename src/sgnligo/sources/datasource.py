@@ -376,6 +376,10 @@ def datasource(
             )
         for ifo, segs in frame_segments.items():
             frame_segments[ifo] = [segments.segment(s[0].ns(), s[1].ns()) for s in segs]
+
+        # FIXME: find a better way to get the analysis ifos. In gstlal this is obtained
+        # from the time-slide file
+        info.all_analysis_ifos = list(frame_segments.keys())
     else:
         # if no frame segments provided, set them to an empty segment list dictionary
         frame_segments = segments.segmentlistdict((ifo, None) for ifo in info.ifos)
