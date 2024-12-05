@@ -8,7 +8,7 @@ from gwpy.timeseries import TimeSeriesDict
 from lal import LIGOTimeGPS
 from lal.utils import CacheEntry
 from ligo import segments
-from sgn.base import InternalPad, SourcePad
+from sgn.base import SourcePad
 from sgnts.base import Audioadapter, Offset, SeriesBuffer, TSFrame, TSSource
 
 
@@ -179,13 +179,9 @@ class FrameReader(TSSource):
 
         self.last_epoch = end
 
-    def internal(self, pad: InternalPad) -> None:
+    def internal(self) -> None:
         """Check if we need to read the next gw frame file in the cache. All channels
         are read at once.
-
-        Args:
-            pad:
-                InternalPad
         """
 
         # load next frame of data from disk when we have less than

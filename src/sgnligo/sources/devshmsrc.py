@@ -11,7 +11,7 @@ try:
 except ImportError:
     INotify = flags = None
 
-from sgn.base import InternalPad, SourcePad
+from sgn.base import SourcePad
 from sgnts.base import Offset, SeriesBuffer, TSFrame, TSSource
 
 from sgnligo.base import from_T050017, now
@@ -149,13 +149,9 @@ class DevShmSrc(TSSource):
         # Remove the watch
         i.rm_watch(watch_dir)
 
-    def internal(self, pad: InternalPad) -> None:
+    def internal(self) -> None:
         """Queue files and check if we need to send out buffers of data or gaps. All
         channels are read at once.
-
-        Args:
-            pad:
-                InternalPad
         """
         self.next_buffer_t0 = self.next_buffer_end
         for data in self.data_dict.values():

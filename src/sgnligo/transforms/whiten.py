@@ -338,7 +338,7 @@ class Whiten(TSTransform):
         self.geometric_mean_square = np.log(arithmetic_mean_square_data) - EULERGAMMA
         self.n_samples = min(weight, self.navg)
 
-    def internal(self, pad):
+    def internal(self):
         """
         Whiten incoming data in segments of fft-length seconds overlapped by fft-length
         * 3/4. If the data segment has N samples, we apply a zero-padded Hann window on
@@ -404,7 +404,7 @@ class Whiten(TSTransform):
         to or after the first input buffer, so the first iteration is a gap buffer.
 
         """
-        super().internal(pad)
+        super().internal()
         # incoming frame handling
         frame = self.preparedframes[self.sink_pads[0]]
         EOS = frame.EOS
