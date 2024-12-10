@@ -556,5 +556,5 @@ class Whiten(TSTransform):
             metadata=metadata,
         )
 
-    def transform(self, pad):
+    def new(self, pad):
         return self.output_frames[pad]

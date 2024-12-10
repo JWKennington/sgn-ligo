@@ -31,7 +31,7 @@ class BitMask(TSTransform):
         # set state vector on bits
         self.bit_mask = state_vector_on_off_bits(self.bit_mask)
 
-    def transform(self, pad: SourcePad) -> TSFrame:
+    def new(self, pad: SourcePad) -> TSFrame:
         """Produce non-gap buffers if the bit of the data passes the bit mask,
         otherwise, produce gap buffers.
 
