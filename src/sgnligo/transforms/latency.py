@@ -18,7 +18,7 @@ class Latency(TSTransform):
         assert len(self.sink_pads) == 1
         assert isinstance(self.route, str)
 
-    def transform(self, pad):
+    def new(self, pad):
         frame = self.preparedframes[self.sink_pads[0]]
         metadata = frame.metadata
         time = now()
