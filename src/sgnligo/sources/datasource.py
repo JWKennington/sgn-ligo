@@ -12,7 +12,7 @@ from ligo import segments
 from ligo.lw import utils as ligolw_utils
 from ligo.lw.utils import segments as ligolw_segments
 from sgn import Pipeline
-from sgnts.sources import FakeSeriesSrc, SegmentSrc
+from sgnts.sources import FakeSeriesSrc, RealTimeWhiteNoiseSrc, SegmentSrc
 from sgnts.transforms import Adder, Gate
 
 from sgnligo.base import parse_list_to_dict
@@ -20,8 +20,8 @@ from sgnligo.sources.devshmsrc import DevShmSrc
 from sgnligo.sources.framecachesrc import FrameReader
 from sgnligo.transforms import BitMask
 
-KNOWN_DATASOURCES = ["white", "sin", "impulse", "frames", "devshm"]
-FAKE_DATASOURCES = ["white", "sin", "impulse"]
+KNOWN_DATASOURCES = ["white", "sin", "impulse", "white-realtime", "frames", "devshm"]
+FAKE_DATASOURCES = ["white", "sin", "impulse", "white-realtime"]
 OFFLINE_DATASOURCES = ["white", "sin", "impulse", "frames"]
 
 
@@ -32,10 +32,11 @@ class DataSourceInfo:
     Args:
         data_source:
             str, the data source, can be one of
-            [white|sin|impulse|frames|devshm]
+            [white|sin|impulse|white-realtime|frames|devshm]
         channel_name:
             list[str, ...], a list of channel names ["IFO=CHANNEL_NAME",...].
-            For fake sources [white|sin|impulse], channel names are used to derive ifos.
+            For fake sources [white|sin|impulse|white-realtime], channel names are used
+            to derive ifos.
         gps_start_time:
             float, the gps start time of the data to analyze, in seconds
         gps_end_time:
@@ -70,7 +71,7 @@ class DataSourceInfo:
             float, the time to wait for next file from the queue before sending a
             hearbeat buffer when data_souce is "devshm", in seconds
         input_sample_rate:
-            int, the sample rate for fake sources [white|sin|impulse]
+            int, the sample rate for fake sources [white|sin|impulse|white-realtime]
         impulse_position:
             int, the sample point position to place the impulse data point. Default -1,
             which will generate the impulse position randomly
@@ -146,6 +147,12 @@ class DataSourceInfo:
                 raise ValueError(
                     "Must not specify gps_start_time or gps_end_time when"
                     " data_source='devshm'"
+                )
+        elif self.data_source == "white-realtime":
+            if self.input_sample_rate is None:
+                raise ValueError(
+                    "Must specify input_sample_rate when data_source is one of"
+                    f" {FAKE_DATASOURCES}"
                 )
         else:
             if self.gps_start_time is None or self.gps_end_time is None:
@@ -234,8 +241,7 @@ class DataSourceInfo:
             "--data-source",
             action="store",
             required=True,
-            help="The type of the input source. Supported sources: 'white', 'sin', "
-            "'impulse', 'frames', 'devshm'",
+            help=f"The type of the input source. Supported: {KNOWN_DATASOURCES}",
         )
         group.add_argument(
             "--channel-name",
@@ -333,7 +339,8 @@ class DataSourceInfo:
             "--input-sample-rate",
             metavar="Hz",
             type=int,
-            help="Input sample rate. Required if data-source one of [white, sin]",
+            help="Input sample rate. Required if data-source one of [white|sin| "
+            "white-realtime]",
         )
         group.add_argument(
             "--impulse-position",
@@ -383,6 +390,7 @@ def datasource(
     else:
         # if no frame segments provided, set them to an empty segment list dictionary
         frame_segments = segments.segmentlistdict((ifo, None) for ifo in info.ifos)
+        info.all_analysis_ifos = info.ifos
 
     source_out_links = {ifo: None for ifo in info.ifos}
     pad_names = {ifo: None for ifo in info.ifos}
@@ -479,6 +487,17 @@ def datasource(
                     + state_channel_name_ifo,
                     ifo + "_Gate:sink:state_vector": ifo + "_Mask:src:" + ifo,
                 },
+            )
+        elif info.data_source == "white-realtime":
+            pad_names[ifo] = ifo
+            source_name = "_FakeSource"
+            source_pad_names = (ifo,)
+            pipeline.insert(
+                RealTimeWhiteNoiseSrc(
+                    name=ifo + "_FakeSource",
+                    source_pad_names=source_pad_names,
+                    rate=info.input_sample_rate,
+                ),
             )
         else:
             pad_names[ifo] = ifo
