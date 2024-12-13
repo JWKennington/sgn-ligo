@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 
 import pytest
 from sgn.apps import Pipeline
+from sgn.sources import SignalEOS
 from sgnts.sinks import FakeSeriesSink
 from sgnts.transforms import Align
 
@@ -60,7 +61,8 @@ def test_devshmsrc_multi(capsys):
         link_map={"snk2:sink:" + ifo: "trans1:src:" + ifo for ifo in ifos},
     )
 
-    pipeline.run()
+    with SignalEOS():
+        pipeline.run()
 
 
 if __name__ == "__main__":

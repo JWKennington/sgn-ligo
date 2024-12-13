@@ -44,3 +44,7 @@ class KafkaSink(SinkElement):
 
         if frame.EOS:
             self.mark_eos(pad)
+
+    def internal(self):
+        if self.at_eos:
+            self.client.close()
