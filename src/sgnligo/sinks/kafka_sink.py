@@ -1,72 +1,46 @@
 from dataclasses import dataclass
 
 from ligo.scald.io import kafka
-from sgnts.base import TSSink
+from sgnts.base import SinkElement
 
 
 @dataclass
-class KafkaSink(TSSink):
-    """
-    Push data to kafka
+class KafkaSink(SinkElement):
+    """Send data to kafka topics
 
-    Parameters:
-    -----------
-    output_kafka_server: str
-        The kafka server to write data to
-    topics: str
-        The kafka topics to write data to
-    tags: str
-        The tags to write the kafka data
-    verbose: bool
-        Be verbose
-    reduce_time: float
-        Will reduce data every reduce_time, in seconds
+    Args:
+        output_kafka_server:
+            str, The kafka server to write data to
+        topics:
+            list[str], The kafka topics to write data to
+        tag:
+            str, The tag to write the kafka data
     """
 
     output_kafka_server: str = None
-    topics: str = None
-    prepare_kafka_data: bool = False
-    routes: str = None
-    tags: list = None
-    verbose: bool = False
-    reduce_time: float = 2
+    topics: list[str] = None
+    tag: list[str] = None
 
     def __post_init__(self):
         assert isinstance(self.output_kafka_server, str)
         assert isinstance(self.topics, list)
         super().__post_init__()
 
-        self.cnt = {p: 0 for p in self.sink_pads}
-        self.last_reduce_time = None
-
         self.client = kafka.Client("kafka://{}".format(self.output_kafka_server))
-        # self.kafka_data = defaultdict(lambda: {'time': [], 'data': []})
-        self.last_t0 = None
+        if self.tag is None:
+            self.tag = []
 
-    def pull(self, pad, bufs):
+    def pull(self, pad, frame):
+        """Incoming frames are expected to be an EventFrame containing {"kafka":
+        EventBuffer}. The data in the EventBuffer are expected to in the format of
+        {topic: {"time": [t1, t2, ...], "data": [d1, d2, ...]}}
         """
-        getting the buffer on the pad just modifies the name to show this final
-        graph point and the prints it to prove it all works.
-        """
-        self.cnt[pad] += 1
-        bufst0 = bufs[0].t0 / 1_000_000_000
-        metadata = bufs.metadata
-        if self.last_t0 is None:
-            self.last_t0 = bufst0
+        events = frame["kafka"].data
+        # append data to deque
+        for topic in self.topics:
+            t = topic.split(".")[-1]
+            if events is not None and t in events:
+                self.client.write(topic, events[t], tags=self.tag)
 
-        if "kafka" in metadata:
-            mkafka = metadata["kafka"]
-
-            # append data to deque
-            for topic in self.topics:
-                t = topic.split(".")[-1]
-                if t in mkafka:
-                    self.client.write(topic, mkafka[t], tags=self.tags)
-
-            self.last_t0 = bufst0
-
-        if bufs.EOS:
+        if frame.EOS:
             self.mark_eos(pad)
-
-        if self.verbose is True:
-            print(self.cnt[pad], bufs)
