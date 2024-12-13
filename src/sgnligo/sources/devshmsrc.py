@@ -231,7 +231,7 @@ class DevShmSrc(TSSource):
 
     def new(self, pad: SourcePad) -> TSFrame:
         """New frames are created on "pad" with an instance specific count and a name
-        derived from the channel name. "EOS" is never set when streaming data online.
+        derived from the channel name. "EOS" is set by signaled_eos().
 
         Args:
             pad:
@@ -295,12 +295,8 @@ class DevShmSrc(TSSource):
                     flush=True,
                 )
 
-        # online data is never EOS
-        # FIXME but maybe there should be some kind of graceful shutdown
-        EOS = False
-
         return TSFrame(
             buffers=[outbuf],
             metadata={"cnt": self.cnt, "name": "'%s'" % pad.name},
-            EOS=EOS,
+            EOS=self.signaled_eos(),
         )
