@@ -1,3 +1,8 @@
+"""A source element to read low-latency data streamed to /dev/shm in real-time."""
+
+# Copyright (C) 2022 Ron Tapia
+# Copyright (C) 2024 Becca Ewing, Yun-Jing Huang
+
 import os
 import queue
 import threading

@@ -1,3 +1,7 @@
+"""Read GW frame files from a frame cache file."""
+
+# Copyright (C) 2024 Becca Ewing, Yun-Jing Huang
+
 from __future__ import annotations
 
 from dataclasses import dataclass

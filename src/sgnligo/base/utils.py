@@ -1,3 +1,8 @@
+"""A module that contains utility functions for SGN-LIGO programs."""
+
+# Copyright (C) 2009-2013  Kipp Cannon, Chad Hanna, Drew Keppel
+# Copyright (C) 2024 Becca Ewing, Yun-Jing Huang
+
 import os
 import types
 from datetime import datetime

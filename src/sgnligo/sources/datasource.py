@@ -1,5 +1,7 @@
-"""Datasource element utilities for LIGO pipelines
-"""
+"""Datasource element utilities for LIGO pipelines."""
+
+# Copyright (C) 2009-2013  Kipp Cannon, Chad Hanna, Drew Keppel
+# Copyright (C) 2024 Yun-Jing Huang
 
 from __future__ import annotations
 

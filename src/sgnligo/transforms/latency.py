@@ -1,3 +1,8 @@
+"""An element to calculate latency of buffers."""
+
+# Copyright (C) 2017 Patrick Godwin
+# Copyright (C) 2024 Yun-Jing Huang
+
 from dataclasses import dataclass
 
 from sgn.base import TransformElement
