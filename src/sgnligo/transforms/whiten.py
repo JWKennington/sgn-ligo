@@ -1,3 +1,11 @@
+"""An element to whiten time-series data and caclulate the power spectral density."""
+
+# Copyright (C) 2007 Bruce Allen, Duncan Brown, Jolien Creighton, Kipp Cannon,
+#                    Patrick Brady, Teviet Creighton
+# Copyright (C) 2007 Bernd Machenschalk, Jolien Creighton, Kipp Cannon, Drew Keppel
+# Copyright (C) 2008-2016  Kipp Cannon, Chad Hanna, Drew Keppel
+# Copyright (C) 2024 Becca Ewing, Joshua Gonsalves, Yun-Jing Huang
+
 from collections import deque
 from dataclasses import dataclass
 

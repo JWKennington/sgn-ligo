@@ -1,3 +1,8 @@
+"""An SGN graph to condition incoming data with whitening and gating."""
+
+# Copyright (C) 2009-2013  Kipp Cannon, Chad Hanna, Drew Keppel
+# Copyright (C) 2024 Yun-Jing Huang
+
 from __future__ import annotations
 
 from argparse import ArgumentParser

@@ -1,3 +1,7 @@
+"""A sink element to send data to kafka topics."""
+
+# Copyright (C) 2024 Yun-Jing Huang
+
 from dataclasses import dataclass
 
 from ligo.scald.io import kafka

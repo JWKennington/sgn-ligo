@@ -1,3 +1,8 @@
+"""An element to apply a bit mask on the incoming data."""
+
+# Copyright (C) 2011-2012,2014,2015 Kipp Cannon
+# Copyright (C) 2024 Yun-Jing Huang
+
 from __future__ import annotations
 
 from dataclasses import dataclass

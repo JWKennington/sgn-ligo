@@ -1,3 +1,7 @@
+"""A sink element to send data to a influx database."""
+
+# Copyright (C) 2024 Yun-Jing Huang
+
 from collections import deque
 from dataclasses import dataclass
 
