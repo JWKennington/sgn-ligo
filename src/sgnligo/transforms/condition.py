@@ -141,7 +141,7 @@ def condition(
     """
     condition_out_links = {ifo: None for ifo in ifos}
     spectrum_out_links = {ifo: None for ifo in ifos}
-    if data_source == "devshm":
+    if whiten_latency is True:
         whiten_latency_out_links = {ifo: None for ifo in ifos}
     else:
         whiten_latency_out_links = None

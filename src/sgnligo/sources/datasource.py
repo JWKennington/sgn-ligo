@@ -14,11 +14,12 @@ from ligo import segments
 from ligo.lw import utils as ligolw_utils
 from ligo.lw.utils import segments as ligolw_segments
 from sgn import Pipeline
-from sgnts.sources import FakeSeriesSrc, RealTimeWhiteNoiseSrc, SegmentSrc
+from sgnts.sources import FakeSeriesSrc, SegmentSrc
 from sgnts.transforms import Adder, Gate
 
 from sgnligo.base import parse_list_to_dict
 from sgnligo.sources.devshmsrc import DevShmSrc
+from sgnligo.sources.fake_realtime import RealTimeWhiteNoiseGPSSrc
 from sgnligo.sources.framecachesrc import FrameReader
 from sgnligo.transforms import BitMask
 
@@ -495,7 +496,7 @@ def datasource(
             source_name = "_FakeSource"
             source_pad_names = (ifo,)
             pipeline.insert(
-                RealTimeWhiteNoiseSrc(
+                RealTimeWhiteNoiseGPSSrc(
                     name=ifo + "_FakeSource",
                     source_pad_names=source_pad_names,
                     rate=info.input_sample_rate,
