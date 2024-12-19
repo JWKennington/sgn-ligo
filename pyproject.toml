@@ -54,9 +54,11 @@ test = [
     "gwpy",
 ]
 docs = [
-    "furo",
-    "myst-parser",
-    "sphinx",
+    "mkdocs",
+    "mkdocstrings",
+    "mkdocstrings-python",
+    "mkdocs-material",
+    "pymdown-extensions",
 ]
 lint = [
     "black",
