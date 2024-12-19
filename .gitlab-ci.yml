@@ -14,20 +14,15 @@ include:
         - "3.10"
         - "3.11"
 #        - "3.12"  # TODO uncomment this when torch support is available for 3.12
-  - component: git.ligo.org/computing/gitlab/components/sphinx/apidoc@1
+  - component: git.ligo.org/computing/gitlab/components/mkdocs/build@1
     inputs:
       image: python:3.12
-      module_dir: "src/sgnligo"
-      sphinx_sourcedir: "docs"
+      project_dir: "."
       requirements: ".[docs]"
-  - component: git.ligo.org/computing/gitlab/components/sphinx/build@1
-    inputs:
-      image: python:3.12
-      sphinx_sourcedir: "docs"
-      requirements: ".[docs]"
-  - component: git.ligo.org/computing/gitlab/components/sphinx/pages@1
+  - component: git.ligo.org/computing/gitlab/components/mkdocs/pages@1
     inputs:
       pages_when: "default"
+
 
 python_test:
   before_script:
@@ -35,6 +30,24 @@ python_test:
     - |
       apt-get update
       apt-get install -yqq graphviz
+    - echo "Manually installing pip dependencies"
+    - |
+      pip install lalsuite
+      pip install torch
+      pip install gwpy
+    - echo "Installing SGN Family libraries"
+    - |
+      pip install -r build_requirements.txt
+
+mkdocs:
+  before_script:
+    - echo "Manually installing system dependencies"
+    - |
+      apt-get update
+      apt-get install -yqq graphviz
+    - echo "Upgrading pip"
+    - |
+      pip install --upgrade pip
     - echo "Manually installing pip dependencies"
     - |
       pip install lalsuite

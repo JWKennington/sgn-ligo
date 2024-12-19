@@ -1,0 +1,63 @@
+site_name: SGN-LIGO Documentation
+
+nav:
+  - Home: index.md
+  - User Guide:
+    - Key Concepts: user-guide/concepts.md
+  - Developer Guide:
+    - Contributing: dev-guide/contributing.md
+  - API Reference:
+    - Base:
+      - Utils: api/base/utils.md
+    - Sources:
+      - DataSource: api/sources/datasource.md
+      - DevSHMSource: api/sources/devshmsrc.md
+      - FakeRealtime: api/sources/fake_realtime.md
+      - FrameCacheSource: api/sources/framecachesrc.md
+    - Transforms:
+      - BitMask: api/transforms/bit_mask.md
+      - Condition: api/transforms/condition.md
+      - Latency: api/transforms/latency.md
+      - Whiten: api/transforms/whiten.md
+    - Sinks:
+      - InfluxSink: api/sinks/influx_sink.md
+      - KafkaSink: api/sinks/kafka_sink.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_inheritance_diagram: true
+            show_root_heading: true
+            show_root_toc_entry: true
+            show_symbol_type_heading: true
+            heading_level: 1
+
+theme:
+  name: material
+  logo: assets/img/sgnligo-small.png
+
+extra_css:
+  - assets/css/sgn.css
+  - assets/css/mkdocstrings-custom.css
+  - https://unpkg.com/katex@0/dist/katex.min.css
+
+
+markdown_extensions:
+  - pymdownx.superfences:
+  - toc:
+      permalink: true
+      toc_depth: 4
+  - admonition: {}
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - assets/js/katex.js
+  - https://unpkg.com/katex@0/dist/katex.min.js
+  - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
+
+
+
