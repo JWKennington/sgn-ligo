@@ -7,7 +7,7 @@ from typing import Sequence
 
 from gwpy.timeseries import TimeSeries, TimeSeriesDict
 from sgn.base import SGN_LOG_LEVELS, get_sgn_logger
-from sgnts.base import Offset, TSSink
+from sgnts.base import AdapterConfig, Offset, TSSink
 
 # TODO remove the SGN_LOG_LEVELS once
 #  https://git.ligo.org/greg/sgn/-/merge_requests/65 is merged
@@ -38,27 +38,11 @@ class FrameSink(TSSink):
                 - {gps_start_time}, the start time of the data in GPS time
                 - {duration}, the duration of the data in seconds
 
-    Usage:
-        Must use with an AdapterConfig with the duration_offsets parameter matching
-        the duration of the FrameSink. For example, if the FrameSink duration is 3
-        seconds, the AdapterConfig should have duration_offsets=Offset.fromsec(3).
-        ```python
-        from sgnts.base import AdapterConfig, Offset
-        from sgnligo.sinks import FrameSink
+    This sink element automatically creates an AdapterConfig for
+    buffering the data needed to create frames of the requested
+    duration.  Attempting to provide an AdapterConfig will produce a
+    RuntimeError.
 
-        duration = 3  # seconds
-        duration_offsets = Offset.fromsec(duration)
-        snk = FrameSink(
-            name="snk",
-            sink_pad_names=(
-                "H1",
-                "L1",
-            ),
-            duration=duration,
-            path=path_format.as_posix(),
-            adapter_config=AdapterConfig(stride=duration_offsets),
-        )
-        ```
     """
 
     channels: Sequence[str] = field(default_factory=list)
@@ -69,6 +53,14 @@ class FrameSink(TSSink):
         """Post init for setting up the FrameSink"""
         # enforce channels = sink_pad_names
         self.sink_pad_names = self.channels
+
+        # setup the adapter config for the audioadapter
+        if self.adapter_config is not None:
+            raise RuntimeError(
+                "specifying AdapterConfig is not supported in this element as they are handled internally."
+            )
+        stride = Offset.fromsec(self.duration)
+        self.adapter_config = AdapterConfig(stride=stride)
 
         # Call parent post init
         super().__post_init__()

@@ -91,7 +91,6 @@ class TestFrameSink:
                         ),
                         duration=duration,
                         path=path_format.as_posix(),
-                        adapter_config=AdapterConfig(stride=duration_offsets),
                     ),
                     link_map={
                         "snk:snk:H1:FOO-BAR": "src_H1:src:H1",
