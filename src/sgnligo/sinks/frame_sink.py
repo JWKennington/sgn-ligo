@@ -12,13 +12,12 @@ from sgnts.base import AdapterConfig, Offset, TSSink
 # TODO remove the SGN_LOG_LEVELS once
 #  https://git.ligo.org/greg/sgn/-/merge_requests/65 is merged
 LOGGER = get_sgn_logger(__name__, SGN_LOG_LEVELS)
-FILENAME_PARAM_CHANNELS = "channels"
-FILENAME_PARAM_GPS_START_TIME = "gps_start_time"
-FILENAME_PARAM_DURATION = "duration"
+
+# filename format parameters
 FILENAME_PARAMS = (
-    FILENAME_PARAM_CHANNELS,
-    FILENAME_PARAM_GPS_START_TIME,
-    FILENAME_PARAM_DURATION,
+    "instruments",
+    "gps_start_time",
+    "duration",
 )
 
 
@@ -32,11 +31,13 @@ class FrameSink(TSSink):
         duration:
             int, the duration of the data to write to the file
         path:
-            str, the path to write the file to. Must contain parameters for:
-                - {channels}, the sorted list of instruments inferred from the included
-                      channels (e.g. "H1" or "H1L1")
-                - {gps_start_time}, the start time of the data in GPS time
-                - {duration}, the duration of the data in seconds
+            str, the path to write the frame files to.  The file name
+            must contain the following format parameters (in curly braces):
+            - {instruments}, the sorted list of instruments inferred from
+                the included channel names (e.g. "H1" for "H1:GDS-CAL...")
+            - {gps_start_time}, the start time of the data in GPS seconds
+            - {duration}, the duration of the data in seconds
+            default: "{instruments}-{gps_start_time}-{duration}.gwf"
 
     This sink element automatically creates an AdapterConfig for
     buffering the data needed to create frames of the requested
@@ -47,7 +48,7 @@ class FrameSink(TSSink):
 
     channels: Sequence[str] = field(default_factory=list)
     duration: int = 0
-    path: str = "{channels}-{gps_start_time}-{duration}.gwf"
+    path: str = "{instruments}-{gps_start_time}-{duration}.gwf"
 
     def __post_init__(self):
         """Post init for setting up the FrameSink"""
@@ -73,6 +74,10 @@ class FrameSink(TSSink):
         for param in FILENAME_PARAMS:
             if f"{{{param}}}" not in self.path:
                 raise ValueError(f"Path must contain parameter {{{param}}}")
+
+        self._instruments_str = "".join(
+            sorted({chan.split(":")[0] for chan in self.channels})
+        )
 
     def write(self):
         """Write a gwf file using the gwpy library. This method gets called by the
@@ -132,7 +137,7 @@ class FrameSink(TSSink):
 
         # Format filename
         filename = self.path.format(
-            channels="".join(sorted(self.channels)),
+            instruments=self._instruments_str,
             gps_start_time=t0,
             duration=self.duration,
         )

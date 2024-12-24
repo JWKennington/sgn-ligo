@@ -51,7 +51,7 @@ class TestFrameSink:
 
         with TemporaryDirectory() as tmpdir:
             path = pathlib.Path(tmpdir)
-            path_format = path / "{channels}-{gps_start_time}-{duration}.gwf"
+            path_format = path / "{instruments}-{gps_start_time}-{duration}.gwf"
             out1 = path / "H1L1-3000000000-3.gwf"
             out2 = path / "H1L1-0-3.gwf"
 
