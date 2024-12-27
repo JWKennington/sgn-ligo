@@ -21,7 +21,7 @@ FILENAME_PARAMS = (
 
 @dataclass
 class FrameSink(TSSink):
-    """A sink element that writes time series data to .gwf file
+    """A sink element that writes time series data to file
 
     Args:
         channels:
@@ -35,6 +35,8 @@ class FrameSink(TSSink):
                 the included channel names (e.g. "H1" for "H1:GDS-CAL...")
             - {gps_start_time}, the start time of the data in GPS seconds
             - {duration}, the duration of the data in seconds
+            The extension on the the path determines the output file
+            type.  Currently ".gwf" and ".hdf5" are supported.
             default: "{instruments}-{gps_start_time}-{duration}.gwf"
 
     This sink element automatically creates an AdapterConfig for
