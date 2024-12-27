@@ -52,8 +52,8 @@ class TestFrameSink:
         with TemporaryDirectory() as tmpdir:
             path = pathlib.Path(tmpdir)
             path_format = path / "{instruments}-{gps_start_time}-{duration}.gwf"
-            out1 = path / "H1L1-3000000000-3.gwf"
-            out2 = path / "H1L1-0-3.gwf"
+            out1 = path / "H1L1-0000000003-3.gwf"
+            out2 = path / "H1L1-0000000000-3.gwf"
 
             # Verify the files do not exist
             assert not out1.exists()

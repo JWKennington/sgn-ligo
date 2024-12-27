@@ -89,7 +89,6 @@ class FrameSink(TSSink):
         """
         # Initialize TimeSeriesDict to hold all channels
         ts_dict = TimeSeriesDict()
-        t0 = None
 
         # Channels
         for name, pad in zip(self.sink_pad_names, self.sink_pads):
@@ -115,12 +114,14 @@ class FrameSink(TSSink):
 
             # Compute start time in floating seconds
             # TODO this could be a new method on the SeriesBuffer class
-            t0_s = Offset.offset_ref_t0 + Offset.tosec(data.offset)
+            t0 = Offset.offset_ref_t0 + Offset.tosec(data.offset)
+            # data times should be lined up with second boundaries
+            assert int(t0) == t0, f"t0 is not on second boundary: {t0}"
 
             # TimeSeries
             ts = TimeSeries(
                 data.data,
-                t0=t0_s,
+                t0=t0,
                 sample_rate=data.sample_rate,
                 channel=name,
             )
@@ -128,14 +129,10 @@ class FrameSink(TSSink):
             # Add to TimeSeriesDict
             ts_dict[name] = ts
 
-            # Track start time for filename
-            if t0 is None:
-                t0 = data.t0
-
         # Format filename
         filename = self.path.format(
             instruments=self._instruments_str,
-            gps_start_time=t0,
+            gps_start_time=f"{t0:0=10.0f}",
             duration=self.duration,
         )
 
