@@ -97,7 +97,6 @@ class FrameSink(TSSink):
             # Data products
             frame = self.preparedframes[pad]
             if frame is None or (frame is not None and frame.is_gap):
-                LOGGER.warning("Gap detected in data. Skipping...")
                 return
 
             # Load first buffer
