@@ -86,16 +86,16 @@ class TestFrameSink:
                     FrameSink(
                         name="snk",
                         channels=(
-                            "H1",
-                            "L1",
+                            "H1:FOO-BAR",
+                            "L1:BAZ-QUX_0",
                         ),
                         duration=duration,
                         path=path_format.as_posix(),
                         adapter_config=AdapterConfig(stride=duration_offsets),
                     ),
                     link_map={
-                        "snk:snk:H1": "src_H1:src:H1",
-                        "snk:snk:L1": "src_L1:src:L1",
+                        "snk:snk:H1:FOO-BAR": "src_H1:src:H1",
+                        "snk:snk:L1:BAZ-QUX_0": "src_L1:src:L1",
                     },
                 )
                 pipeline.run()
