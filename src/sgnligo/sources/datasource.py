@@ -21,7 +21,7 @@ from sgnligo.base import parse_list_to_dict
 from sgnligo.sources.devshmsrc import DevShmSrc
 from sgnligo.sources.fake_realtime import RealTimeWhiteNoiseGPSSrc
 from sgnligo.sources.framecachesrc import FrameReader
-from sgnligo.transforms import BitMask
+from sgnligo.transforms import BitMask, Latency
 
 KNOWN_DATASOURCES = ["white", "sin", "impulse", "white-realtime", "frames", "devshm"]
 FAKE_DATASOURCES = ["white", "sin", "impulse", "white-realtime"]
@@ -356,6 +356,7 @@ class DataSourceInfo:
 def datasource(
     pipeline: Pipeline,
     info: DataSourceInfo,
+    source_latency: bool = False,
     verbose: bool = False,
 ):
     """Wrapper around sgn source elements
@@ -397,6 +398,10 @@ def datasource(
 
     source_out_links = {ifo: None for ifo in info.ifos}
     pad_names = {ifo: None for ifo in info.ifos}
+    if source_latency:
+        source_latency_links = {}
+    else:
+        source_latency_links = None
     for ifo in info.ifos:
         if info.data_source == "frames":
             pad_name = ifo + ":" + info.channel_dict[ifo]
@@ -544,4 +549,16 @@ def datasource(
             )
             source_out_links[ifo] = ifo + "_Gate:src:" + ifo
 
-    return source_out_links
+        if source_latency:
+            pipeline.insert(
+                Latency(
+                    name=ifo + "_SrcLatency",
+                    sink_pad_names=("data",),
+                    source_pad_names=("latency",),
+                    route=ifo + "_datasource_latency",
+                ),
+                link_map={ifo + "_SrcLatency:sink:data": source_out_links[ifo]},
+            )
+            source_latency_links[ifo] = ifo + "_SrcLatency:src:latency"
+
+    return source_out_links, source_latency_links
