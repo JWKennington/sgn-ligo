@@ -72,7 +72,9 @@ class FrameSink(TSSink):
 
         # Check valid duration
         if not isinstance(self.duration, int) or self.duration <= 0:
-            raise ValueError(f"Duration must be an positive integer, got {self.duration}")
+            raise ValueError(
+                f"Duration must be an positive integer, got {self.duration}"
+            )
 
         # Check path contains parameters for duration and gps_start_time
         for param in FILENAME_PARAMS:
