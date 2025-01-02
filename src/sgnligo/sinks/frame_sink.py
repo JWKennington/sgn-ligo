@@ -52,6 +52,7 @@ class FrameSink(TSSink):
     channels: Sequence[str] = field(default_factory=list)
     duration: int = 0
     path: str = "{instruments}-{gps_start_time}-{duration}.gwf"
+    force: bool = False
 
     def __post_init__(self):
         """Post init for setting up the FrameSink"""
@@ -115,6 +116,12 @@ class FrameSink(TSSink):
                     duration=duration,
                 )
             )
+
+            if outpath.exists():
+                if self.force:
+                    outpath.unlink()
+                else:
+                    raise FileExistsError(f"output file exists: {outpath}")
 
             LOGGER.info(f"Writing file {outpath}...")
             tsd.write(outpath)
