@@ -23,7 +23,7 @@ def test_devshmsrc_multi(capsys):
 
     #
     #       -----------
-    #      | DevShmSrc |
+    #      | DevShmSource |
     #       -----------
     #  state |       |
     #  vector|       |

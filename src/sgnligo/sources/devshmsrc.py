@@ -23,7 +23,7 @@ from sgnligo.base import from_T050017, now
 
 
 @dataclass
-class DevShmSrc(TSSource):
+class DevShmSource(TSSource):
     """Source element to read low-latency data streamed to /dev/shm in real-time
 
     Args:
@@ -119,7 +119,7 @@ class DevShmSrc(TSSource):
         """
         # init inotify watcher on shared memory dir
         if INotify is None:
-            raise ImportError("inotify_simple is required for DevShmSrc source.")
+            raise ImportError("inotify_simple is required for DevShmSource source.")
 
         i = INotify()
         i.add_watch(watch_dir, flags.CLOSE_WRITE | flags.MOVED_TO)

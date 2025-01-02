@@ -5,7 +5,7 @@ import pathlib
 import pytest
 from sgn import NullSink
 from sgn.apps import Pipeline
-from sgnts.sources import FakeSeriesSrc
+from sgnts.sources import FakeSeriesSource
 from sgnts.transforms import Resampler, Threshold
 
 from sgnligo.transforms import Whiten
@@ -22,7 +22,7 @@ def build_pipeline(
     pipeline = Pipeline()
 
     pipeline.insert(
-        FakeSeriesSrc(
+        FakeSeriesSource(
             name=f"{instrument}_white",
             source_pad_names=("frsrc",),
             rate=sample_rate,
