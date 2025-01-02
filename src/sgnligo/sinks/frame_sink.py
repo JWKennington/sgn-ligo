@@ -2,7 +2,10 @@
 The formatting is done using the gwpy library.
 """
 
+import queue
+import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Sequence
 
 from gwpy.timeseries import TimeSeries, TimeSeriesDict
@@ -79,18 +82,55 @@ class FrameSink(TSSink):
             sorted({chan.split(":")[0] for chan in self.channels})
         )
 
-    def write(self):
-        """Write a gwf file using the gwpy library. This method gets called by the
-        internal pad, and only writes to the file if there are enough samples in the
-        audioadapters.
+        # create the data queue
+        self._queue = queue.Queue()
 
-        Notes:
-            Single-Segment:
-                Currently, the FrameSink writes a single segment of data to a .gwf file.
-                Future versions will extend this to write multiple segments.
+        # create/start the publisher thread
+        self._writer_thread = threading.Thread(target=self._writer)
+        self._writer_thread.start()
+
+    def _writer(self):
+        """Write a gwf file using the gwpy library"""
+        while True:
+            tsd = self._queue.get(
+                block=True,
+            )
+
+            if tsd is None:
+                LOGGER.debug("writer thread exiting")
+                return
+
+            span = tsd.span
+            t0 = span.start
+            assert int(t0) == t0
+            t0 = int(t0)
+            duration = span.end - span.start
+            assert int(duration) == duration
+            duration = int(duration)
+
+            outpath = Path(
+                self.path.format(
+                    instruments=self._instruments_str,
+                    gps_start_time=f"{t0:0=10.0f}",
+                    duration=duration,
+                )
+            )
+
+            LOGGER.info(f"Writing file {outpath}...")
+            tsd.write(outpath)
+
+    def internal(self):
+        """Internal method, checks if sufficient data is present in the audioadapters to
+        write to a file.
+
+        Args:
+            pad:
+                SinkPad, the pad to check for enough samples
         """
+        super().internal()
+
         # Initialize TimeSeriesDict to hold all channels
-        ts_dict = TimeSeriesDict()
+        tsd = TimeSeriesDict()
 
         # Channels
         for name, pad in zip(self.sink_pad_names, self.sink_pads):
@@ -129,33 +169,17 @@ class FrameSink(TSSink):
             )
 
             # Add to TimeSeriesDict
-            ts_dict[name] = ts
+            tsd[name] = ts
 
-        # Format filename
-        filename = self.path.format(
-            instruments=self._instruments_str,
-            gps_start_time=f"{t0:0=10.0f}",
-            duration=self.duration,
-        )
+        self._queue.put(tsd)
 
-        # Write to frame
-        LOGGER.info(f"Writing file {filename}...")
-        ts_dict.write(filename)
-
-    def internal(self):
-        """Internal method, checks if sufficient data is present in the audioadapters to
-        write to a file.
-
-        Args:
-            pad:
-                SinkPad, the pad to check for enough samples
-        """
-        super().internal()
+        # FIXME: need check that this isn't falling behind real-time
 
         # Check EOS
         for spad in self.sink_pads:
             frame = self.preparedframes[spad]
             if frame is not None and frame.EOS:
                 self.mark_eos(spad)
-
-        self.write()
+                # this shuts down the background thread
+                self._queue.put(None)
+                self._writer_thread.join()
