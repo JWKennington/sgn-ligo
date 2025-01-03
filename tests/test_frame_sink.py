@@ -8,7 +8,7 @@ import numpy
 
 from sgnligo.sinks import FrameSink
 from sgnts.base import AdapterConfig, Offset
-from sgnts.sources import RealTimeWhiteNoiseSrc
+from sgnts.sources import RealTimeWhiteNoiseSource
 
 from sgn.apps import Pipeline
 
@@ -18,7 +18,7 @@ MOCK_TIMES = list(numpy.arange(0.0, 20.0, 0.5))
 
 
 def mock_time_now1(self):
-    """Mock time_now method for RealTimeWhiteNoiseSrc
+    """Mock time_now method for RealTimeWhiteNoiseSource
     ONLY to be used for TestFrameSink.test_frame_sink,
     since it counts the number of calls to time_now
     """
@@ -38,7 +38,7 @@ class TestFrameSink:
 
         The pipeline is as follows:
               ---------------------------        --------------------------
-              | RealTimeWhiteNoiseSrc	|        | RealTimeWhiteNoiseSrc  |
+              | RealTimeWhiteNoiseSource	|        | RealTimeWhiteNoiseSource  |
               ---------------------------        --------------------------
                                       |            |
                                      ----------------
@@ -61,22 +61,22 @@ class TestFrameSink:
             assert not out1.exists()
             assert not out2.exists()
 
-            # Mock the time_now method of RealTimeWhiteNoiseSrc for reproducibility
+            # Mock the time_now method of RealTimeWhiteNoiseSource for reproducibility
             with mock.patch(
-                "sgnligo.sources.fake_realtime.RealTimeWhiteNoiseSrc.time_now",
+                "sgnligo.sources.fake_realtime.RealTimeWhiteNoiseSource.time_now",
                 mock_time_now1,
             ):
 
                 # Run pipeline
                 pipeline.insert(
-                    RealTimeWhiteNoiseSrc(
+                    RealTimeWhiteNoiseSource(
                         name="src_H1",
                         source_pad_names=("H1",),
                         rate=256,
                         t0=t0,
                         duration=2 * duration,
                     ),
-                    RealTimeWhiteNoiseSrc(
+                    RealTimeWhiteNoiseSource(
                         name="src_L1",
                         source_pad_names=("L1",),
                         rate=512,

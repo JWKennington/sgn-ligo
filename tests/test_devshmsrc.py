@@ -7,7 +7,7 @@ from sgn.apps import Pipeline
 from sgn.sinks import NullSink
 from sgnts.transforms import Gate
 
-from sgnligo.sources import DevShmSrc
+from sgnligo.sources import DevShmSource
 from sgnligo.transforms import BitMask
 
 
@@ -64,7 +64,7 @@ def test_devshmsrc(capsys):
 
     #
     #       -----------
-    #      | DevShmSrc |
+    #      | DevShmSource |
     #       -----------
     #  state |       |
     #  vector|       |
@@ -83,7 +83,7 @@ def test_devshmsrc(capsys):
     #       ------------
 
     pipeline.insert(
-        DevShmSrc(
+        DevShmSource(
             name="src1",
             # source_pad_names=("H1",),
             channel_name=options.channel_name,

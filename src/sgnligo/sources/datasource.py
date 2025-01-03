@@ -14,12 +14,12 @@ from ligo import segments
 from ligo.lw import utils as ligolw_utils
 from ligo.lw.utils import segments as ligolw_segments
 from sgn import Pipeline
-from sgnts.sources import FakeSeriesSrc, SegmentSrc
+from sgnts.sources import FakeSeriesSource, SegmentSource
 from sgnts.transforms import Adder, Gate
 
 from sgnligo.base import parse_list_to_dict
-from sgnligo.sources.devshmsrc import DevShmSrc
-from sgnligo.sources.fake_realtime import RealTimeWhiteNoiseGPSSrc
+from sgnligo.sources.devshmsrc import DevShmSource
+from sgnligo.sources.fake_realtime import RealTimeWhiteNoiseGPSSource
 from sgnligo.sources.framecachesrc import FrameReader
 from sgnligo.transforms import BitMask, Latency
 
@@ -461,7 +461,7 @@ def datasource(
             source_name = "_Gate"
             channel_name_ifo = f"{ifo}:{info.channel_dict[ifo]}"
             state_channel_name_ifo = f"{ifo}:{info.state_channel_dict[ifo]}"
-            devshm = DevShmSrc(
+            devshm = DevShmSource(
                 name=ifo + "_Devshm",
                 channel_names=[channel_name_ifo, state_channel_name_ifo],
                 shared_memory_dir=info.shared_memory_dict[ifo],
@@ -501,7 +501,7 @@ def datasource(
             source_name = "_FakeSource"
             source_pad_names = (ifo,)
             pipeline.insert(
-                RealTimeWhiteNoiseGPSSrc(
+                RealTimeWhiteNoiseGPSSource(
                     name=ifo + "_FakeSource",
                     source_pad_names=source_pad_names,
                     rate=info.input_sample_rate,
@@ -512,7 +512,7 @@ def datasource(
             source_name = "_FakeSource"
             source_pad_names = (ifo,)
             pipeline.insert(
-                FakeSeriesSrc(
+                FakeSeriesSource(
                     name=ifo + "_FakeSource",
                     source_pad_names=source_pad_names,
                     rate=info.input_sample_rate,
@@ -528,7 +528,7 @@ def datasource(
 
         if info.frame_segments_file is not None:
             pipeline.insert(
-                SegmentSrc(
+                SegmentSource(
                     name=ifo + "_SegmentSource",
                     source_pad_names=(ifo,),
                     rate=info.input_sample_rate,
@@ -552,13 +552,13 @@ def datasource(
         if source_latency:
             pipeline.insert(
                 Latency(
-                    name=ifo + "_SrcLatency",
+                    name=ifo + "_SourceLatency",
                     sink_pad_names=("data",),
                     source_pad_names=("latency",),
                     route=ifo + "_datasource_latency",
                 ),
-                link_map={ifo + "_SrcLatency:sink:data": source_out_links[ifo]},
+                link_map={ifo + "_SourceLatency:sink:data": source_out_links[ifo]},
             )
-            source_latency_links[ifo] = ifo + "_SrcLatency:src:latency"
+            source_latency_links[ifo] = ifo + "_SourceLatency:src:latency"
 
     return source_out_links, source_latency_links
