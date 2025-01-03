@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from gwpy.timeseries import TimeSeries, TimeSeriesDict
-
 from sgn.base import SGN_LOG_LEVELS, get_sgn_logger
 from sgnts.base import Offset, TSSink
 
