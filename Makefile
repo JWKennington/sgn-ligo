@@ -1,3 +1,10 @@
+ifeq ($(PYTHONPATH),)
+	PYTHONPATH := src
+else
+	PYTHONPATH := src:$(PYTHONPATH)
+endif
+export PYTHONPATH
+
 .PHONY: help
 help :
 	@echo
@@ -11,7 +18,7 @@ help :
 
 .PHONY: test
 test :
-	PYTHONPATH=src pytest -v --cov=sgnts --cov-report=term-missing .
+	pytest -v --cov=sgnts --cov-report=term-missing .
 
 .PHONY: lint
 lint :

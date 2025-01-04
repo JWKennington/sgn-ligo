@@ -19,7 +19,6 @@ from sgnts.transforms import Adder, Gate
 
 from sgnligo.base import parse_list_to_dict
 from sgnligo.sources.devshmsrc import DevShmSource
-from sgnligo.sources.fake_realtime import RealTimeWhiteNoiseGPSSource
 from sgnligo.sources.framecachesrc import FrameReader
 from sgnligo.transforms import BitMask, Latency
 
@@ -501,10 +500,11 @@ def datasource(
             source_name = "_FakeSource"
             source_pad_names = (ifo,)
             pipeline.insert(
-                RealTimeWhiteNoiseGPSSource(
+                FakeSeriesSource(
                     name=ifo + "_FakeSource",
                     source_pad_names=source_pad_names,
                     rate=info.input_sample_rate,
+                    real_time=True,
                 ),
             )
         else:

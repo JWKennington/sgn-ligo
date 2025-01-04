@@ -5,19 +5,17 @@ from tempfile import TemporaryDirectory
 from unittest import mock
 
 import numpy
+from sgn.apps import Pipeline
+from sgnts.base import AdapterConfig, Offset
+from sgnts.sources import FakeSeriesSource
 
 from sgnligo.sinks import FrameSink
-from sgnts.base import AdapterConfig, Offset
-from sgnts.sources import RealTimeWhiteNoiseSource
-
-from sgn.apps import Pipeline
-
 
 _count1 = 0
 MOCK_TIMES = list(numpy.arange(0.0, 20.0, 0.5))
 
 
-def mock_time_now1(self):
+def mock_gpsnow():
     """Mock time_now method for RealTimeWhiteNoiseSource
     ONLY to be used for TestFrameSink.test_frame_sink,
     since it counts the number of calls to time_now
@@ -37,13 +35,13 @@ class TestFrameSink:
 
 
         The pipeline is as follows:
-              ---------------------------        --------------------------
-              | RealTimeWhiteNoiseSource	|        | RealTimeWhiteNoiseSource  |
-              ---------------------------        --------------------------
-                                      |            |
-                                     ----------------
-                                     | FrameWriter  |
-                                     ----------------
+              --------------------        --------------------
+              | FakeSeriesSource |        | FakeSeriesSource |
+              --------------------        --------------------
+                               |            |
+                              ----------------
+                              | FrameWriter  |
+                              ----------------
         """
 
         pipeline = Pipeline()
@@ -61,27 +59,29 @@ class TestFrameSink:
             assert not out1.exists()
             assert not out2.exists()
 
-            # Mock the time_now method of RealTimeWhiteNoiseSource for reproducibility
+            # Mock the gpsnow function for FakeSeriesSource for reproducibility
             with mock.patch(
-                "sgnligo.sources.fake_realtime.RealTimeWhiteNoiseSource.time_now",
-                mock_time_now1,
+                "sgnts.sources.fake_series.gpsnow",
+                mock_gpsnow,
             ):
 
                 # Run pipeline
                 pipeline.insert(
-                    RealTimeWhiteNoiseSource(
+                    FakeSeriesSource(
                         name="src_H1",
                         source_pad_names=("H1",),
                         rate=256,
                         t0=t0,
-                        duration=2 * duration,
+                        end=2 * duration,
+                        real_time=True,
                     ),
-                    RealTimeWhiteNoiseSource(
+                    FakeSeriesSource(
                         name="src_L1",
                         source_pad_names=("L1",),
                         rate=512,
                         t0=t0,
-                        duration=2 * duration,
+                        end=2 * duration,
+                        real_time=True,
                     ),
                     FrameSink(
                         name="snk",
