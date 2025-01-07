@@ -16,9 +16,11 @@ help :
 	@echo '  make type-check            run static type checker'
 	@echo
 
-.PHONY: test
+.PHONY: test test-base
 test :
-	pytest -v --cov=sgnts --cov-report=term-missing .
+	pytest -v --markdown-docs --markdown-docs-syntax=superfences .
+test-base :
+	pytest -v .
 
 .PHONY: lint
 lint :
