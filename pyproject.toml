@@ -111,7 +111,7 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "-p no:warnings --cov=sgnligo"
+addopts = "-p no:warnings --cov=sgnligo --cov-report=term-missing"
 
 [tool.flake8]
 max-line-length = 88
