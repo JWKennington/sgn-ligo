@@ -169,8 +169,8 @@ def condition(
                 reference_psd=condition_info.reference_psd,
             ),
             link_map={
-                ifo + "_SourceResampler:sink:" + ifo: input_links[ifo],
-                ifo + "_Whitener:sink:" + ifo: ifo + "_SourceResampler:src:" + ifo,
+                ifo + "_SourceResampler:snk:" + ifo: input_links[ifo],
+                ifo + "_Whitener:snk:" + ifo: ifo + "_SourceResampler:src:" + ifo,
             },
         )
         spectrum_out_links[ifo] = ifo + "_Whitener:src:spectrum_" + ifo
@@ -188,7 +188,7 @@ def condition(
                     invert=True,
                 ),
                 link_map={
-                    ifo + "_Threshold:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
+                    ifo + "_Threshold:snk:" + ifo: ifo + "_Whitener:src:" + ifo,
                 },
             )
             condition_out_links[ifo] = ifo + "_Threshold:src:" + ifo
@@ -204,7 +204,7 @@ def condition(
                     route=ifo + "_whitening_latency",
                 ),
                 link_map={
-                    ifo + "_Latency:sink:" + ifo: ifo + "_Whitener:src:" + ifo,
+                    ifo + "_Latency:snk:" + ifo: ifo + "_Whitener:src:" + ifo,
                 },
             )
             whiten_latency_out_links[ifo] = ifo + "_Latency:src:" + ifo

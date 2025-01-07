@@ -163,11 +163,11 @@ def test_whitengraph(capsys):
     )
     pipeline.insert(
         link_map={
-            "Resampler:sink:frsrc": "FrameReader:src:frsrc",
-            "Whitener:sink:resamp": "Resampler:src:resamp",
-            "HoftSnk:sink:hoft": "Whitener:src:hoft",
-            "SpectrumSnk:sink:spectrum": "Whitener:src:spectrum",
-            "RawSnk:sink:frsrc": "FrameReader:src:frsrc",
+            "Resampler:snk:frsrc": "FrameReader:src:frsrc",
+            "Whitener:snk:resamp": "Resampler:src:resamp",
+            "HoftSnk:snk:hoft": "Whitener:src:hoft",
+            "SpectrumSnk:snk:spectrum": "Whitener:src:spectrum",
+            "RawSnk:snk:frsrc": "FrameReader:src:frsrc",
         }
     )
 

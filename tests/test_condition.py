@@ -65,11 +65,11 @@ def build_pipeline(
     )
     pipeline.link(
         link_map={
-            "Resampler:sink:frsrc": f"{instrument}_white:src:frsrc",
-            "Whitener:sink:resamp": "Resampler:src:resamp",
-            "Threshold:sink:data": "Whitener:src:hoft",
-            "HoftSnk:sink:hoft": "Threshold:src:threshold",
-            "HoftSnk:sink:spectrum": "Whitener:src:spectrum",
+            "Resampler:snk:frsrc": f"{instrument}_white:src:frsrc",
+            "Whitener:snk:resamp": "Resampler:src:resamp",
+            "Threshold:snk:data": "Whitener:src:hoft",
+            "HoftSnk:snk:hoft": "Threshold:src:threshold",
+            "HoftSnk:snk:spectrum": "Whitener:src:spectrum",
         }
     )
     return pipeline

@@ -55,10 +55,10 @@ def test_devshmsrc_multi(capsys):
             name="snk2",
             sink_pad_names=ifos,
         ),
-        link_map={"trans1:sink:" + ifo: source_out_links[ifo] for ifo in ifos},
+        link_map={"trans1:snk:" + ifo: source_out_links[ifo] for ifo in ifos},
     )
     pipeline.insert(
-        link_map={"snk2:sink:" + ifo: "trans1:src:" + ifo for ifo in ifos},
+        link_map={"snk2:snk:" + ifo: "trans1:src:" + ifo for ifo in ifos},
     )
 
     with SignalEOS():
