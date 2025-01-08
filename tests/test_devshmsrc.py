@@ -113,10 +113,10 @@ def test_devshmsrc(capsys):
 
     pipeline.insert(
         link_map={
-            "mask:sink:" + options.instrument: "src1:src:" + options.state_channel_name,
-            "gate:sink:strain": "src1:src:" + options.channel_name,
-            "gate:sink:state_vector": "mask:src:" + options.instrument,
-            "snk2:sink:" + options.state_channel_name: "gate:src:" + options.instrument,
+            "mask:snk:" + options.instrument: "src1:src:" + options.state_channel_name,
+            "gate:snk:strain": "src1:src:" + options.channel_name,
+            "gate:snk:state_vector": "mask:src:" + options.instrument,
+            "snk2:snk:" + options.state_channel_name: "gate:src:" + options.instrument,
         }
     )
 

@@ -94,8 +94,8 @@ class TestFrameSink:
                         adapter_config=AdapterConfig(stride=duration_offsets),
                     ),
                     link_map={
-                        "snk:sink:H1": "src_H1:src:H1",
-                        "snk:sink:L1": "src_L1:src:L1",
+                        "snk:snk:H1": "src_H1:src:H1",
+                        "snk:snk:L1": "src_L1:src:L1",
                     },
                 )
                 pipeline.run()

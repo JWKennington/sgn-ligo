@@ -60,9 +60,9 @@ def test_framereader():
 
     pipeline.insert(
         link_map={
-            "trans1:sink:" + instrument: "src1:src:L1:GWOSC-16KHZ_R1_STRAIN",
-            "snk1:sink:" + instrument: "trans1:src:" + instrument,
-            "snk2:sink:DQ": "src1:src:L1:GWOSC-16KHZ_R1_DQMASK",
+            "trans1:snk:" + instrument: "src1:src:L1:GWOSC-16KHZ_R1_STRAIN",
+            "snk1:snk:" + instrument: "trans1:src:" + instrument,
+            "snk2:snk:DQ": "src1:src:L1:GWOSC-16KHZ_R1_DQMASK",
         }
     )
 

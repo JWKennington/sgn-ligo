@@ -440,13 +440,13 @@ def datasource(
                     ),
                     link_map={
                         ifo
-                        + "_InjAdd:sink:frame": ifo
+                        + "_InjAdd:snk:frame": ifo
                         + "_FrameSource:src:"
                         + ifo
                         + ":"
                         + info.channel_dict[ifo],
                         ifo
-                        + "_InjAdd:sink:inj": ifo
+                        + "_InjAdd:snk:inj": ifo
                         + "_InjSource:src:"
                         + ifo
                         + ":"
@@ -486,13 +486,13 @@ def datasource(
                 bit_mask,
                 gate,
                 link_map={
-                    ifo + "_Gate:sink:strain": ifo + "_Devshm:src:" + channel_name_ifo,
+                    ifo + "_Gate:snk:strain": ifo + "_Devshm:src:" + channel_name_ifo,
                     ifo
-                    + "_Mask:sink:"
+                    + "_Mask:snk:"
                     + ifo: ifo
                     + "_Devshm:src:"
                     + state_channel_name_ifo,
-                    ifo + "_Gate:sink:state_vector": ifo + "_Mask:src:" + ifo,
+                    ifo + "_Gate:snk:state_vector": ifo + "_Mask:src:" + ifo,
                 },
             )
         elif info.data_source == "white-realtime":
@@ -543,8 +543,8 @@ def datasource(
                     control="control",
                 ),
                 link_map={
-                    ifo + "_Gate:sink:strain": source_out_links[ifo],
-                    ifo + "_Gate:sink:control": ifo + "_SegmentSource:src:" + ifo,
+                    ifo + "_Gate:snk:strain": source_out_links[ifo],
+                    ifo + "_Gate:snk:control": ifo + "_SegmentSource:src:" + ifo,
                 },
             )
             source_out_links[ifo] = ifo + "_Gate:src:" + ifo
@@ -557,7 +557,7 @@ def datasource(
                     source_pad_names=("latency",),
                     route=ifo + "_datasource_latency",
                 ),
-                link_map={ifo + "_SourceLatency:sink:data": source_out_links[ifo]},
+                link_map={ifo + "_SourceLatency:snk:data": source_out_links[ifo]},
             )
             source_latency_links[ifo] = ifo + "_SourceLatency:src:latency"
 
