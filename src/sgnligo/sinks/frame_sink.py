@@ -2,29 +2,29 @@
 The formatting is done using the gwpy library.
 """
 
+import queue
+import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Sequence
 
 from gwpy.timeseries import TimeSeries, TimeSeriesDict
-from sgn.base import SGN_LOG_LEVELS, get_sgn_logger
-from sgnts.base import Offset, TSSink
+from sgn.base import get_sgn_logger
+from sgnts.base import AdapterConfig, Offset, TSSink
 
-# TODO remove the SGN_LOG_LEVELS once
-#  https://git.ligo.org/greg/sgn/-/merge_requests/65 is merged
-LOGGER = get_sgn_logger(__name__, SGN_LOG_LEVELS)
-FILENAME_PARAM_CHANNELS = "channels"
-FILENAME_PARAM_GPS_START_TIME = "gps_start_time"
-FILENAME_PARAM_DURATION = "duration"
+LOGGER = get_sgn_logger(__name__)
+
+# filename format parameters
 FILENAME_PARAMS = (
-    FILENAME_PARAM_CHANNELS,
-    FILENAME_PARAM_GPS_START_TIME,
-    FILENAME_PARAM_DURATION,
+    "instruments",
+    "gps_start_time",
+    "duration",
 )
 
 
 @dataclass
 class FrameSink(TSSink):
-    """A sink element that writes time series data to .gwf file
+    """A sink element that writes time series data to file
 
     Args:
         channels:
@@ -32,69 +32,114 @@ class FrameSink(TSSink):
         duration:
             int, the duration of the data to write to the file
         path:
-            str, the path to write the file to. Must contain parameters for:
-                - {channels}, the sorted list of instruments inferred from the included
-                      channels (e.g. "H1" or "H1L1")
-                - {gps_start_time}, the start time of the data in GPS time
-                - {duration}, the duration of the data in seconds
+            str, the path to write the frame files to.  The file name
+            must contain the following format parameters (in curly braces):
+            - {instruments}, the sorted list of instruments inferred from
+                the included channel names (e.g. "H1" for "H1:GDS-CAL...")
+            - {gps_start_time}, the start time of the data in GPS seconds
+            - {duration}, the duration of the data in seconds
+            The extension on the the path determines the output file
+            type.  Currently ".gwf" and ".hdf5" are supported.
+            default: "{instruments}-{gps_start_time}-{duration}.gwf"
 
-    Usage:
-        Must use with an AdapterConfig with the duration_offsets parameter matching
-        the duration of the FrameSink. For example, if the FrameSink duration is 3
-        seconds, the AdapterConfig should have duration_offsets=Offset.fromsec(3).
-        ```python
-        from sgnts.base import AdapterConfig, Offset
-        from sgnligo.sinks import FrameSink
+    This sink element automatically creates an AdapterConfig for
+    buffering the data needed to create frames of the requested
+    duration.  Attempting to provide an AdapterConfig will produce a
+    RuntimeError.
 
-        duration = 3  # seconds
-        duration_offsets = Offset.fromsec(duration)
-        snk = FrameSink(
-            name="snk",
-            sink_pad_names=(
-                "H1",
-                "L1",
-            ),
-            duration=duration,
-            path=path_format.as_posix(),
-            adapter_config=AdapterConfig(stride=duration_offsets),
-        )
-        ```
     """
 
     channels: Sequence[str] = field(default_factory=list)
     duration: int = 0
-    path: str = "{channels}-{gps_start_time}-{duration}.gwf"
+    path: str = "{instruments}-{gps_start_time}-{duration}.gwf"
+    force: bool = False
 
     def __post_init__(self):
         """Post init for setting up the FrameSink"""
         # enforce channels = sink_pad_names
         self.sink_pad_names = self.channels
 
+        # setup the adapter config for the audioadapter
+        if self.adapter_config is not None:
+            raise RuntimeError(
+                "specifying AdapterConfig is not supported in this element as they are handled internally."
+            )
+        stride = Offset.fromsec(self.duration)
+        self.adapter_config = AdapterConfig(stride=stride)
+
         # Call parent post init
         super().__post_init__()
 
         # Check valid duration
-        if not isinstance(self.duration, int) and self.duration > 0:
-            raise ValueError(f"Duration must be an integer, got {self.duration}")
+        if not isinstance(self.duration, int) or self.duration <= 0:
+            raise ValueError(
+                f"Duration must be an positive integer, got {self.duration}"
+            )
 
         # Check path contains parameters for duration and gps_start_time
         for param in FILENAME_PARAMS:
             if f"{{{param}}}" not in self.path:
                 raise ValueError(f"Path must contain parameter {{{param}}}")
 
-    def write(self):
-        """Write a gwf file using the gwpy library. This method gets called by the
-        internal pad, and only writes to the file if there are enough samples in the
-        audioadapters.
+        self._instruments_str = "".join(
+            sorted({chan.split(":")[0] for chan in self.channels})
+        )
 
-        Notes:
-            Single-Segment:
-                Currently, the FrameSink writes a single segment of data to a .gwf file.
-                Future versions will extend this to write multiple segments.
+        # create the data queue
+        self._queue = queue.Queue()
+
+        # create/start the publisher thread
+        self._writer_thread = threading.Thread(target=self._writer)
+        self._writer_thread.start()
+
+    def _writer(self):
+        """Write a gwf file using the gwpy library"""
+        while True:
+            tsd = self._queue.get(
+                block=True,
+            )
+
+            if tsd is None:
+                LOGGER.debug("writer thread exiting")
+                return
+
+            span = tsd.span
+            t0 = span.start
+            assert int(t0) == t0
+            t0 = int(t0)
+            duration = span.end - span.start
+            assert int(duration) == duration
+            duration = int(duration)
+
+            outpath = Path(
+                self.path.format(
+                    instruments=self._instruments_str,
+                    gps_start_time=f"{t0:0=10.0f}",
+                    duration=duration,
+                )
+            )
+
+            if outpath.exists():
+                if self.force:
+                    outpath.unlink()
+                else:
+                    raise FileExistsError(f"output file exists: {outpath}")
+
+            LOGGER.info(f"Writing file {outpath}...")
+            tsd.write(outpath)
+
+    def internal(self):
+        """Internal method, checks if sufficient data is present in the audioadapters to
+        write to a file.
+
+        Args:
+            pad:
+                SinkPad, the pad to check for enough samples
         """
+        super().internal()
+
         # Initialize TimeSeriesDict to hold all channels
-        ts_dict = TimeSeriesDict()
-        t0 = None
+        tsd = TimeSeriesDict()
 
         # Channels
         for name, pad in zip(self.sink_pad_names, self.sink_pads):
@@ -102,7 +147,6 @@ class FrameSink(TSSink):
             # Data products
             frame = self.preparedframes[pad]
             if frame is None or (frame is not None and frame.is_gap):
-                LOGGER.warning("Gap detected in data. Skipping...")
                 return
 
             # Load first buffer
@@ -121,48 +165,30 @@ class FrameSink(TSSink):
 
             # Compute start time in floating seconds
             # TODO this could be a new method on the SeriesBuffer class
-            t0_s = Offset.offset_ref_t0 + Offset.tosec(data.offset)
+            t0 = Offset.offset_ref_t0 + Offset.tosec(data.offset)
+            # data times should be lined up with second boundaries
+            assert int(t0) == t0, f"t0 is not on second boundary: {t0}"
 
             # TimeSeries
             ts = TimeSeries(
                 data.data,
-                t0=t0_s,
+                t0=t0,
                 sample_rate=data.sample_rate,
                 channel=name,
             )
 
             # Add to TimeSeriesDict
-            ts_dict[name] = ts
+            tsd[name] = ts
 
-            # Track start time for filename
-            if t0 is None:
-                t0 = data.t0
+        self._queue.put(tsd)
 
-        # Format filename
-        filename = self.path.format(
-            channels="".join(sorted(self.channels)),
-            gps_start_time=t0,
-            duration=self.duration,
-        )
-
-        # Write to frame
-        LOGGER.info(f"Writing file {filename}...")
-        ts_dict.write(filename)
-
-    def internal(self):
-        """Internal method, checks if sufficient data is present in the audioadapters to
-        write to a file.
-
-        Args:
-            pad:
-                SinkPad, the pad to check for enough samples
-        """
-        super().internal()
+        # FIXME: need check that this isn't falling behind real-time
 
         # Check EOS
         for spad in self.sink_pads:
             frame = self.preparedframes[spad]
             if frame is not None and frame.EOS:
                 self.mark_eos(spad)
-
-        self.write()
+                # this shuts down the background thread
+                self._queue.put(None)
+                self._writer_thread.join()

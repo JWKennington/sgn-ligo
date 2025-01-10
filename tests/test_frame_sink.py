@@ -51,9 +51,9 @@ class TestFrameSink:
 
         with TemporaryDirectory() as tmpdir:
             path = pathlib.Path(tmpdir)
-            path_format = path / "{channels}-{gps_start_time}-{duration}.gwf"
-            out1 = path / "H1L1-3000000000-3.gwf"
-            out2 = path / "H1L1-0-3.gwf"
+            path_format = path / "{instruments}-{gps_start_time}-{duration}.gwf"
+            out1 = path / "H1L1-0000000003-3.gwf"
+            out2 = path / "H1L1-0000000000-3.gwf"
 
             # Verify the files do not exist
             assert not out1.exists()
@@ -86,16 +86,15 @@ class TestFrameSink:
                     FrameSink(
                         name="snk",
                         channels=(
-                            "H1",
-                            "L1",
+                            "H1:FOO-BAR",
+                            "L1:BAZ-QUX_0",
                         ),
                         duration=duration,
                         path=path_format.as_posix(),
-                        adapter_config=AdapterConfig(stride=duration_offsets),
                     ),
                     link_map={
-                        "snk:snk:H1": "src_H1:src:H1",
-                        "snk:snk:L1": "src_L1:src:L1",
+                        "snk:snk:H1:FOO-BAR": "src_H1:src:H1",
+                        "snk:snk:L1:BAZ-QUX_0": "src_L1:src:L1",
                     },
                 )
                 pipeline.run()
