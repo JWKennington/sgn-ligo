@@ -556,6 +556,7 @@ def datasource(
                     sink_pad_names=("data",),
                     source_pad_names=("latency",),
                     route=ifo + "_datasource_latency",
+                    interval=1,
                 ),
                 link_map={ifo + "_SourceLatency:snk:data": source_out_links[ifo]},
             )

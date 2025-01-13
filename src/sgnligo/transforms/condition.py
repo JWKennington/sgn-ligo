@@ -202,6 +202,7 @@ def condition(
                     source_pad_names=(ifo,),
                     sink_pad_names=(ifo,),
                     route=ifo + "_whitening_latency",
+                    interval=1,
                 ),
                 link_map={
                     ifo + "_Latency:snk:" + ifo: ifo + "_Whitener:src:" + ifo,
