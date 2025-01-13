@@ -18,15 +18,22 @@ class Latency(TransformElement):
     Args:
         route:
             str, the kafka route to send the latency data to
+        interval:
+            float, the interval to calculate latency, in seconds
     """
 
     route: str = None
+    interval: float = None
 
     def __post_init__(self):
         super().__post_init__()
         assert len(self.sink_pads) == 1
         assert isinstance(self.route, str)
         self.frame = None
+
+        if self.interval is not None:
+            self.last_time = now()
+            self.latencies = []
 
     def pull(self, pad, frame):
         self.frame = frame
@@ -44,17 +51,37 @@ class Latency(TransformElement):
         elif isinstance(frame, EventFrame):
             framets = next(iter(frame.events.values())).ts
             framete = next(iter(frame.events.values())).te
+
         latency = (time - framets) / 1_000_000_000
-        event_data = {
-            self.route: {
-                "time": [
-                    framets / 1_000_000_000,
-                ],
-                "data": [
-                    latency,
-                ],
+
+        if self.interval is None:
+            event_data = {
+                self.route: {
+                    "time": [
+                        framets / 1_000_000_000,
+                    ],
+                    "data": [
+                        latency,
+                    ],
+                }
             }
-        }
+        else:
+            self.latencies.append(latency)
+            if time/1e9 - self.last_time >= self.interval:
+                event_data = {
+                    self.route: {
+                        "time": [
+                            framets / 1_000_000_000,
+                        ],
+                        "data": [
+                            max(self.latencies),
+                        ],
+                    }
+                }
+                self.latencies = []
+                self.last_time = time/1e9
+            else:
+                event_data = None
 
         return EventFrame(
             events={"kafka": EventBuffer(ts=framets, te=framete, data=event_data)},

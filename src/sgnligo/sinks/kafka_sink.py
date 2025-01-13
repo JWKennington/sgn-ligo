@@ -24,6 +24,7 @@ class KafkaSink(SinkElement):
     output_kafka_server: str = None
     topics: list[str] = None
     tag: list[str] = None
+    prefix: str = ""
 
     def __post_init__(self):
         assert isinstance(self.output_kafka_server, str)
@@ -44,6 +45,10 @@ class KafkaSink(SinkElement):
         for topic in self.topics:
             t = topic.split(".")[-1]
             if events is not None and t in events:
+                if self.prefix:
+                    topic = topic.split(".")
+                    topic[-1] = self.prefix + topic[-1]
+                    topic = ".".join(topic)
                 self.client.write(topic, events[t], tags=self.tag)
 
         if frame.EOS:
