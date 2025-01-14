@@ -537,7 +537,10 @@ class Whiten(TSTransform):
                 output_whitened_data = whitened_data[: self.stride_samples]
 
         # passes the spectrum in metadata if the pad is the psd_pad
-        metadata["psd"] = self.latest_psd
+        if output_whitened_data is None:
+            metadata["psd"] = None
+        else:
+            metadata["psd"] = self.latest_psd
         self.output_frames[self.srcs[self.psd_pad_name]] = TSFrame(
             buffers=[
                 SeriesBuffer(
