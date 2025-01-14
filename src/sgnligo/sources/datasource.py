@@ -69,7 +69,7 @@ class DataSourceInfo:
         discont_wait_time:
             float, the time to wait for next file before dropping data when data_souce
             is "devshm", in seconds
-        queue_timeout:
+        source_queue_timeout:
             float, the time to wait for next file from the queue before sending a
             hearbeat buffer when data_souce is "devshm", in seconds
         input_sample_rate:
@@ -92,7 +92,7 @@ class DataSourceInfo:
     state_vector_on_bits: Optional[list[int]] = None
     shared_memory_dir: Optional[list[str]] = None
     discont_wait_time: float = 60
-    queue_timeout: float = 1
+    source_queue_timeout: float = 1
     input_sample_rate: Optional[int] = None
     impulse_position: int = -1
 
@@ -231,7 +231,7 @@ class DataSourceInfo:
             state_vector_on_bits=options.state_vector_on_bits,
             shared_memory_dir=options.shared_memory_dir,
             discont_wait_time=options.discont_wait_time,
-            queue_timeout=options.queue_timeout,
+            source_queue_timeout=options.source_queue_timeout,
             input_sample_rate=options.input_sample_rate,
             impulse_position=options.impulse_position,
         )
@@ -329,7 +329,7 @@ class DataSourceInfo:
             "Default wait time is 60 seconds.",
         )
         group.add_argument(
-            "--queue-timeout",
+            "--source-queue-timeout",
             metavar="seconds",
             type=float,
             default=1,
@@ -465,7 +465,7 @@ def datasource(
                 channel_names=[channel_name_ifo, state_channel_name_ifo],
                 shared_memory_dir=info.shared_memory_dict[ifo],
                 discont_wait_time=info.discont_wait_time,
-                queue_timeout=info.queue_timeout,
+                queue_timeout=info.source_queue_timeout,
                 verbose=verbose,
             )
             bit_mask = BitMask(
