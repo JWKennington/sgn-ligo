@@ -436,6 +436,16 @@ class Whiten(TSTransform):
             outoffset = padded_data_offset
             shape = (Offset.tosamples(outoffsets[0]["noffset"], self.sample_rate),)
 
+        # the epoch of the psd is the mid point of the most recent fft
+        # which corresponds to the end offset of the output + half hann
+        # length
+        # FIXME: double check
+
+        psd_epoch = int(
+            Offset.tons(outoffset + outoffsets[0]["noffset"])
+            + self.hann_length // 2 / self.sample_rate * 1e9
+        )
+
         # if audioadapter hasn't given us a frame, then we have to wait for more
         # data before we can whiten. send a gap buffer
         if frame.is_gap:
@@ -489,11 +499,14 @@ class Whiten(TSTransform):
                 this_psd = self.get_psd(freq_data)
 
                 # store the latest spectrum so we can output on spectrum pad
-                psd_offset = outoffsets[0]["offset"]
-                psd_epoch = Offset.tosec(psd_offset)
                 f0 = freqs[0]
                 self.latest_psd = lal.CreateREAL8FrequencySeries(
-                    "new_psd", psd_epoch, f0, self.delta_f, "s strain^2", len(this_psd)
+                    "new_psd",
+                    psd_epoch / 1e9,
+                    f0,
+                    self.delta_f,
+                    "s strain^2",
+                    len(this_psd),
                 )
                 self.latest_psd.data.data = this_psd
 
@@ -537,10 +550,18 @@ class Whiten(TSTransform):
                 output_whitened_data = whitened_data[: self.stride_samples]
 
         # passes the spectrum in metadata if the pad is the psd_pad
+        # FIXME: use EventBuffers
         if output_whitened_data is None:
             metadata["psd"] = None
+            metadata["navg"] = None
+            metadata["n_samples"] = None
         else:
             metadata["psd"] = self.latest_psd
+            metadata["navg"] = self.navg
+            metadata["n_samples"] = self.n_samples
+
+        metadata["epoch"] = psd_epoch
+
         self.output_frames[self.srcs[self.psd_pad_name]] = TSFrame(
             buffers=[
                 SeriesBuffer(
