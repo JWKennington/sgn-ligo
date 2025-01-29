@@ -41,7 +41,7 @@ def test_devshmsrc_multi(capsys):
     #      |   NullSink |
     #       ------------
 
-    source_out_links = datasource(pipeline, data_source_info, options.verbose)
+    source_out_links, _ = datasource(pipeline, data_source_info, False, options.verbose)
 
     ifos = data_source_info.ifos
 

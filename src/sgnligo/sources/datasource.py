@@ -19,10 +19,19 @@ from sgnts.transforms import Adder, Gate
 
 from sgnligo.base import parse_list_to_dict
 from sgnligo.sources.devshmsrc import DevShmSource
+from sgnligo.sources.devshmsrc_multi import DevShmSourceMulti
 from sgnligo.sources.framecachesrc import FrameReader
 from sgnligo.transforms import BitMask, Latency
 
-KNOWN_DATASOURCES = ["white", "sin", "impulse", "white-realtime", "frames", "devshm"]
+KNOWN_DATASOURCES = [
+    "white",
+    "sin",
+    "impulse",
+    "white-realtime",
+    "frames",
+    "devshm",
+    "devshm-single",
+]
 FAKE_DATASOURCES = ["white", "sin", "impulse", "white-realtime"]
 OFFLINE_DATASOURCES = ["white", "sin", "impulse", "frames"]
 
@@ -34,7 +43,7 @@ class DataSourceInfo:
     Args:
         data_source:
             str, the data source, can be one of
-            [white|sin|impulse|white-realtime|frames|devshm]
+            [white|sin|impulse|white-realtime|frames|devshm|devshm-single]
         channel_name:
             list[str, ...], a list of channel names ["IFO=CHANNEL_NAME",...].
             For fake sources [white|sin|impulse|white-realtime], channel names are used
@@ -68,10 +77,10 @@ class DataSourceInfo:
             str, the path to the shared memory directory to read low-latency data from
         discont_wait_time:
             float, the time to wait for next file before dropping data when data_souce
-            is "devshm", in seconds
+            is "devshm" or "devshm-single", in seconds
         source_queue_timeout:
             float, the time to wait for next file from the queue before sending a
-            hearbeat buffer when data_souce is "devshm", in seconds
+            hearbeat buffer when data_souce is "devshm" or "devshm-single", in seconds
         input_sample_rate:
             int, the sample rate for fake sources [white|sin|impulse|white-realtime]
         impulse_position:
@@ -110,10 +119,11 @@ class DataSourceInfo:
                 )
             )
 
-        if self.data_source == "devshm":
+        if self.data_source in ["devshm", "devshm-single"]:
             if self.shared_memory_dir is None:
                 raise ValueError(
-                    "Must specify shared_memory_dir when data_source='devshm'"
+                    "Must specify shared_memory_dir when data_source in ['devshm',"
+                    "'devshm-single']"
                 )
             else:
                 self.shared_memory_dict = parse_list_to_dict(self.shared_memory_dir)
@@ -123,7 +133,8 @@ class DataSourceInfo:
                     )
             if self.state_channel_name is None:
                 raise ValueError(
-                    "Must specify state_channel_name when data_source='devshm'"
+                    "Must specify state_channel_name when data_source in ['devshm',"
+                    "'devshm-single']"
                 )
             else:
                 self.state_channel_dict = parse_list_to_dict(self.state_channel_name)
@@ -133,7 +144,8 @@ class DataSourceInfo:
                     )
             if self.state_vector_on_bits is None:
                 raise ValueError(
-                    "Must specify state_vector_on_bits when data_source='devshm'"
+                    "Must specify state_vector_on_bits when data_source in ['devshm',"
+                    "'devshm-single']"
                 )
             else:
                 self.state_vector_on_dict = parse_list_to_dict(
@@ -148,7 +160,7 @@ class DataSourceInfo:
             if self.gps_start_time is not None or self.gps_end_time is not None:
                 raise ValueError(
                     "Must not specify gps_start_time or gps_end_time when"
-                    " data_source='devshm'"
+                    " data_source in ['devshm','devshm-single']"
                 )
         elif self.data_source == "white-realtime":
             if self.input_sample_rate is None:
@@ -401,73 +413,25 @@ def datasource(
         source_latency_links = {}
     else:
         source_latency_links = None
-    for ifo in info.ifos:
-        if info.data_source == "frames":
-            pad_name = ifo + ":" + info.channel_dict[ifo]
-            pad_names[ifo] = pad_name
-            source_name = "_FrameSource"
-            frame_reader = FrameReader(
-                name=ifo + source_name,
-                framecache=info.frame_cache,
-                channel_names=[
-                    ifo + ":" + info.channel_dict[ifo],
-                ],
-                instrument=ifo,
-                t0=info.gps_start_time,
-                end=info.gps_end_time,
-            )
-            info.input_sample_rate = next(iter(frame_reader.rates.values()))
-            pipeline.insert(
-                frame_reader,
-            )
-            if info.noiseless_inj_frame_cache is not None:
-                print("Connecting noiseless injection frame source")
-                pipeline.insert(
-                    FrameReader(
-                        name=ifo + "_InjSource",
-                        framecache=info.noiseless_inj_frame_cache,
-                        channel_names=[
-                            ifo + ":" + info.noiseless_inj_channel_dict[ifo]
-                        ],
-                        instrument=ifo,
-                        t0=info.gps_start_time,
-                        end=info.gps_end_time,
-                    ),
-                    Adder(
-                        name=ifo + "_InjAdd",
-                        sink_pad_names=("frame", "inj"),
-                        source_pad_names=(ifo,),
-                    ),
-                    link_map={
-                        ifo
-                        + "_InjAdd:snk:frame": ifo
-                        + "_FrameSource:src:"
-                        + ifo
-                        + ":"
-                        + info.channel_dict[ifo],
-                        ifo
-                        + "_InjAdd:snk:inj": ifo
-                        + "_InjSource:src:"
-                        + ifo
-                        + ":"
-                        + info.noiseless_inj_channel_dict[ifo],
-                    },
-                )
-                source_name = "_InjAdd"
-                pad_names[ifo] = ifo
-        elif info.data_source == "devshm":
+
+    if info.data_source == "devshm":
+        source_name = "_Gate"
+        channel_names = {}
+        for ifo in info.ifos:
             pad_names[ifo] = ifo
-            source_name = "_Gate"
             channel_name_ifo = f"{ifo}:{info.channel_dict[ifo]}"
             state_channel_name_ifo = f"{ifo}:{info.state_channel_dict[ifo]}"
-            devshm = DevShmSource(
-                name=ifo + "_Devshm",
-                channel_names=[channel_name_ifo, state_channel_name_ifo],
-                shared_memory_dir=info.shared_memory_dict[ifo],
-                discont_wait_time=info.discont_wait_time,
-                queue_timeout=info.source_queue_timeout,
-                verbose=verbose,
-            )
+            channel_names[ifo] = [channel_name_ifo, state_channel_name_ifo]
+        devshm = DevShmSourceMulti(
+            name="DevShmMulti",
+            channel_names=channel_names,
+            shared_memory_dirs=info.shared_memory_dict,
+            discont_wait_time=info.discont_wait_time,
+            queue_timeout=info.source_queue_timeout,
+            verbose=verbose,
+        )
+        pipeline.insert(devshm)
+        for ifo in info.ifos:
             bit_mask = BitMask(
                 name=ifo + "_Mask",
                 sink_pad_names=(ifo,),
@@ -480,76 +444,177 @@ def datasource(
                 control="state_vector",
                 source_pad_names=(ifo,),
             )
-            info.input_sample_rate = devshm.rates[channel_name_ifo]
+            info.input_sample_rate = devshm.rates[ifo][channel_names[ifo][0]]
             pipeline.insert(
-                devshm,
                 bit_mask,
                 gate,
                 link_map={
-                    ifo + "_Gate:snk:strain": ifo + "_Devshm:src:" + channel_name_ifo,
+                    ifo
+                    + "_Gate:snk:strain": "DevShmMulti:src:"
+                    + channel_names[ifo][0],
                     ifo
                     + "_Mask:snk:"
-                    + ifo: ifo
-                    + "_Devshm:src:"
-                    + state_channel_name_ifo,
+                    + ifo: "DevShmMulti:src:"
+                    + channel_names[ifo][1],
                     ifo + "_Gate:snk:state_vector": ifo + "_Mask:src:" + ifo,
                 },
             )
-        elif info.data_source == "white-realtime":
-            pad_names[ifo] = ifo
-            source_name = "_FakeSource"
-            source_pad_names = (ifo,)
-            pipeline.insert(
-                FakeSeriesSource(
-                    name=ifo + "_FakeSource",
-                    source_pad_names=source_pad_names,
-                    rate=info.input_sample_rate,
-                    real_time=True,
-                ),
-            )
-        else:
-            pad_names[ifo] = ifo
-            source_name = "_FakeSource"
-            source_pad_names = (ifo,)
-            pipeline.insert(
-                FakeSeriesSource(
-                    name=ifo + "_FakeSource",
-                    source_pad_names=source_pad_names,
-                    rate=info.input_sample_rate,
-                    signal_type=info.data_source,
-                    impulse_position=info.impulse_position,
+            source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
+
+    else:
+        for ifo in info.ifos:
+            if info.data_source == "frames":
+                pad_name = ifo + ":" + info.channel_dict[ifo]
+                pad_names[ifo] = pad_name
+                source_name = "_FrameSource"
+                frame_reader = FrameReader(
+                    name=ifo + source_name,
+                    framecache=info.frame_cache,
+                    channel_names=[
+                        ifo + ":" + info.channel_dict[ifo],
+                    ],
+                    instrument=ifo,
+                    t0=info.gps_start_time,
+                    end=info.gps_end_time,
+                )
+                info.input_sample_rate = next(iter(frame_reader.rates.values()))
+                pipeline.insert(
+                    frame_reader,
+                )
+                if info.noiseless_inj_frame_cache is not None:
+                    print("Connecting noiseless injection frame source")
+                    pipeline.insert(
+                        FrameReader(
+                            name=ifo + "_InjSource",
+                            framecache=info.noiseless_inj_frame_cache,
+                            channel_names=[
+                                ifo + ":" + info.noiseless_inj_channel_dict[ifo]
+                            ],
+                            instrument=ifo,
+                            t0=info.gps_start_time,
+                            end=info.gps_end_time,
+                        ),
+                        Adder(
+                            name=ifo + "_InjAdd",
+                            sink_pad_names=("frame", "inj"),
+                            source_pad_names=(ifo,),
+                        ),
+                        link_map={
+                            ifo
+                            + "_InjAdd:snk:frame": ifo
+                            + "_FrameSource:src:"
+                            + ifo
+                            + ":"
+                            + info.channel_dict[ifo],
+                            ifo
+                            + "_InjAdd:snk:inj": ifo
+                            + "_InjSource:src:"
+                            + ifo
+                            + ":"
+                            + info.noiseless_inj_channel_dict[ifo],
+                        },
+                    )
+                    source_name = "_InjAdd"
+                    pad_names[ifo] = ifo
+            elif info.data_source == "devshm-single":
+                pad_names[ifo] = ifo
+                source_name = "_Gate"
+                channel_name_ifo = f"{ifo}:{info.channel_dict[ifo]}"
+                state_channel_name_ifo = f"{ifo}:{info.state_channel_dict[ifo]}"
+                devshm = DevShmSource(
+                    name=ifo + "_Devshm",
+                    channel_names=[channel_name_ifo, state_channel_name_ifo],
+                    shared_memory_dir=info.shared_memory_dict[ifo],
+                    discont_wait_time=info.discont_wait_time,
+                    queue_timeout=info.source_queue_timeout,
                     verbose=verbose,
-                    t0=info.gps_start_time,
-                    end=info.gps_end_time,
-                ),
-            )
-
-        source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
-
-        if info.frame_segments_file is not None:
-            pipeline.insert(
-                SegmentSource(
-                    name=ifo + "_SegmentSource",
+                )
+                bit_mask = BitMask(
+                    name=ifo + "_Mask",
+                    sink_pad_names=(ifo,),
                     source_pad_names=(ifo,),
-                    rate=info.input_sample_rate,
-                    t0=info.gps_start_time,
-                    end=info.gps_end_time,
-                    segments=frame_segments[ifo],
-                ),
-                Gate(
-                    name=ifo + "_Gate",
-                    sink_pad_names=("strain", "control"),
+                    bit_mask=int(info.state_vector_on_dict[ifo]),
+                )
+                gate = Gate(
+                    name=ifo + source_name,
+                    sink_pad_names=("strain", "state_vector"),
+                    control="state_vector",
                     source_pad_names=(ifo,),
-                    control="control",
-                ),
-                link_map={
-                    ifo + "_Gate:snk:strain": source_out_links[ifo],
-                    ifo + "_Gate:snk:control": ifo + "_SegmentSource:src:" + ifo,
-                },
-            )
-            source_out_links[ifo] = ifo + "_Gate:src:" + ifo
+                )
+                info.input_sample_rate = devshm.rates[channel_name_ifo]
+                pipeline.insert(
+                    devshm,
+                    bit_mask,
+                    gate,
+                    link_map={
+                        ifo
+                        + "_Gate:snk:strain": ifo
+                        + "_Devshm:src:"
+                        + channel_name_ifo,
+                        ifo
+                        + "_Mask:snk:"
+                        + ifo: ifo
+                        + "_Devshm:src:"
+                        + state_channel_name_ifo,
+                        ifo + "_Gate:snk:state_vector": ifo + "_Mask:src:" + ifo,
+                    },
+                )
+            elif info.data_source == "white-realtime":
+                pad_names[ifo] = ifo
+                source_name = "_FakeSource"
+                source_pad_names = (ifo,)
+                pipeline.insert(
+                    FakeSeriesSource(
+                        name=ifo + "_FakeSource",
+                        source_pad_names=source_pad_names,
+                        rate=info.input_sample_rate,
+                        real_time=True,
+                    ),
+                )
+            else:
+                pad_names[ifo] = ifo
+                source_name = "_FakeSource"
+                source_pad_names = (ifo,)
+                pipeline.insert(
+                    FakeSeriesSource(
+                        name=ifo + "_FakeSource",
+                        source_pad_names=source_pad_names,
+                        rate=info.input_sample_rate,
+                        signal_type=info.data_source,
+                        impulse_position=info.impulse_position,
+                        verbose=verbose,
+                        t0=info.gps_start_time,
+                        end=info.gps_end_time,
+                    ),
+                )
 
-        if source_latency:
+            source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
+
+            if info.frame_segments_file is not None:
+                pipeline.insert(
+                    SegmentSource(
+                        name=ifo + "_SegmentSource",
+                        source_pad_names=(ifo,),
+                        rate=info.input_sample_rate,
+                        t0=info.gps_start_time,
+                        end=info.gps_end_time,
+                        segments=frame_segments[ifo],
+                    ),
+                    Gate(
+                        name=ifo + "_Gate",
+                        sink_pad_names=("strain", "control"),
+                        source_pad_names=(ifo,),
+                        control="control",
+                    ),
+                    link_map={
+                        ifo + "_Gate:snk:strain": source_out_links[ifo],
+                        ifo + "_Gate:snk:control": ifo + "_SegmentSource:src:" + ifo,
+                    },
+                )
+                source_out_links[ifo] = ifo + "_Gate:src:" + ifo
+
+    if source_latency:
+        for ifo in info.ifos:
             pipeline.insert(
                 Latency(
                     name=ifo + "_SourceLatency",
