@@ -124,7 +124,8 @@ class Whiten(TSTransform):
     psd_pad_name: str = ""
     whiten_pad_name: str = ""
     whitening_method: str = "gstlal"
-    sample_rate: int = 2048
+    input_sample_rate: int = 16384
+    whiten_sample_rate: int = 2048
     fft_length: int = 8
     nmed: int = 7
     navg: int = 64
@@ -139,20 +140,27 @@ class Whiten(TSTransform):
         self.source_pad_names = (self.whiten_pad_name, self.psd_pad_name)
 
         # define block overlap following arxiv:1604.04324
-        self.n = int(self.fft_length * self.sample_rate)
-        self.z = int(self.fft_length / 4 * self.sample_rate)
-        self.hann_length = self.n - 2 * self.z
-        overlap = self.hann_length // 2
+        self.n_input = int(self.fft_length * self.input_sample_rate)
+        self.z_input = int(self.fft_length / 4 * self.input_sample_rate)
+        self.hann_length_input = self.n_input - 2 * self.z_input
+        overlap_input = self.hann_length_input // 2
+
+        self.n_whiten = int(self.fft_length * self.whiten_sample_rate)
+        self.z_whiten = int(self.fft_length / 4 * self.whiten_sample_rate)
+        self.hann_length_whiten = self.n_whiten - 2 * self.z_whiten
 
         # init audio addapter
         self.adapter_config = AdapterConfig()
-        self.adapter_config.overlap = (0, Offset.fromsamples(overlap, self.sample_rate))
+        self.adapter_config.overlap = (
+            0,
+            Offset.fromsamples(overlap_input, self.input_sample_rate),
+        )
         self.adapter_config.stride = Offset.fromsamples(
-            self.hann_length // 2, self.sample_rate
+            self.hann_length_input // 2, self.input_sample_rate
         )
         self.adapter_config.skip_gaps = True
         self.stride_samples = Offset.tosamples(
-            self.adapter_config.stride, self.sample_rate
+            self.adapter_config.stride, self.whiten_sample_rate
         )
 
         super().__post_init__()
@@ -170,9 +178,9 @@ class Whiten(TSTransform):
             self.n_samples = 0
 
             # set requested sampling rates
-            self.delta_f = 1 / (1 / self.sample_rate) / self.n
-            self.delta_t = 1 / self.sample_rate
-            self.lal_normalization_constant = 2 * self.delta_f
+            self.delta_f_whiten = 1 / (1 / self.whiten_sample_rate) / self.n_whiten
+            self.delta_t_whiten = 1 / self.whiten_sample_rate
+            self.lal_normalization_constant_whiten = 2 * self.delta_f_whiten
 
             # store last nmed instantaneous PSDs
             self.square_data_bufs = deque(maxlen=self.nmed)
@@ -180,11 +188,18 @@ class Whiten(TSTransform):
 
             # initialize window functions
             # we apply a hann window to incoming raw data
-            self.hann = self.hann_window(self.n, self.z)
+            self.hann_input, self.hann_norm_input = self.hann_window(
+                self.n_input, self.z_input
+            )
+            self.hann_whiten, self.hann_norm_whiten = self.hann_window(
+                self.n_whiten, self.z_whiten
+            )
 
             # we apply a tukey window on whitened data if we have zero-padding
-            if self.z:
-                self.tukey = self.tukey_window(self.n, 2 * self.z / self.n)
+            if self.z_whiten:
+                self.tukey = self.tukey_window(
+                    self.n_whiten, 2 * self.z_whiten / self.n_whiten
+                )
             else:
                 self.tukey = None
 
@@ -210,11 +225,11 @@ class Whiten(TSTransform):
                 scale = 1
 
                 # get frequency resolution and number of bins
-                fnyquist = self.sample_rate / 2
-                n = int(round(fnyquist / self.delta_f) + 1)
+                fnyquist = self.whiten_sample_rate / 2
+                n = int(round(fnyquist / self.delta_f_whiten) + 1)
 
                 # interpolate and rescale PSD
-                psd = interpolate_psd(psd, self.delta_f)
+                psd = interpolate_psd(psd, self.delta_f_whiten)
                 ref_psd_data = psd.data.data[:n] * scale
 
                 # install PSD in buffer history
@@ -260,9 +275,9 @@ class Whiten(TSTransform):
 
         # FIXME gstlal had a method of adding from the two ends of the window
         # so that small numbers weren't added to big ones
-        self.hann_norm = np.sqrt(N / np.sum(hann**2))
+        hann_norm = np.sqrt(N / np.sum(hann**2))
 
-        return hann
+        return hann, hann_norm
 
     def median_bias(self, nn):
         """
@@ -319,17 +334,17 @@ class Whiten(TSTransform):
         """
         # running average mode (track-psd)
         if self.n_samples == 0:
-            out = self.lal_normalization_constant * (np.abs(fdata) ** 2)
+            out = self.lal_normalization_constant_whiten * (np.abs(fdata) ** 2)
 
             # set DC and Nyquist terms to zero
             # FIXME: gstlal had a condition if self.f0 == 0
             out[0] = 0
-            out[self.n // 2] = 0
+            out[self.n_whiten // 2] = 0
             return out
         else:
             return (
                 np.exp(self.geometric_mean_square + EULERGAMMA)
-                * self.lal_normalization_constant
+                * self.lal_normalization_constant_whiten
             )
 
     def set_psd(self, ref_psd_data, weight):
@@ -337,7 +352,9 @@ class Whiten(TSTransform):
         XLALPSDRegressorSetPSD
         https://lscsoft.docs.ligo.org/lalsuite/lal/_average_spectrum_8c_source.html#l01831
         """
-        arithmetic_mean_square_data = ref_psd_data / self.lal_normalization_constant
+        arithmetic_mean_square_data = (
+            ref_psd_data / self.lal_normalization_constant_whiten
+        )
 
         # populate the buffer history with the ref psd
         for _i in range(self.nmed):
@@ -423,7 +440,7 @@ class Whiten(TSTransform):
             self.first_output_offset = frame.offset
 
         padded_data_offset = outoffsets[0]["offset"] - Offset.fromsamples(
-            self.z, self.sample_rate
+            self.z_whiten, self.whiten_sample_rate
         )
 
         # FIXME: haven't tested whether this works for gwpy method
@@ -434,7 +451,9 @@ class Whiten(TSTransform):
             shape = (0,)
         else:
             outoffset = padded_data_offset
-            shape = (Offset.tosamples(outoffsets[0]["noffset"], self.sample_rate),)
+            shape = (
+                Offset.tosamples(outoffsets[0]["noffset"], self.whiten_sample_rate),
+            )
 
         # the epoch of the psd is the mid point of the most recent fft
         # which corresponds to the end offset of the output + half hann
@@ -443,7 +462,7 @@ class Whiten(TSTransform):
 
         psd_epoch = int(
             Offset.tons(outoffset + outoffsets[0]["noffset"])
-            + self.hann_length // 2 / self.sample_rate * 1e9
+            + self.hann_length_whiten // 2 / self.whiten_sample_rate * 1e9
         )
 
         # if audioadapter hasn't given us a frame, then we have to wait for more
@@ -482,18 +501,31 @@ class Whiten(TSTransform):
             elif self.whitening_method == "gstlal":
                 # apply the window function
                 this_seg_data = (
-                    self.hann[self.z : -self.z]
+                    self.hann_input[self.z_input : -self.z_input]
                     * this_seg_data
-                    * self.delta_t
-                    * self.hann_norm
+                    * 1
+                    / self.input_sample_rate
+                    * self.hann_norm_input
                 )
-                this_seg_data = np.pad(this_seg_data, (self.z, self.z))
+                this_seg_data = np.pad(this_seg_data, (self.z_input, self.z_input))
 
                 # apply fourier transform
                 freq_data = np.fft.rfft(this_seg_data)
 
                 # get frequency bins
-                freqs = np.fft.rfftfreq(this_seg_data.size, d=self.delta_t)
+                freqs = np.fft.rfftfreq(
+                    this_seg_data.size, d=1 / self.input_sample_rate
+                )
+
+                # downsampling
+                freq_data = freq_data[
+                    : int(
+                        self.whiten_sample_rate
+                        / self.input_sample_rate
+                        * freq_data.shape[-1]
+                    )
+                    + 1
+                ]
 
                 # get the latest PSD
                 this_psd = self.get_psd(freq_data)
@@ -504,7 +536,7 @@ class Whiten(TSTransform):
                     "new_psd",
                     psd_epoch / 1e9,
                     f0,
-                    self.delta_f,
+                    self.delta_f_whiten,
                     "s strain^2",
                     len(this_psd),
                 )
@@ -517,7 +549,7 @@ class Whiten(TSTransform):
                 # the DC and Nyquist terms are zero
                 freq_data_whitened = np.zeros_like(freq_data)
                 freq_data_whitened[1:-1] = freq_data[1:-1] * np.sqrt(
-                    self.lal_normalization_constant / this_psd[1:-1]
+                    self.lal_normalization_constant_whiten / this_psd[1:-1]
                 )
 
                 # Fourier Transform back to the time domain
@@ -525,10 +557,12 @@ class Whiten(TSTransform):
                 # self.delta_f scaling https://lscsoft.docs.ligo.org/lalsuite/lal/
                 # _time_freq_f_f_t_8c_source.html#l00183
                 whitened_data = (
-                    np.fft.irfft(freq_data_whitened, self.n, norm="forward")
-                    * self.delta_f
+                    np.fft.irfft(freq_data_whitened, self.n_whiten, norm="forward")
+                    * self.delta_f_whiten
                 )
-                whitened_data *= self.delta_t * np.sqrt(np.sum(self.hann**2))
+                whitened_data *= self.delta_t_whiten * np.sqrt(
+                    np.sum(self.hann_whiten**2)
+                )
 
                 if self.tukey is not None:
                     whitened_data *= self.tukey
@@ -566,7 +600,7 @@ class Whiten(TSTransform):
             buffers=[
                 SeriesBuffer(
                     offset=outoffset,
-                    sample_rate=self.sample_rate,
+                    sample_rate=self.whiten_sample_rate,
                     data=None,
                     shape=shape,
                 )
@@ -579,7 +613,7 @@ class Whiten(TSTransform):
             buffers=[
                 SeriesBuffer(
                     offset=outoffset,
-                    sample_rate=self.sample_rate,
+                    sample_rate=self.whiten_sample_rate,
                     data=output_whitened_data,
                     shape=shape,
                 )

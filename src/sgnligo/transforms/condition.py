@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from math import isinf
 
 from sgn import Pipeline
-from sgnts.transforms import Resampler, Threshold
+from sgnts.transforms import Threshold
 
 from sgnligo.transforms.latency import Latency
 from sgnligo.transforms.whiten import Whiten
@@ -150,27 +150,20 @@ def condition(
 
         # Downsample and whiten
         pipeline.insert(
-            Resampler(
-                name=ifo + "_SourceResampler",
-                sink_pad_names=(ifo,),
-                source_pad_names=(ifo,),
-                inrate=input_sample_rate,
-                outrate=condition_info.whiten_sample_rate,
-            ),
             Whiten(
                 name=ifo + "_Whitener",
                 sink_pad_names=(ifo,),
                 instrument=ifo,
                 psd_pad_name="spectrum_" + ifo,
                 whiten_pad_name=ifo,
-                sample_rate=condition_info.whiten_sample_rate,
+                input_sample_rate=input_sample_rate,
+                whiten_sample_rate=condition_info.whiten_sample_rate,
                 fft_length=condition_info.psd_fft_length,
                 whitening_method=condition_info.whitening_method,
                 reference_psd=condition_info.reference_psd,
             ),
             link_map={
-                ifo + "_SourceResampler:snk:" + ifo: input_links[ifo],
-                ifo + "_Whitener:snk:" + ifo: ifo + "_SourceResampler:src:" + ifo,
+                ifo + "_Whitener:snk:" + ifo: input_links[ifo],
             },
         )
         spectrum_out_links[ifo] = ifo + "_Whitener:src:spectrum_" + ifo
