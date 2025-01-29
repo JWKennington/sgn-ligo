@@ -6,7 +6,7 @@ import pytest
 from sgn import NullSink
 from sgn.apps import Pipeline
 from sgnts.sources import FakeSeriesSource
-from sgnts.transforms import Resampler, Threshold
+from sgnts.transforms import Threshold
 
 from sgnligo.transforms import Whiten
 
@@ -31,18 +31,12 @@ def build_pipeline(
             verbose=False,
             end=10,
         ),
-        Resampler(
-            name="Resampler",
-            source_pad_names=("resamp",),
-            sink_pad_names=("frsrc",),
-            inrate=sample_rate,
-            outrate=2048,
-        ),
         Whiten(
             name="Whitener",
             sink_pad_names=("resamp",),
             instrument=instrument,
-            sample_rate=2048,
+            input_sample_rate=sample_rate,
+            whiten_sample_rate=2048,
             fft_length=4,
             whitening_method=whitening_method,
             reference_psd=PATH_PSD.as_posix(),
@@ -65,8 +59,7 @@ def build_pipeline(
     )
     pipeline.link(
         link_map={
-            "Resampler:snk:frsrc": f"{instrument}_white:src:frsrc",
-            "Whitener:snk:resamp": "Resampler:src:resamp",
+            "Whitener:snk:resamp": f"{instrument}_white:src:frsrc",
             "Threshold:snk:data": "Whitener:src:hoft",
             "HoftSnk:snk:hoft": "Threshold:src:threshold",
             "HoftSnk:snk:spectrum": "Whitener:src:spectrum",
@@ -94,11 +87,9 @@ class TestCondition:
             "digraph {",
             "\tH1_white [label=H1_white]",
             "\tHoftSnk [label=HoftSnk]",
-            "\tResampler [label=Resampler]",
             "\tThreshold [label=Threshold]",
             "\tWhitener [label=Whitener]",
-            "\tH1_white -> Resampler",
-            "\tResampler -> Whitener",
+            "\tH1_white -> Whitener",
             "\tThreshold -> HoftSnk",
             "\tWhitener -> HoftSnk",
             "\tWhitener -> Threshold",
