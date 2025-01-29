@@ -17,6 +17,7 @@ LOGGER = get_sgn_logger(__name__)
 # filename format parameters
 FILENAME_PARAMS = (
     "instruments",
+    "description",
     "gps_start_time",
     "duration",
 )
@@ -51,8 +52,9 @@ class FrameSink(TSSink):
 
     channels: Sequence[str] = field(default_factory=list)
     duration: int = 0
-    path: str = "{instruments}-{gps_start_time}-{duration}.gwf"
+    path: str = "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
     force: bool = False
+    description: str = "SGN"
 
     def __post_init__(self):
         """Post init for setting up the FrameSink"""
@@ -62,7 +64,8 @@ class FrameSink(TSSink):
         # setup the adapter config for the audioadapter
         if self.adapter_config is not None:
             raise RuntimeError(
-                "specifying AdapterConfig is not supported in this element as they are handled internally."
+                "specifying AdapterConfig is not supported in this element "
+                "as they are handled internally."
             )
         stride = Offset.fromsec(self.duration)
         self.adapter_config = AdapterConfig(stride=stride)
@@ -116,6 +119,7 @@ class FrameSink(TSSink):
                     instruments=self._instruments_str,
                     gps_start_time=f"{t0:0=10.0f}",
                     duration=duration,
+                    description=self.description,
                 )
             )
 
@@ -159,7 +163,8 @@ class FrameSink(TSSink):
             exp_samples = self.duration * data.sample_rate
             if data.samples < exp_samples:
                 LOGGER.warning(
-                    f"Data does not contain enough samples for duration {self.duration}. Skipping..."
+                    f"Data does not contain enough samples for duration {self.duration}."
+                    f" Skipping..."
                 )
                 return
 

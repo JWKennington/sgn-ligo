@@ -51,9 +51,11 @@ class TestFrameSink:
 
         with TemporaryDirectory() as tmpdir:
             path = pathlib.Path(tmpdir)
-            path_format = path / "{instruments}-{gps_start_time}-{duration}.gwf"
-            out1 = path / "H1L1-0000000003-3.gwf"
-            out2 = path / "H1L1-0000000000-3.gwf"
+            path_format = path / (
+                "{instruments}-{description}-{gps_start_time}-{" "duration}.gwf"
+            )
+            out1 = path / "H1L1-testing-0000000003-3.gwf"
+            out2 = path / "H1L1-testing-0000000000-3.gwf"
 
             # Verify the files do not exist
             assert not out1.exists()
@@ -91,6 +93,7 @@ class TestFrameSink:
                         ),
                         duration=duration,
                         path=path_format.as_posix(),
+                        description="testing",
                     ),
                     link_map={
                         "snk:snk:H1:FOO-BAR": "src_H1:src:H1",
