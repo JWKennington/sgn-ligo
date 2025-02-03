@@ -84,6 +84,9 @@ class DevShmSourceMulti(TSSource):
         if self.verbose:
             print(f"Start up t0: {self.next_buffer_t0}", flush=True)
 
+        # Start the observer and set the stop attribute
+        self._stop = False
+
         # Create the inotify handler
         self.observer = {}
         for ifo, shared_dir in self.shared_memory_dirs.items():
@@ -93,9 +96,6 @@ class DevShmSourceMulti(TSSource):
                 daemon=True,
             )
             self.observer[ifo].start()
-
-        # Start the observer and set the stop attribute
-        self._stop = False
 
         self.rates = {}
         self.data_dict = {}
