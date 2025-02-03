@@ -65,10 +65,8 @@ class DevShmSourceMulti(TSSource):
             self.source_pad_names = tuple(
                 ci for c in self.channel_names.values() for ci in c
             )
-        super().__post_init__()
         assert self.shared_memory_dirs and self.channel_names
 
-        self.cnt = {p: 0 for p in self.source_pads}
         ifos = self.shared_memory_dirs.keys()
         self.ifos = ifos
         self.queues = {}
@@ -129,6 +127,10 @@ class DevShmSourceMulti(TSSource):
 
             self.data_dict[ifo] = {c: None for c in self.channel_names[ifo]}
             self.send_gaps[ifo] = False
+
+        self.t0 = start
+        super().__post_init__()
+        self.cnt = {p: 0 for p in self.source_pads}
 
     def monitor_dir(self, queue: queue.Queue, watch_dir: str, ifo: str) -> None:
         """Poll directory for new files with inotify
