@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from ligo.scald.io import kafka
 from sgnts.base import SinkElement
 
+from sgnligo.base import now
+
 
 @dataclass
 class KafkaSink(SinkElement):
@@ -15,25 +17,61 @@ class KafkaSink(SinkElement):
     Args:
         output_kafka_server:
             str, The kafka server to write data to
-        topics:
-            list[str], The kafka topics to write data to
+        time_series_topics:
+            list[str], The kafka topics to write time-series data to
+        trigger_topics:
+            list[str], The kafka topics to write trigger data to
         tag:
-            str, The tag to write the kafka data
+            str, The tag to write the kafka data with
+        prefix:
+            str, The prefix of the kafka topic
+        interval:
+            int, The interval at which to write the data to kafka
     """
 
     output_kafka_server: str = None
-    topics: list[str] = None
+    time_series_topics: list[str] = None
+    trigger_topics: list[str] = None
     tag: list[str] = None
     prefix: str = ""
+    interval: float = None
 
     def __post_init__(self):
         assert isinstance(self.output_kafka_server, str)
-        assert isinstance(self.topics, list)
         super().__post_init__()
 
         self.client = kafka.Client("kafka://{}".format(self.output_kafka_server))
         if self.tag is None:
             self.tag = []
+
+        if self.time_series_topics is not None:
+            self.time_series_data = {}
+            for topic in self.time_series_topics:
+                self.time_series_data[topic] = {"time": [], "data": []}
+        else:
+            self.time_series_data = None
+
+        if self.trigger_topics is not None:
+            self.trigger_data = {}
+            for topic in self.trigger_topics:
+                self.trigger_data[topic] = []
+        else:
+            self.trigger_data = None
+
+        self.last_sent = now()
+
+    def write(self):
+        if self.time_series_data is not None:
+            for topic, data in self.time_series_data.items():
+                if len(data["time"]) > 0:
+                    self.client.write(self.prefix + topic, data, tags=self.tag)
+                    self.time_series_data[topic] = {"time": [], "data": []}
+
+        if self.trigger_data is not None:
+            for topic, data in self.trigger_data.items():
+                if len(data) > 0:
+                    self.client.write(self.prefix + topic, data, tags=self.tag)
+                    self.trigger_data[topic] = []
 
     def pull(self, pad, frame):
         """Incoming frames are expected to be an EventFrame containing {"kafka":
@@ -41,19 +79,30 @@ class KafkaSink(SinkElement):
         {topic: {"time": [t1, t2, ...], "data": [d1, d2, ...]}}
         """
         events = frame["kafka"].data
-        # append data to deque
-        for topic in self.topics:
-            t = topic.split(".")[-1]
-            if events is not None and t in events:
-                if self.prefix:
-                    topic = topic.split(".")
-                    topic[-1] = self.prefix + topic[-1]
-                    topic = ".".join(topic)
-                self.client.write(topic, events[t], tags=self.tag)
+        if events is not None:
+            for topic, data in events.items():
+                if (
+                    self.time_series_topics is not None
+                    and topic in self.time_series_topics
+                ):
+                    self.time_series_data[topic]["time"].extend(data["time"])
+                    self.time_series_data[topic]["data"].extend(data["data"])
+                elif self.trigger_topics is not None and topic in self.trigger_topics:
+                    self.trigger_data[topic].extend(data)
 
         if frame.EOS:
             self.mark_eos(pad)
 
     def internal(self):
+        if self.interval is None:
+            # Don't wait
+            self.write()
+        else:
+            time_now = now()
+            if time_now - self.last_sent > self.interval:
+                self.write()
+                self.last_sent = time_now
+
         if self.at_eos:
+            print("shutdown: KafkaSink: close")
             self.client.close()
