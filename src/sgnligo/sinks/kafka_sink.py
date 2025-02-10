@@ -2,7 +2,10 @@
 
 # Copyright (C) 2024 Yun-Jing Huang
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import Optional
 
 from ligo.scald.io import kafka
 from sgnts.base import SinkElement
@@ -29,12 +32,12 @@ class KafkaSink(SinkElement):
             int, The interval at which to write the data to kafka
     """
 
-    output_kafka_server: str = None
-    time_series_topics: list[str] = None
-    trigger_topics: list[str] = None
-    tag: list[str] = None
+    output_kafka_server: Optional[str] = None
+    time_series_topics: Optional[list[str]] = None
+    trigger_topics: Optional[list[str]] = None
+    tag: Optional[list[str]] = None
     prefix: str = ""
-    interval: float = None
+    interval: Optional[float] = None
 
     def __post_init__(self):
         assert isinstance(self.output_kafka_server, str)

@@ -5,6 +5,9 @@ else
 endif
 export PYTHONPATH
 
+.PHONY: all
+all : format lint type-check test
+
 .PHONY: help
 help :
 	@echo

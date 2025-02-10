@@ -3,6 +3,8 @@
 # Copyright (C) 2022      Ron Tapia
 # Copyright (C) 2024-2025 Becca Ewing, Yun-Jing Huang
 
+from __future__ import annotations
+
 import os
 import queue
 import threading
@@ -15,6 +17,9 @@ try:
     from inotify_simple import INotify, flags
 except ImportError:
     INotify = flags = None
+
+
+from typing import Dict, Optional
 
 from sgn.base import SourcePad
 from sgnts.base import Offset, SeriesBuffer, TSFrame, TSSource
@@ -49,8 +54,8 @@ class DevShmSourceMulti(TSSource):
             bool, be verbose
     """
 
-    shared_memory_dirs: dict[str, str] = None
-    channel_names: dict[str, list[str]] = None
+    shared_memory_dirs: Optional[Dict[str, str]] = None
+    channel_names: Optional[Dict[str, list[str]]] = None
     discont_wait_time: float = 60
     queue_timeout: float = 1
     watch_suffix: str = ".gwf"
@@ -287,6 +292,7 @@ class DevShmSourceMulti(TSSource):
                 else:
                     self.send_gap[ifo] = False
                 # load data from the file using gwpy
+                assert self.channel_names is not None
                 self.data_dict[ifo] = TimeSeriesDict.read(
                     next_file,
                     self.channel_names[ifo],

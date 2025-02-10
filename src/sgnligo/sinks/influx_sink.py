@@ -1,11 +1,13 @@
 """A sink element to send data to a influx database."""
 
 # Copyright (C) 2024 Yun-Jing Huang
+from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from typing import Optional
 
-import yaml
+import yaml  # type: ignore
 from ligo.scald.io import influx
 from sgnts.base import TSSink
 
@@ -16,10 +18,10 @@ class InfluxSink(TSSink):
     Push data to influx
     """
 
-    instrument: str = None
-    metadata_key: str = None
-    scald_config: str = None
-    route: str = None
+    instrument: Optional[str] = None
+    metadata_key: Optional[str] = None
+    scald_config: Optional[str] = None
+    route: Optional[str] = None
     verbose: bool = False
     wait_time: float = 2
 

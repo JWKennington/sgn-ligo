@@ -6,8 +6,11 @@
 # Copyright (C) 2008-2016  Kipp Cannon, Chad Hanna, Drew Keppel
 # Copyright (C) 2024 Becca Ewing, Joshua Gonsalves, Yun-Jing Huang
 
+from __future__ import annotations
+
 from collections import deque
 from dataclasses import dataclass
+from typing import Optional
 
 import lal
 import lal.series
@@ -120,7 +123,7 @@ class Whiten(TSTransform):
             str, pad name of the psd output source pad
     """
 
-    instrument: str = None
+    instrument: Optional[str] = None
     psd_pad_name: str = ""
     whiten_pad_name: str = ""
     whitening_method: str = "gstlal"
@@ -129,7 +132,7 @@ class Whiten(TSTransform):
     fft_length: int = 8
     nmed: int = 7
     navg: int = 64
-    reference_psd: str = None
+    reference_psd: Optional[str] = None
 
     def __post_init__(self):
         assert len(self.sink_pad_names) == 1, "Only supports one sink pad"

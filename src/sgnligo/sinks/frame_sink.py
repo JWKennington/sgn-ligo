@@ -1,4 +1,5 @@
-"""This module contains the FrameSink class, which writes time series data to .gwf files.
+"""This module contains the FrameSink class,
+which writes time series data to .gwf files.
 The formatting is done using the gwpy library.
 """
 
@@ -94,43 +95,48 @@ class FrameSink(TSSink):
         # create/start the publisher thread
         self._writer_thread = threading.Thread(target=self._writer)
         self._writer_thread.start()
+        self._writer_thread_exception = None
 
     def _writer(self):
         """Write a gwf file using the gwpy library"""
         while True:
-            tsd = self._queue.get(
-                block=True,
-            )
-
-            if tsd is None:
-                LOGGER.debug("writer thread exiting")
-                return
-
-            span = tsd.span
-            t0 = span.start
-            assert int(t0) == t0
-            t0 = int(t0)
-            duration = span.end - span.start
-            assert int(duration) == duration
-            duration = int(duration)
-
-            outpath = Path(
-                self.path.format(
-                    instruments=self._instruments_str,
-                    gps_start_time=f"{t0:0=10.0f}",
-                    duration=duration,
-                    description=self.description,
+            try:
+                tsd = self._queue.get(
+                    block=True,
                 )
-            )
 
-            if outpath.exists():
-                if self.force:
-                    outpath.unlink()
-                else:
-                    raise FileExistsError(f"output file exists: {outpath}")
+                if tsd is None:
+                    LOGGER.debug("writer thread exiting")
+                    return
 
-            LOGGER.info(f"Writing file {outpath}...")
-            tsd.write(outpath)
+                span = tsd.span
+                t0 = span.start
+                assert int(t0) == t0
+                t0 = int(t0)
+                duration = span.end - span.start
+                assert int(duration) == duration
+                duration = int(duration)
+
+                outpath = Path(
+                    self.path.format(
+                        instruments=self._instruments_str,
+                        gps_start_time=f"{t0:0=10.0f}",
+                        duration=duration,
+                        description=self.description,
+                    )
+                )
+
+                if outpath.exists():
+                    if self.force:
+                        outpath.unlink()
+                    else:
+                        raise FileExistsError(f"output file exists: {outpath}")
+
+                LOGGER.info("Writing file %s...", outpath)
+                tsd.write(outpath)
+            except Exception as e:
+                self._writer_thread_exception = e
+                break
 
     def internal(self):
         """Internal method, checks if sufficient data is present in the audioadapters to
@@ -163,8 +169,8 @@ class FrameSink(TSSink):
             exp_samples = self.duration * data.sample_rate
             if data.samples < exp_samples:
                 LOGGER.warning(
-                    f"Data does not contain enough samples for duration {self.duration}."
-                    f" Skipping..."
+                    "Data does not contain enough samples for duration %d. Skipping",
+                    self.duration,
                 )
                 return
 
@@ -197,3 +203,5 @@ class FrameSink(TSSink):
                 # this shuts down the background thread
                 self._queue.put(None)
                 self._writer_thread.join()
+                if self._writer_thread_exception is not None:
+                    raise (self._writer_thread_exception)
