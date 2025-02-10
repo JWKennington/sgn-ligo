@@ -3,7 +3,10 @@
 # Copyright (C) 2017 Patrick Godwin
 # Copyright (C) 2024 Yun-Jing Huang
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import Optional
 
 from sgn.base import TransformElement
 from sgnts.base import EventBuffer, EventFrame, TSFrame
@@ -22,8 +25,8 @@ class Latency(TransformElement):
             float, the interval to calculate latency, in seconds
     """
 
-    route: str = None
-    interval: float = None
+    route: Optional[str] = None
+    interval: Optional[float] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -67,7 +70,7 @@ class Latency(TransformElement):
             }
         else:
             self.latencies.append(latency)
-            if time/1e9 - self.last_time >= self.interval:
+            if time / 1e9 - self.last_time >= self.interval:
                 event_data = {
                     self.route: {
                         "time": [
@@ -79,7 +82,7 @@ class Latency(TransformElement):
                     }
                 }
                 self.latencies = []
-                self.last_time = time/1e9
+                self.last_time = time / 1e9
             else:
                 event_data = None
 

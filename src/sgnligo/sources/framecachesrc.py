@@ -126,7 +126,7 @@ class FrameReader(TSSource):
         else:
             return (ifo, ifo + "1")
 
-    def load_gwf_data(self, frame_file: CacheEntry) -> dict[str, np.ndarray]:
+    def load_gwf_data(self, frame_file: CacheEntry):
         """Load timeseries data from a gwf frame file.
 
         Args:

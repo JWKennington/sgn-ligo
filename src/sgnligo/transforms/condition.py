@@ -8,6 +8,7 @@ from __future__ import annotations
 from argparse import ArgumentParser
 from dataclasses import dataclass
 from math import isinf
+from typing import Optional
 
 from sgn import Pipeline
 from sgnts.transforms import Threshold
@@ -38,7 +39,7 @@ class ConditionInfo:
     whiten_sample_rate: int = 2048
     psd_fft_length: int = 8
     whitening_method: str = "gstlal"
-    reference_psd: str = None
+    reference_psd: Optional[str] = None
     ht_gate_threshold: float = float("+inf")
     track_psd: bool = True
 
@@ -163,10 +164,10 @@ def condition(
                 reference_psd=condition_info.reference_psd,
             ),
             link_map={
-                ifo + "_Whitener:snk:" + ifo: input_links[ifo],
+                ifo + "_Whitener:snk:" + ifo: input_links[ifo],  # type: ignore
             },
         )
-        spectrum_out_links[ifo] = ifo + "_Whitener:src:spectrum_" + ifo
+        spectrum_out_links[ifo] = ifo + "_Whitener:src:spectrum_" + ifo  # type: ignore
 
         # Apply htgate
         if not isinf(condition_info.ht_gate_threshold):
@@ -184,9 +185,9 @@ def condition(
                     ifo + "_Threshold:snk:" + ifo: ifo + "_Whitener:src:" + ifo,
                 },
             )
-            condition_out_links[ifo] = ifo + "_Threshold:src:" + ifo
+            condition_out_links[ifo] = ifo + "_Threshold:src:" + ifo  # type: ignore
         else:
-            condition_out_links[ifo] = ifo + "_Whitener:src:" + ifo
+            condition_out_links[ifo] = ifo + "_Whitener:src:" + ifo  # type: ignore
 
         if whiten_latency is True:
             pipeline.insert(
@@ -201,6 +202,6 @@ def condition(
                     ifo + "_Latency:snk:" + ifo: ifo + "_Whitener:src:" + ifo,
                 },
             )
-            whiten_latency_out_links[ifo] = ifo + "_Latency:src:" + ifo
+            whiten_latency_out_links[ifo] = ifo + "_Latency:src:" + ifo  # type: ignore
 
     return condition_out_links, spectrum_out_links, whiten_latency_out_links

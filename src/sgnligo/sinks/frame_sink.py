@@ -1,4 +1,5 @@
-"""This module contains the FrameSink class, which writes time series data to .gwf files.
+"""This module contains the FrameSink class,
+which writes time series data to .gwf files.
 The formatting is done using the gwpy library.
 """
 
@@ -129,7 +130,7 @@ class FrameSink(TSSink):
                 else:
                     raise FileExistsError(f"output file exists: {outpath}")
 
-            LOGGER.info(f"Writing file {outpath}...")
+            LOGGER.info("Writing file %s...", outpath)
             tsd.write(outpath)
 
     def internal(self):
@@ -163,8 +164,8 @@ class FrameSink(TSSink):
             exp_samples = self.duration * data.sample_rate
             if data.samples < exp_samples:
                 LOGGER.warning(
-                    f"Data does not contain enough samples for duration {self.duration}."
-                    f" Skipping..."
+                    "Data does not contain enough samples for duration %d. Skipping",
+                    self.duration,
                 )
                 return
 

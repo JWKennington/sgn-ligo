@@ -6,7 +6,6 @@ from unittest import mock
 
 import numpy
 from sgn.apps import Pipeline
-from sgnts.base import AdapterConfig, Offset
 from sgnts.sources import FakeSeriesSource
 
 from sgnligo.sinks import FrameSink
@@ -47,7 +46,6 @@ class TestFrameSink:
         pipeline = Pipeline()
         t0 = 0.0
         duration = 3  # seconds
-        duration_offsets = Offset.fromsec(duration)
 
         with TemporaryDirectory() as tmpdir:
             path = pathlib.Path(tmpdir)

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from lal import LIGOTimeGPS
 from ligo import segments
@@ -107,9 +107,11 @@ class DataSourceInfo:
 
     def __post_init__(self):
         self.channel_dict = parse_list_to_dict(self.channel_name)
+        print(self.channel_dict)
         self.ifos = sorted(self.channel_dict.keys())
         self.seg = None
         self.validate()
+        self.all_analysis_ifos = None
 
     def validate(self):
         if self.data_source not in KNOWN_DATASOURCES:
@@ -410,7 +412,7 @@ def datasource(
     source_out_links = {ifo: None for ifo in info.ifos}
     pad_names = {ifo: None for ifo in info.ifos}
     if source_latency:
-        source_latency_links = {}
+        source_latency_links: Optional[dict[Any, Any]] = {}
     else:
         source_latency_links = None
 
@@ -607,10 +609,11 @@ def datasource(
                         control="control",
                     ),
                     link_map={
-                        ifo + "_Gate:snk:strain": source_out_links[ifo],
+                        ifo + "_Gate:snk:strain": source_out_links[ifo],  # type: ignore
                         ifo + "_Gate:snk:control": ifo + "_SegmentSource:src:" + ifo,
                     },
                 )
+                assert source_out_links is not None
                 source_out_links[ifo] = ifo + "_Gate:src:" + ifo
 
     if source_latency:
@@ -623,8 +626,12 @@ def datasource(
                     route=ifo + "_datasource_latency",
                     interval=1,
                 ),
-                link_map={ifo + "_SourceLatency:snk:data": source_out_links[ifo]},
+                link_map={
+                    ifo
+                    + "_SourceLatency:snk:data": source_out_links[ifo]  # type: ignore
+                },
             )
+            assert source_latency_links is not None
             source_latency_links[ifo] = ifo + "_SourceLatency:src:latency"
 
     return source_out_links, source_latency_links

@@ -3,10 +3,13 @@
 # Copyright (C) 2022 Ron Tapia
 # Copyright (C) 2024 Becca Ewing, Yun-Jing Huang
 
+from __future__ import annotations
+
 import os
 import queue
 import threading
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy
 from gwpy.timeseries import TimeSeriesDict
@@ -45,7 +48,7 @@ class DevShmSource(TSSource):
     """
 
     shared_memory_dir: str = ""
-    channel_names: list[str] = None
+    channel_names: Optional[list[str]] = None
     discont_wait_time: float = 60
     queue_timeout: float = 1
     watch_suffix: str = ".gwf"
@@ -162,10 +165,10 @@ class DevShmSource(TSSource):
         for data in self.data_dict.values():
             if data is not None:
                 # there is still data
-                if self.file_t0 == self.next_buffer_t0:
+                if self.file_t0 == self.next_buffer_t0:  # type: ignore
                     self.discont = False
                     self.send_gap = False
-                elif self.file_t0 > self.next_buffer_t0:
+                elif self.file_t0 > self.next_buffer_t0:  # type: ignore
                     self.discont = True
                     self.send_gap = True
                     self.send_gap_duration = self.buffer_duration
