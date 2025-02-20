@@ -94,13 +94,24 @@ class FrameReader(TSSource):
         self.cache.sort(key=lambda x: x.segment[0])
 
         # Check if there are missing segments
-        missing_segments = self.analysis_seg
+        segment_remaining = self.analysis_seg
+        missing_segments = []
         for c in self.cache:
-            if missing_segments in c.segment:
+            if segment_remaining in c.segment:
                 # the cache contains all the rest of the proposed segment
-                missing_segments = segments.segment(0, 0)
+                segment_remaining = segments.segment(0, 0)
+            elif segment_remaining[0] < c.segment[0]:
+                # there is a discontinuity
+                missing_segments.append(
+                    segments.segment(segment_remaining[0], c.segment[0])
+                )
+                segment_remaining = segments.segment(c.segment[0], segment_remaining[1])
+                segment_remaining -= c.segment
             else:
-                missing_segments -= c.segment
+                segment_remaining -= c.segment
+
+        if segment_remaining:
+            missing_segments.append(segment_remaining)
 
         if missing_segments:
             LOGGER.warning(
