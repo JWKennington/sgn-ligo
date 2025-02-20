@@ -12,8 +12,10 @@ from gwpy.timeseries import TimeSeriesDict
 from lal import LIGOTimeGPS
 from lal.utils import CacheEntry
 from ligo import segments
-from sgn.base import SourcePad
+from sgn.base import SourcePad, get_sgn_logger
 from sgnts.base import Audioadapter, Offset, SeriesBuffer, TSFrame, TSSource
+
+LOGGER = get_sgn_logger("FrameReader")
 
 
 @dataclass
@@ -90,6 +92,23 @@ class FrameReader(TSSource):
 
         # make sure it is sorted by gps time
         self.cache.sort(key=lambda x: x.segment[0])
+
+        # Check if there are missing segments
+        missing_segments = self.analysis_seg
+        for c in self.cache:
+            if missing_segments in c.segment:
+                # the cache contains all the rest of the proposed segment
+                missing_segments = segments.segment(0, 0)
+            else:
+                missing_segments -= c.segment
+
+        if missing_segments:
+            LOGGER.warning(
+                "%s has missing segment %s, padding with gaps",
+                self.name,
+                missing_segments,
+            )
+
         self.A = {c: Audioadapter() for c in self.channel_names}
 
         # load first segment of data to read sample rate
@@ -221,22 +240,15 @@ class FrameReader(TSSource):
 
         channel = self.rsrcs[pad]
 
-        # EOS condition is when we have processed all data intersecting
-        # the analysis segment in every frame in the cache
-        # set this condition on second to last buffer so it can propagate to
-        # downstream elements
-        EOS = (self.A[channel].size <= self.num_samples(self.rates[channel])) and (
-            len(self.cache) == 0
-        )
-
         metadata = {"cnt": self.cnt[pad], "name": "'%s'" % pad.name}
 
-        frame = self.prepare_frame(pad, EOS=EOS, metadata=metadata)
+        frame = self.prepare_frame(pad, metadata=metadata)
 
-        bufs = self.A[channel].get_sliced_buffers((frame.offset, frame.end_offset))
+        if self.A[channel].end_offset >= frame.end_offset:
+            bufs = self.A[channel].get_sliced_buffers((frame.offset, frame.end_offset))
 
-        frame.set_buffers(bufs)
+            frame.set_buffers(bufs)
 
-        self.A[channel].flush_samples_by_end_offset(frame.end_offset)
+            self.A[channel].flush_samples_by_end_offset(frame.end_offset)
 
         return frame
