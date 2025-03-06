@@ -4,7 +4,7 @@ from argparse import ArgumentParser
 import pytest
 from sgn.apps import Pipeline
 from sgn.sources import SignalEOS
-from sgnts.sinks import FakeSeriesSink
+from sgnts.sinks import NullSeriesSink
 from sgnts.transforms import Align
 
 from sgnligo.sources import DataSourceInfo, datasource
@@ -51,7 +51,7 @@ def test_devshmsrc_multi(capsys):
             sink_pad_names=ifos,
             source_pad_names=ifos,
         ),
-        FakeSeriesSink(
+        NullSeriesSink(
             name="snk2",
             sink_pad_names=ifos,
         ),
