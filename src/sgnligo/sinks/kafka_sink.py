@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ligo.scald.io import kafka
-from sgnts.base import SinkElement
+from sgn.base import SinkElement
 
 from sgnligo.base import now
 
