@@ -105,8 +105,12 @@ class FrameReader(TSSource):
                 missing_segments.append(
                     segments.segment(segment_remaining[0], c.segment[0])
                 )
-                segment_remaining = segments.segment(c.segment[0], segment_remaining[1])
-                segment_remaining -= c.segment
+                if c.segment[1] <= segment_remaining[1]:
+                    segment_remaining = segments.segment(
+                        c.segment[1], segment_remaining[1]
+                    )
+                else:
+                    segment_remaining = segments.segment(0, 0)
             else:
                 segment_remaining -= c.segment
 
