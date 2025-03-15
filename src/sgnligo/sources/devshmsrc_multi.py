@@ -81,6 +81,7 @@ class DevShmSourceMulti(TSSource):
         # initialize a named tuple to track info about the previous
         # buffer sent. this will be used to make sure we dont resend
         # late data and to track discontinuities
+        self.reset_start = True
         start = int(now())
         self.next_buffer_t0 = {ifo: start for ifo in ifos}
         self.next_buffer_end = {ifo: start for ifo in ifos}
@@ -187,6 +188,12 @@ class DevShmSourceMulti(TSSource):
         """Queue files and check if we need to send out buffers of data or gaps. All
         channels are read at once.
         """
+        if self.reset_start is True:
+            # pipeline init takes too long
+            start = int(now())
+            self.next_buffer_t0 = {ifo: start for ifo in self.ifos}
+            self.next_buffer_end = {ifo: start for ifo in self.ifos}
+            self.reset_start = False
 
         old_data = False
         for ifo in self.ifos:
