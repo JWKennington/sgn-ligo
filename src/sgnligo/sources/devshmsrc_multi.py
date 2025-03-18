@@ -195,31 +195,39 @@ class DevShmSourceMulti(TSSource):
             self.next_buffer_end = {ifo: start for ifo in self.ifos}
             self.reset_start = False
 
-        old_data = False
+        # old_data = False
+        old_data = {ifo: False for ifo in self.ifos}
         for ifo in self.ifos:
             self.next_buffer_t0[ifo] = self.next_buffer_end[ifo]
             for data in self.data_dict[ifo].values():
                 if data is not None:
-                    old_data = True
+                    old_data[ifo] = True
                     # there is still data
                     if self.file_t0[ifo] == self.next_buffer_t0[ifo]:
                         self.discont[ifo] = False
                         self.send_gap[ifo] = False
+                        print(
+                            f"old data cont. | file_t0 {self.file_t0[ifo]} | "
+                            f"next_buffer_t0 {self.next_buffer_t0[ifo]} | ifo: {ifo}"
+                        )
                     elif self.file_t0[ifo] > self.next_buffer_t0[ifo]:
+                        print(
+                            f"old data discont. | file_t0 {self.file_t0[ifo]} | "
+                            f"next_buffer_t0 {self.next_buffer_t0[ifo]} | ifo: {ifo}"
+                        )
                         self.discont[ifo] = True
                         self.send_gap[ifo] = True
                         self.send_gap_duration[ifo] = self.buffer_duration
-                        pass
                     else:
                         raise ValueError("wrong t0")
                 else:
                     self.discont[ifo] = False
                     self.send_gap[ifo] = True
                     self.send_gap_duration[ifo] = 0
-        if old_data is True:
-            if self.verbose:
-                print("there is old data")
-            return
+        # if old_data is True:
+        #     if self.verbose:
+        #         print("there is old data")
+        #     return
 
         # get next file from queue. if its old, try again until we
         # find a new file or reach the end of the queue
@@ -230,6 +238,11 @@ class DevShmSourceMulti(TSSource):
             sorted(self.next_buffer_t0.items(), key=lambda item: item[1])
         )
         for ifo in self.next_buffer_t0.keys():
+            if old_data[ifo] is True:
+                # There is old data in the data_dict, don't read in new data
+                print(ifo, "There is old data in the data_dict, skip reading new file")
+                continue
+
             if send_gap_sync:
                 # another ifo is falling behind and is preparing to send a nongap
                 # send gap for this ifo so the other one can catch up
@@ -275,11 +288,12 @@ class DevShmSourceMulti(TSSource):
                     #    f"Reached {self.wait_time} seconds with no new files in "
                     #    f"{self.shared_memory_dir}, exiting."
                     # )
-                    if self.verbose:
-                        print(
-                            "Reached wait time, sending a gap buffer of "
-                            f" {self.buffer_duration}"
-                        )
+                    # if self.verbose:
+                    print(
+                        f"{ifo} Reached wait time, sending a gap buffer with t0 "
+                        f"{self.next_buffer_t0[ifo]} | duration {self.buffer_duration}"
+                        f" | now {now()}"
+                    )
                     self.send_gap[ifo] = True
                     self.send_gap_duration[ifo] = self.buffer_duration
                 else:
@@ -294,7 +308,7 @@ class DevShmSourceMulti(TSSource):
                     self.send_gap_duration[ifo] = self.buffer_duration
                     print(
                         f"discont t0 {t0} | file_t0 {self.file_t0[ifo]} | "
-                        f"next_buffer_t0 {self.next_buffer_t0[ifo]}"
+                        f"next_buffer_t0 {self.next_buffer_t0[ifo]} | ifo: {ifo}"
                     )
                 else:
                     self.send_gap[ifo] = False
