@@ -124,6 +124,7 @@ def condition(
     data_source: str,
     input_sample_rate: int,
     input_links: list[str],
+    whiten_sample_rate: int = None,
     whiten_latency: bool = False,
 ):
     """Condition the data with whitening and gating
@@ -140,6 +141,8 @@ def condition(
         input_links:
             the src pad names to link to this element
     """
+    if whiten_sample_rate is None:
+        whiten_sample_rate = condition_info.whiten_sample_rate
     condition_out_links = {ifo: None for ifo in ifos}
     spectrum_out_links = {ifo: None for ifo in ifos}
     if whiten_latency is True:
@@ -158,7 +161,7 @@ def condition(
                 psd_pad_name="spectrum_" + ifo,
                 whiten_pad_name=ifo,
                 input_sample_rate=input_sample_rate,
-                whiten_sample_rate=condition_info.whiten_sample_rate,
+                whiten_sample_rate=whiten_sample_rate,
                 fft_length=condition_info.psd_fft_length,
                 whitening_method=condition_info.whitening_method,
                 reference_psd=condition_info.reference_psd,
@@ -177,8 +180,8 @@ def condition(
                     source_pad_names=(ifo,),
                     sink_pad_names=(ifo,),
                     threshold=condition_info.ht_gate_threshold,
-                    startwn=condition_info.whiten_sample_rate // 2,
-                    stopwn=condition_info.whiten_sample_rate // 2,
+                    startwn=whiten_sample_rate // 2,
+                    stopwn=whiten_sample_rate // 2,
                     invert=True,
                 ),
                 link_map={
