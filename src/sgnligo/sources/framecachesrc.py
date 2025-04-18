@@ -7,11 +7,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import igwn_segments as segments
 import numpy as np
 from gwpy.timeseries import TimeSeriesDict
 from lal import LIGOTimeGPS
 from lal.utils import CacheEntry
-from ligo import segments
 from sgn.base import SourcePad, get_sgn_logger
 from sgnts.base import Audioadapter, Offset, SeriesBuffer, TSFrame, TSSource
 
