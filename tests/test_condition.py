@@ -28,7 +28,6 @@ def build_pipeline(
             rate=sample_rate,
             signal_type="white",
             impulse_position=None,
-            verbose=False,
             end=10,
         ),
         Whiten(
