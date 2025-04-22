@@ -48,7 +48,6 @@ Issues = "https://git.ligo.org/greg/sgn-ligo/issues"
 test = [
     "pytest",
     "pytest-cov",
-    "graphviz",
     "lalsuite",
     "torch",
     "gwpy",

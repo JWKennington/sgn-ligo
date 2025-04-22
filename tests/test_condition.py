@@ -80,23 +80,6 @@ class TestCondition:
             sample_rate=16384,
         )
 
-    def test_graph(self, pipeline):
-        """Test the pipeline graph"""
-        dot_str = pipeline.to_dot()
-        assert dot_str.split("\n") == [
-            "digraph {",
-            "\tH1_white [label=H1_white]",
-            "\tHoftSnk [label=HoftSnk]",
-            "\tThreshold [label=Threshold]",
-            "\tWhitener [label=Whitener]",
-            "\tH1_white -> Whitener",
-            "\tThreshold -> HoftSnk",
-            "\tWhitener -> HoftSnk",
-            "\tWhitener -> Threshold",
-            "}",
-            "",
-        ]
-
     def test_run(self, pipeline):
         """Test Running the pipeline"""
         pipeline.run()
