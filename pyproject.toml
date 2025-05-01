@@ -19,6 +19,7 @@ dependencies = [
     "python-ligo-lw",
     "sgn",
     "sgn-ts",
+    "sympy",
 ]
 requires-python = ">=3.9"
 authors = [
