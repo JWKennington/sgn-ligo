@@ -11,18 +11,15 @@ build-backend = "setuptools.build_meta"
 name = "sgn-ligo"
 dynamic = ["version"]
 dependencies = [
-    # External dependencies
-    "lalsuite",
-    "gwpy",
-    # SGN dependencies
-    "sgn",
-    "sgn-ts[torch]",
-    # LIGO dependencies
-    "ligo-scald",
     "confluent-kafka",
-    "python-ligo-lw",
-    # Problematic dependencies
+    "gwpy",
     "inotify-simple", # TODO: note this is LINUX only, should remove
+    "lalsuite",
+    "ligo-scald",
+    "python-ligo-lw",
+    "sgn",
+    "sgn-ts",
+    "sympy",
 ]
 requires-python = ">=3.9"
 authors = [
@@ -48,10 +45,6 @@ Issues = "https://git.ligo.org/greg/sgn-ligo/issues"
 test = [
     "pytest",
     "pytest-cov",
-    "graphviz",
-    "lalsuite",
-    "torch",
-    "gwpy",
 ]
 docs = [
     "mkdocs",

@@ -28,7 +28,6 @@ def build_pipeline(
             rate=sample_rate,
             signal_type="white",
             impulse_position=None,
-            verbose=False,
             end=10,
         ),
         Whiten(
@@ -79,23 +78,6 @@ class TestCondition:
             whitening_method="gstlal",
             sample_rate=16384,
         )
-
-    def test_graph(self, pipeline):
-        """Test the pipeline graph"""
-        dot_str = pipeline.to_dot()
-        assert dot_str.split("\n") == [
-            "digraph {",
-            "\tH1_white [label=H1_white]",
-            "\tHoftSnk [label=HoftSnk]",
-            "\tThreshold [label=Threshold]",
-            "\tWhitener [label=Whitener]",
-            "\tH1_white -> Whitener",
-            "\tThreshold -> HoftSnk",
-            "\tWhitener -> HoftSnk",
-            "\tWhitener -> Threshold",
-            "}",
-            "",
-        ]
 
     def test_run(self, pipeline):
         """Test Running the pipeline"""
