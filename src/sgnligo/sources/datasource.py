@@ -584,7 +584,6 @@ def datasource(
                         rate=info.input_sample_rate,
                         signal_type=info.data_source,
                         impulse_position=info.impulse_position,
-                        verbose=verbose,
                         t0=info.gps_start_time,
                         end=info.gps_end_time,
                     ),
