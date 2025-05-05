@@ -20,7 +20,6 @@ from sgnts.transforms import Adder, Gate
 
 from sgnligo.base import parse_list_to_dict
 from sgnligo.sources.devshmsrc import DevShmSource
-from sgnligo.sources.devshmsrc_multi import DevShmSourceMulti
 from sgnligo.sources.framecachesrc import FrameReader
 from sgnligo.transforms import BitMask, Latency
 
@@ -31,7 +30,6 @@ KNOWN_DATASOURCES = [
     "white-realtime",
     "frames",
     "devshm",
-    "devshm-single",
     "arrakis",
 ]
 FAKE_DATASOURCES = ["white", "sin", "impulse", "white-realtime"]
@@ -45,7 +43,7 @@ class DataSourceInfo:
     Args:
         data_source:
             str, the data source, can be one of
-            [white|sin|impulse|white-realtime|frames|devshm|devshm-single|arrakis]
+            [white|sin|impulse|white-realtime|frames|devshm|arrakis]
         channel_name:
             list[str, ...], a list of channel names ["IFO=CHANNEL_NAME",...].
             For fake sources [white|sin|impulse|white-realtime], channel names are used
@@ -78,11 +76,11 @@ class DataSourceInfo:
         shared_memory_dir:
             str, the path to the shared memory directory to read low-latency data from
         discont_wait_time:
-            float, the time to wait for next file before dropping data when data_souce
-            is "devshm" or "devshm-single", in seconds
+            float, the time to wait for next file before dropping data when data_source
+            is "devshm", in seconds
         source_queue_timeout:
             float, the time to wait for next file from the queue before sending a
-            hearbeat buffer when data_souce is "devshm" or "devshm-single", in seconds.
+            heartbeat buffer when data_source is "devshm", in seconds.
             When data_source is "arrakis", used as the in_queue_timeout for
             ArrakisSource.
         input_sample_rate:
@@ -125,11 +123,10 @@ class DataSourceInfo:
                 )
             )
 
-        if self.data_source in ["devshm", "devshm-single"]:
+        if self.data_source == "devshm":
             if self.shared_memory_dir is None:
                 raise ValueError(
-                    "Must specify shared_memory_dir when data_source in ['devshm',"
-                    "'devshm-single']"
+                    "Must specify shared_memory_dir when data_source is 'devshm'"
                 )
             else:
                 self.shared_memory_dict = parse_list_to_dict(self.shared_memory_dir)
@@ -139,8 +136,7 @@ class DataSourceInfo:
                     )
             if self.state_channel_name is None:
                 raise ValueError(
-                    "Must specify state_channel_name when data_source in ['devshm',"
-                    "'devshm-single']"
+                    "Must specify state_channel_name when data_source is 'devshm'"
                 )
             else:
                 self.state_channel_dict = parse_list_to_dict(self.state_channel_name)
@@ -150,8 +146,7 @@ class DataSourceInfo:
                     )
             if self.state_vector_on_bits is None:
                 raise ValueError(
-                    "Must specify state_vector_on_bits when data_source in ['devshm',"
-                    "'devshm-single']"
+                    "Must specify state_vector_on_bits when data_source is 'devshm'"
                 )
             else:
                 self.state_vector_on_dict = parse_list_to_dict(
@@ -166,7 +161,7 @@ class DataSourceInfo:
             if self.gps_start_time is not None or self.gps_end_time is not None:
                 raise ValueError(
                     "Must not specify gps_start_time or gps_end_time when"
-                    " data_source in ['devshm','devshm-single']"
+                    " data_source is 'devshm'"
                 )
         elif self.data_source == "arrakis":
             # Arrakis source can have optional start_time and end_time
@@ -440,8 +435,8 @@ def datasource(
             channel_name_ifo = f"{ifo}:{info.channel_dict[ifo]}"
             state_channel_name_ifo = f"{ifo}:{info.state_channel_dict[ifo]}"
             channel_names[ifo] = [channel_name_ifo, state_channel_name_ifo]
-        devshm = DevShmSourceMulti(
-            name="DevShmMulti",
+        devshm = DevShmSource(
+            name="DevShm",
             channel_names=channel_names,
             shared_memory_dirs=info.shared_memory_dict,
             discont_wait_time=info.discont_wait_time,
@@ -468,11 +463,11 @@ def datasource(
                 gate,
                 link_map={
                     ifo
-                    + "_Gate:snk:strain": "DevShmMulti:src:"
+                    + "_Gate:snk:strain": "DevShm:src:"
                     + channel_names[ifo][0],
                     ifo
                     + "_Mask:snk:"
-                    + ifo: "DevShmMulti:src:"
+                    + ifo: "DevShm:src:"
                     + channel_names[ifo][1],
                     ifo + "_Gate:snk:state_vector": ifo + "_Mask:src:" + ifo,
                 },
@@ -566,49 +561,6 @@ def datasource(
                     )
                     source_name = "_InjAdd"
                     pad_names[ifo] = ifo
-            elif info.data_source == "devshm-single":
-                pad_names[ifo] = ifo
-                source_name = "_Gate"
-                channel_name_ifo = f"{ifo}:{info.channel_dict[ifo]}"
-                state_channel_name_ifo = f"{ifo}:{info.state_channel_dict[ifo]}"
-                devshm = DevShmSource(
-                    name=ifo + "_Devshm",
-                    channel_names=[channel_name_ifo, state_channel_name_ifo],
-                    shared_memory_dir=info.shared_memory_dict[ifo],
-                    discont_wait_time=info.discont_wait_time,
-                    queue_timeout=info.source_queue_timeout,
-                    verbose=verbose,
-                )
-                bit_mask = BitMask(
-                    name=ifo + "_Mask",
-                    sink_pad_names=(ifo,),
-                    source_pad_names=(ifo,),
-                    bit_mask=int(info.state_vector_on_dict[ifo]),
-                )
-                gate = Gate(
-                    name=ifo + source_name,
-                    sink_pad_names=("strain", "state_vector"),
-                    control="state_vector",
-                    source_pad_names=(ifo,),
-                )
-                info.input_sample_rate = devshm.rates[channel_name_ifo]
-                pipeline.insert(
-                    devshm,
-                    bit_mask,
-                    gate,
-                    link_map={
-                        ifo
-                        + "_Gate:snk:strain": ifo
-                        + "_Devshm:src:"
-                        + channel_name_ifo,
-                        ifo
-                        + "_Mask:snk:"
-                        + ifo: ifo
-                        + "_Devshm:src:"
-                        + state_channel_name_ifo,
-                        ifo + "_Gate:snk:state_vector": ifo + "_Mask:src:" + ifo,
-                    },
-                )
             elif info.data_source == "white-realtime":
                 pad_names[ifo] = ifo
                 source_name = "_FakeSource"
