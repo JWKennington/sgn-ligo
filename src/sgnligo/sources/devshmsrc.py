@@ -7,22 +7,46 @@ from __future__ import annotations
 
 import os
 import queue
-import threading
 from dataclasses import dataclass
 
 import numpy
 from gwpy.timeseries import TimeSeriesDict
-
-try:
-    from inotify_simple import INotify, flags
-except ImportError:
-    INotify = flags = None
-
-
 from sgn.base import SourcePad
 from sgnts.base import Offset, SeriesBuffer, TSFrame, TSSource
+from watchdog.events import PatternMatchingEventHandler
+from watchdog.observers import Observer
 
 from sgnligo.base import from_T050017, now
+
+
+class _FrameFileEventHandler(PatternMatchingEventHandler):
+    """Custom watchdog event handler for tracking new frame files."""
+
+    def __init__(self, queue, watch_suffix, current_watermark):
+        self.queue = queue
+        self.watch_suffix = watch_suffix
+        self.current_watermark = current_watermark
+        super().__init__(patterns=[f"*{self.watch_suffix}"])
+
+    def on_closed(self, event):
+        if event.is_directory:
+            return
+        self._handle_event(event.src_path)
+
+    def on_moved(self, event):
+        if event.is_directory:
+            return
+        self._handle_event(event.dest_path)
+
+    def _handle_event(self, path):
+        extension = os.path.splitext(path)[1]
+        if extension != self.watch_suffix:
+            return
+        # skip any files past the current watermark
+        _, _, t0, _ = from_T050017(path)
+        if t0 < self.current_watermark:
+            return
+        self.queue.put((path, t0))
 
 
 @dataclass
@@ -100,14 +124,18 @@ class DevShmSource(TSSource):
         # Start the observer and set the stop attribute
         self._stop = False
 
-        # Create the inotify handler
+        # Create the observer threads to watch for new frame files
         self.observer = {}
         for ifo, shared_dir in self.shared_memory_dirs.items():
-            self.observer[ifo] = threading.Thread(
-                target=self.monitor_dir,
-                args=(self.queues[ifo], shared_dir, ifo),
-                daemon=True,
+            event_handler = _FrameFileEventHandler(
+                self.queues[ifo], self.watch_suffix, self.next_buffer_t0[ifo]
             )
+            self.observer[ifo] = Observer()
+            self.observer[ifo].schedule(
+                event_handler,
+                path=shared_dir,
+            )
+            self.observer[ifo].daemon = True
             self.observer[ifo].start()
 
         self.rates = {}
@@ -133,10 +161,8 @@ class DevShmSource(TSSource):
             # set assumed buffer duration based on sample rate
             # and num samples per buffer. Will fail if this does
             # not match the file duration
-            self.buffer_duration = 1
-            for rate in self.rates[ifo].values():
-                if self.num_samples(rate) / rate != 1:
-                    raise ValueError("Buffer duration must be 1 second.")
+            channel = self.channel_names[ifo][0]
+            self.buffer_duration = _data_dict[channel].duration.value
 
             print("sample rates:", self.rates[ifo])
 
@@ -146,52 +172,6 @@ class DevShmSource(TSSource):
         self.t0 = start
         super().__post_init__()
         self.cnt = {p: 0 for p in self.source_pads}
-
-    def monitor_dir(self, queue: queue.Queue, watch_dir: str, ifo: str) -> None:
-        """Poll directory for new files with inotify
-
-        Args:
-            queue:
-                queue.Queue, the queue to add files to
-            watch_dir:
-                str, directory to monitor
-        """
-        # init inotify watcher on shared memory dir
-        if INotify is None:
-            raise ImportError("inotify_simple is required for DevShmSource source.")
-
-        i = INotify()
-        i.add_watch(watch_dir, flags.CLOSE_WRITE | flags.MOVED_TO)
-
-        # Get the current thread
-        # t = threading.currentThread()
-
-        # Check if this thread should stop
-        while not self._stop:
-            # Loop over the events and check when a file has been created
-            for event in i.read(timeout=1):
-                # directory was removed, so the corresponding watch was
-                # also removed
-                if flags.IGNORED in flags.from_mask(event.mask):
-                    break
-
-                # ignore temporary files
-                filename = event.name
-                extension = os.path.splitext(filename)[1]
-                if not (extension == self.watch_suffix):
-                    continue
-
-                # parse filename for the t0, we dont want to
-                # add files to the queue if they arrive late
-                _, _, t0, _ = from_T050017(filename)
-                if t0 < self.next_buffer_t0[ifo]:
-                    pass
-                else:
-                    # Add the filename to the queue
-                    queue.put((os.path.join(watch_dir, filename), t0))
-
-        # Remove the watch
-        i.rm_watch(watch_dir)
 
     def internal(self) -> None:
         """Queue files and check if we need to send out buffers of data or gaps. All
@@ -233,10 +213,6 @@ class DevShmSource(TSSource):
                     self.discont[ifo] = False
                     self.send_gap[ifo] = True
                     self.send_gap_duration[ifo] = 0
-        # if old_data is True:
-        #     if self.verbose:
-        #         print("there is old data")
-        #     return
 
         # get next file from queue. if its old, try again until we
         # find a new file or reach the end of the queue
@@ -397,6 +373,13 @@ class DevShmSource(TSSource):
                     f" Time delay: {float(now()) - t0:.3e}",
                     flush=True,
                 )
+
+        # stop watching for new frame files, wait for threads to finish
+        if self.signaled_eos():
+            for observer in self.observer.values():
+                observer.unschedule_all()
+                observer.stop()
+                observer.join()
 
         return TSFrame(
             buffers=[outbuf],
