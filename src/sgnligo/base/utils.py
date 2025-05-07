@@ -24,7 +24,7 @@ def from_T050017(url):
     """
     Parse a URL in the style of T050017-00.
     """
-    filename, _ = os.path.splitext(url)
+    filename, _ = os.path.splitext(os.path.basename(url))
     obs, desc, start, dur = filename.split("-")
     return obs, desc, int(start), int(dur)
 
