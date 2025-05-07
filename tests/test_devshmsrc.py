@@ -1,6 +1,7 @@
-#!/usr/bin/env python3
-import os
-from optparse import OptionParser
+import shutil
+import time
+from pathlib import Path
+from threading import Thread
 
 import pytest
 from sgn.apps import Pipeline
@@ -11,55 +12,8 @@ from sgnligo.sources import DevShmSource
 from sgnligo.transforms import BitMask
 
 
-def parse_command_line():
-    parser = OptionParser()
-
-    parser.add_option(
-        "--instrument", metavar="ifo", help="Instrument to analyze. H1, L1, or V1."
-    )
-    parser.add_option(
-        "--channel-name", metavar="channel", help="Name of the data channel to analyze."
-    )
-    parser.add_option(
-        "--state-channel-name",
-        metavar="channel",
-        help="Name of the state vector channel to analyze.",
-    )
-    parser.add_option(
-        "--shared-memory-dir",
-        metavar="directory",
-        help="Set the name of the shared memory directory.",
-    )
-    parser.add_option(
-        "--wait-time",
-        metavar="seconds",
-        type=int,
-        default=60,
-        help="Time to wait for new files in seconds before throwing an error. In online"
-        " mode, new files should always arrive every second, unless there are problems."
-        " Default wait time is 60 seconds.",
-    )
-    parser.add_option(
-        "--state-vector-on-bits",
-        metavar="bits",
-        type=int,
-        help="Set the state vector on bits to process.",
-    )
-
-    options, args = parser.parse_args()
-
-    return options, args
-
-
-@pytest.mark.skip(reason="Not currently pytest compatible")
-def test_devshmsrc(capsys):
-
-    # parse arguments
-    options, args = parse_command_line()
-
-    if not os.path.exists(options.shared_memory_dir):
-        raise ValueError(f"{options.shared_memory_dir} directory not found, exiting.")
-
+@pytest.mark.freeze_time("2019-04-25 08:17:49", tick=True)
+def test_devshmsrc(tmp_path):
     pipeline = Pipeline()
 
     #
@@ -82,46 +36,61 @@ def test_devshmsrc(capsys):
     #      |   NullSink |
     #       ------------
 
-    pipeline.insert(
-        DevShmSource(
-            name="src1",
-            # source_pad_names=("H1",),
-            channel_name=options.channel_name,
-            state_channel_name=options.state_channel_name,
-            instrument=options.instrument,
-            shared_memory_dir=options.shared_memory_dir,
-            wait_time=options.wait_time,
-            verbose=True,
-        ),
-        BitMask(
-            name="mask",
-            sink_pad_names=(options.instrument,),
-            source_pad_names=(options.instrument,),
-            bit_mask=options.state_vector_on_bits,
-        ),
-        Gate(
-            name="gate",
-            sink_pad_names=("strain", "state_vector"),
-            control="state_vector",
-            source_pad_names=(options.instrument,),
-        ),
-        NullSink(
-            name="snk2",
-            sink_pad_names=(options.state_channel_name,),
-        ),
+    datadir = Path(__file__).parent / "data"
+    test_frame = "L-L1_GWOSC_16KHZ_R1-1240215487-32.gwf"
+
+    # add frame to "shmdir" to determine sampling rates
+    dest_path = tmp_path / "L-L1_GWOSC_16KHZ_R1-1240215465-32.gwf"
+    shutil.copyfile(datadir / test_frame, dest_path)
+
+    # create pipeline
+    hoft = "L1:GWOSC-16KHZ_R1_STRAIN"
+    dqmask = "L1:GWOSC-16KHZ_R1_DQMASK"
+
+    src = DevShmSource(
+        name="src",
+        channel_names=[hoft, dqmask],
+        shared_memory_dirs=str(tmp_path),
+        duration=32,
+    )
+    mask = BitMask(
+        name="mask",
+        sink_pad_names=(dqmask,),
+        source_pad_names=("dqmask",),
+        bit_mask=0,
+    )
+    gate = Gate(
+        name="gate",
+        source_pad_names=("strain",),
+        sink_pad_names=(hoft, "dqmask"),
+        control="dqmask",
+    )
+    sink = NullSink(
+        name="sink",
+        sink_pad_names=("strain",),
     )
 
     pipeline.insert(
+        src,
+        mask,
+        gate,
+        sink,
         link_map={
-            "mask:snk:" + options.instrument: "src1:src:" + options.state_channel_name,
-            "gate:snk:strain": "src1:src:" + options.channel_name,
-            "gate:snk:state_vector": "mask:src:" + options.instrument,
-            "snk2:snk:" + options.state_channel_name: "gate:src:" + options.instrument,
-        }
+            mask.snks[dqmask]: src.srcs[dqmask],
+            gate.snks[hoft]: src.srcs[hoft],
+            gate.snks["dqmask"]: mask.srcs["dqmask"],
+            sink.snks["strain"]: gate.srcs["strain"],
+        },
     )
 
+    # add frame to simulate live data after a short period of time
+    def populate_frame():
+        time.sleep(3)
+        shutil.copyfile(datadir / test_frame, tmp_path / test_frame)
+
+    thread = Thread(target=populate_frame)
+    thread.start()
+
+    # start pipeline
     pipeline.run()
-
-
-if __name__ == "__main__":
-    test_devshmsrc(None)
+    thread.join()

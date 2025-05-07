@@ -177,6 +177,8 @@ class DevShmSource(TSSource):
         """Queue files and check if we need to send out buffers of data or gaps. All
         channels are read at once.
         """
+        super().internal()
+
         if self.reset_start is True:
             # pipeline init takes too long
             start = int(now())
@@ -374,8 +376,9 @@ class DevShmSource(TSSource):
                     flush=True,
                 )
 
-        # stop watching for new frame files, wait for threads to finish
-        if self.signaled_eos():
+        # if at EOS, stop watching for new frame files, wait for threads to finish
+        EOS = (outbuf.end_offset >= self.end_offset) or self.signaled_eos()
+        if EOS:
             for observer in self.observer.values():
                 observer.unschedule_all()
                 observer.stop()
@@ -384,5 +387,5 @@ class DevShmSource(TSSource):
         return TSFrame(
             buffers=[outbuf],
             metadata={"cnt": self.cnt, "name": "'%s'" % pad.name},
-            EOS=self.signaled_eos(),
+            EOS=EOS,
         )
