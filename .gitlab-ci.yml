@@ -12,7 +12,8 @@ include:
       python_versions:
         - "3.10"
         - "3.11"
-#        - "3.12"  # TODO uncomment this when torch support is available for 3.12
+        - "3.12"
+        - "3.13"
   - component: git.ligo.org/computing/gitlab/components/mkdocs/build@1
     inputs:
       image: python:3.12
