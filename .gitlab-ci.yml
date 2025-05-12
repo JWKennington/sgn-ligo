@@ -28,12 +28,6 @@ python_test:
     - echo "Manually installing system dependencies"
     - |
       apt-get update
-      apt-get install -yqq graphviz
-    - echo "Manually installing pip dependencies"
-    - |
-      pip install lalsuite
-      pip install torch
-      pip install gwpy
     - echo "Installing SGN Family libraries"
     - |
       pip install -r build_requirements.txt
@@ -43,15 +37,9 @@ mkdocs:
     - echo "Manually installing system dependencies"
     - |
       apt-get update
-      apt-get install -yqq graphviz
     - echo "Upgrading pip"
     - |
       pip install --upgrade pip
-    - echo "Manually installing pip dependencies"
-    - |
-      pip install lalsuite
-      pip install torch
-      pip install gwpy
     - echo "Installing SGN Family libraries"
     - |
       pip install -r build_requirements.txt
@@ -63,12 +51,6 @@ flake8-code_quality:
     - echo "Manually installing system dependencies"
     - |
       apt-get update
-      apt-get install -yqq graphviz
-    - echo "Manually installing pip dependencies"
-    - |
-      pip install lalsuite
-      pip install torch
-      pip install gwpy
     - echo "Installing SGN Family libraries"
     - |
       pip install -r build_requirements.txt
