@@ -89,54 +89,33 @@ class FrameSink(TSSink):
             sorted({chan.split(":")[0] for chan in self.channels})
         )
 
-        # create the data queue
-        self._queue = queue.Queue()
-
-        # create/start the publisher thread
-        self._writer_thread = threading.Thread(target=self._writer)
-        self._writer_thread.start()
-        self._writer_thread_exception = None
-
-    def _writer(self):
+    def _write_tsd(self, tsd):
         """Write a gwf file using the gwpy library"""
-        while True:
-            try:
-                tsd = self._queue.get(
-                    block=True,
-                )
+        span = tsd.span
+        t0 = span.start
+        assert int(t0) == t0
+        t0 = int(t0)
+        duration = span.end - span.start
+        assert int(duration) == duration
+        duration = int(duration)
 
-                if tsd is None:
-                    LOGGER.debug("writer thread exiting")
-                    return
+        outpath = Path(
+            self.path.format(
+                instruments=self._instruments_str,
+                gps_start_time=f"{t0:0=10.0f}",
+                duration=duration,
+                description=self.description,
+            )
+        )
 
-                span = tsd.span
-                t0 = span.start
-                assert int(t0) == t0
-                t0 = int(t0)
-                duration = span.end - span.start
-                assert int(duration) == duration
-                duration = int(duration)
+        if outpath.exists():
+            if self.force:
+                outpath.unlink()
+            else:
+                raise FileExistsError(f"output file exists: {outpath}")
 
-                outpath = Path(
-                    self.path.format(
-                        instruments=self._instruments_str,
-                        gps_start_time=f"{t0:0=10.0f}",
-                        duration=duration,
-                        description=self.description,
-                    )
-                )
-
-                if outpath.exists():
-                    if self.force:
-                        outpath.unlink()
-                    else:
-                        raise FileExistsError(f"output file exists: {outpath}")
-
-                LOGGER.info("Writing file %s...", outpath)
-                tsd.write(outpath)
-            except Exception as e:
-                self._writer_thread_exception = e
-                break
+        LOGGER.info("Writing file %s...", outpath)
+        tsd.write(outpath)
 
     def internal(self):
         """Internal method, checks if sufficient data is present in the audioadapters to
@@ -156,8 +135,13 @@ class FrameSink(TSSink):
 
             # Data products
             frame = self.preparedframes[pad]
-            if frame is None or (frame is not None and frame.is_gap):
+            if frame is None:
                 return
+            else:
+                if frame.EOS:
+                    self.mark_eos(pad)
+                if frame.is_gap:
+                    return
 
             # Load first buffer
             # TODO fix this indexing to handle multiple buffers as multiple segments
@@ -191,17 +175,4 @@ class FrameSink(TSSink):
             # Add to TimeSeriesDict
             tsd[name] = ts
 
-        self._queue.put(tsd)
-
-        # FIXME: need check that this isn't falling behind real-time
-
-        # Check EOS
-        for spad in self.sink_pads:
-            frame = self.preparedframes[spad]
-            if frame is not None and frame.EOS:
-                self.mark_eos(spad)
-                # this shuts down the background thread
-                self._queue.put(None)
-                self._writer_thread.join()
-                if self._writer_thread_exception is not None:
-                    raise (self._writer_thread_exception)
+        self._write_tsd(tsd)
