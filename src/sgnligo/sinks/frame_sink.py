@@ -97,8 +97,36 @@ class FrameSink(TSSink):
         self._writer_thread.start()
         self._writer_thread_exception = None
 
-    def _writer(self):
+    def _write_tsd(self, tsd):
         """Write a gwf file using the gwpy library"""
+        span = tsd.span
+        t0 = span.start
+        assert int(t0) == t0
+        t0 = int(t0)
+        duration = span.end - span.start
+        assert int(duration) == duration
+        duration = int(duration)
+
+        outpath = Path(
+            self.path.format(
+                instruments=self._instruments_str,
+                gps_start_time=f"{t0:0=10.0f}",
+                duration=duration,
+                description=self.description,
+            )
+        )
+
+        if outpath.exists():
+            if self.force:
+                outpath.unlink()
+            else:
+                raise FileExistsError(f"output file exists: {outpath}")
+
+        LOGGER.info("Writing file %s...", outpath)
+        tsd.write(outpath)
+
+    def _writer(self):
+        """frame writer method for background thread"""
         while True:
             try:
                 tsd = self._queue.get(
@@ -109,31 +137,9 @@ class FrameSink(TSSink):
                     LOGGER.debug("writer thread exiting")
                     return
 
-                span = tsd.span
-                t0 = span.start
-                assert int(t0) == t0
-                t0 = int(t0)
-                duration = span.end - span.start
-                assert int(duration) == duration
-                duration = int(duration)
 
-                outpath = Path(
-                    self.path.format(
-                        instruments=self._instruments_str,
-                        gps_start_time=f"{t0:0=10.0f}",
-                        duration=duration,
-                        description=self.description,
-                    )
-                )
+                self._write_tsd(tsd)
 
-                if outpath.exists():
-                    if self.force:
-                        outpath.unlink()
-                    else:
-                        raise FileExistsError(f"output file exists: {outpath}")
-
-                LOGGER.info("Writing file %s...", outpath)
-                tsd.write(outpath)
             except Exception as e:
                 self._writer_thread_exception = e
                 break
