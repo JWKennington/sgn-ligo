@@ -16,6 +16,7 @@ dependencies = [
     "lalsuite",
     "ligo-scald",
     "python-ligo-lw",
+    "scipy",
     "sgn",
     "sgn-arrakis",
     "sgn-ts",
