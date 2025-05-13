@@ -123,3 +123,6 @@ exclude = [
     "docs",
     "_version.py",
 ]
+
+[project.scripts]
+sgn-ligo-ll-dq = "sgnligo.bin.ll_dq:main"
