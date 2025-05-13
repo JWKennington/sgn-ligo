@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Optional
 
 import lal
 from sgnts.base import EventBuffer, EventFrame, Offset, TSTransform
@@ -17,8 +18,8 @@ class HorizonDistanceTracker(TSTransform):
     Compute horizon distance for an incoming PSD and a given waveform model
     """
 
-    horizon_distance_funcs: Callable | dict[str, Callable] = None
-    ifo: str = None
+    horizon_distance_funcs: Optional[Callable | dict[str, Callable]] = None
+    ifo: Optional[str] = None
     range: bool = False
 
     def __post_init__(self):

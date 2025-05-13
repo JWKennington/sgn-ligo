@@ -83,7 +83,8 @@ class DataSourceInfo:
         source_queue_timeout:
             float, the time to wait for next file from the queue before sending a
             hearbeat buffer when data_souce is "devshm" or "devshm-single", in seconds.
-            When data_source is "arrakis", used as the in_queue_timeout for ArrakisSource.
+            When data_source is "arrakis", used as the in_queue_timeout for
+            ArrakisSource.
         input_sample_rate:
             int, the sample rate for fake sources [white|sin|impulse|white-realtime]
         impulse_position:
@@ -177,7 +178,8 @@ class DataSourceInfo:
                     self.seg = segments.segment(
                         LIGOTimeGPS(self.gps_start_time), LIGOTimeGPS(self.gps_end_time)
                     )
-            # Input sample rate is not required but will default to 16384 Hz if not provided
+        # Input sample rate is not required but will default to 16384 Hz if
+        # not provided
         elif self.data_source == "white-realtime":
             if self.input_sample_rate is None:
                 raise ValueError(
@@ -423,8 +425,8 @@ def datasource(
         frame_segments = segments.segmentlistdict((ifo, None) for ifo in info.ifos)
         info.all_analysis_ifos = info.ifos
 
-    source_out_links = {ifo: None for ifo in info.ifos}
-    pad_names = {ifo: None for ifo in info.ifos}
+    source_out_links = {}
+    pad_names = {}
     if source_latency:
         source_latency_links: Optional[dict[Any, Any]] = {}
     else:
@@ -479,19 +481,19 @@ def datasource(
 
     elif info.data_source == "arrakis":
         # Prepare for ArrakisSource which handles all channels with a single source
-        channel_names = []
+        _channel_names = []
 
         # Create channel names list and set up pad_names in one loop
         for ifo in info.ifos:
             channel_name = f"{ifo}:{info.channel_dict[ifo]}"
-            channel_names.append(channel_name)
+            _channel_names.append(channel_name)
             pad_names[ifo] = channel_name
             source_out_links[ifo] = f"ArrakisSource:src:{channel_name}"
 
         # Create a single ArrakisSource for all channels
         arrakis_source = ArrakisSource(
             name="ArrakisSource",
-            source_pad_names=channel_names,
+            source_pad_names=_channel_names,
             start_time=info.gps_start_time,
             duration=(
                 None

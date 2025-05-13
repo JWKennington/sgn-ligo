@@ -333,6 +333,7 @@ def taperzero_fseries(
     #
 
     deltaF = fseries.deltaF
+    assert minfs is not None and maxfs is not None
     kmin = int(minfs[0] / deltaF)
     kmax = int(minfs[1] / deltaF)
     data[(len(data) // 2 + 1) - kmin + 1 : (len(data) // 2 + 1) + kmin] = 0.0
@@ -371,8 +372,8 @@ def taperzero_fseries(
 def condition_psd(
     psd: lal.REAL8FrequencySeries,
     newdeltaF: int,
-    minfs: Optional[Tuple[int, int]] = (35.0, 40.0),
-    maxfs: Optional[Tuple[int, int]] = (1800.0, 2048.0),
+    minfs: Optional[Tuple[float, float]] = (35.0, 40.0),
+    maxfs: Optional[Tuple[float, float]] = (1800.0, 2048.0),
     smoothing_frequency: Optional[float] = 4.0,
     fir_whiten: Optional[bool] = False,
 ) -> lal.REAL8FrequencySeries:
@@ -410,6 +411,7 @@ def condition_psd(
     # store the psd horizon before conditioning
     #
 
+    assert minfs is not None and maxfs is not None
     horizon_distance = HorizonDistance(minfs[1], maxfs[0], psd.deltaF, 1.4, 1.4)
     horizon_before = horizon_distance(psd, 8.0)[0]
 
@@ -424,6 +426,7 @@ def condition_psd(
     #
 
     psddata = psd.data.data
+    assert smoothing_frequency is not None
     avgwindow = int(smoothing_frequency / newdeltaF)
     psddata = movingmedian(psddata, avgwindow)
     psddata = movingaverage(psddata, avgwindow)
