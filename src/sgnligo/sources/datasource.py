@@ -14,9 +14,9 @@ from ligo import segments
 from ligo.lw import utils as ligolw_utils
 from ligo.lw.utils import segments as ligolw_segments
 from sgn import Pipeline
+from sgn_arrakis.source import ArrakisSource
 from sgnts.sources import FakeSeriesSource, SegmentSource
 from sgnts.transforms import Adder, Gate
-from sgn_arrakis.source import ArrakisSource
 
 from sgnligo.base import parse_list_to_dict
 from sgnligo.sources.devshmsrc import DevShmSource
@@ -489,12 +489,19 @@ def datasource(
             source_out_links[ifo] = f"ArrakisSource:src:{channel_name}"
 
         # Create a single ArrakisSource for all channels
-        print (info.gps_start_time, None if info.gps_end_time is None else info.gps_end_time - info.gps_start_time if info.gps_start_time is not None else None)
         arrakis_source = ArrakisSource(
             name="ArrakisSource",
-            source_pad_names=tuple(channel_names),
+            source_pad_names=channel_names,
             start_time=info.gps_start_time,
-            duration=None if info.gps_end_time is None else info.gps_end_time - info.gps_start_time if info.gps_start_time is not None else None,
+            duration=(
+                None
+                if info.gps_end_time is None
+                else (
+                    info.gps_end_time - info.gps_start_time
+                    if info.gps_start_time is not None
+                    else None
+                )
+            ),
             in_queue_timeout=int(info.source_queue_timeout),
         )
         pipeline.insert(arrakis_source)

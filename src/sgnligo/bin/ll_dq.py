@@ -7,13 +7,13 @@
 from argparse import ArgumentParser
 
 from sgn.apps import Pipeline
+from sgnts.sinks import NullSeriesSink
+
+from sgnligo.psd import HorizonDistance
 from sgnligo.sinks import KafkaSink
 from sgnligo.sources import DataSourceInfo, datasource
 from sgnligo.transforms import ConditionInfo, condition
-from sgnts.sinks import NullSeriesSink
-
-from sgnl.psd import HorizonDistance
-from sgnl.transforms import HorizonDistanceTracker
+from sgnligo.transforms.horizon import HorizonDistanceTracker
 
 
 def parse_command_line():
@@ -127,8 +127,7 @@ def ll_dq(
         input_links=source_out_links,
     )
 
-    # Create the horizon tracker and hoft sink
-    elements = [
+    pipeline.insert(
         HorizonDistanceTracker(
             name="Horizon",
             source_pad_names=("horizon",),
@@ -148,47 +147,25 @@ def ll_dq(
             sink_pad_names=("hoft",),
             verbose=verbose,
         ),
-    ]
+        KafkaSink(
+            name="HorizonSnk",
+            sink_pad_names=("horizon",),
+            output_kafka_server=output_kafka_server,
+            time_series_topics=["range_history"],
+            tag=[
+                ifo,
+            ],
+            prefix="sgnl." + analysis_tag + "." + ("inj_" if injections else ""),
+        ),
+    )
 
-    # Add Kafka sink only if server is provided
-    if output_kafka_server is not None:
-        elements.append(
-            KafkaSink(
-                name="HorizonSnk",
-                sink_pad_names=("horizon",),
-                output_kafka_server=output_kafka_server,
-                time_series_topics=["range_history"],
-                tag=[
-                    ifo,
-                ],
-                prefix="sgnl." + analysis_tag + "." + ("inj_" if injections else ""),
-            )
-        )
-        # Add the Kafka connection to the link map
-        kafka_link = {"HorizonSnk:snk:horizon": "Horizon:src:horizon"}
-    else:
-        # Use a null sink for horizon output if no Kafka server is provided
-        elements.append(
-            NullSeriesSink(
-                name="HorizonSnk",
-                sink_pad_names=("horizon",),
-                verbose=verbose,
-            )
-        )
-        kafka_link = {"HorizonSnk:snk:horizon": "Horizon:src:horizon"}
-
-    pipeline.insert(*elements)
-
-    # Create link map with the kafka link
-    link_map = {
-        "Horizon:snk:spectrum": spectrum_out_links[ifo],
-        "HoftSnk:snk:hoft": condition_out_links[ifo],
-    }
-
-    # Add the kafka link
-    link_map.update(kafka_link)
-
-    pipeline.insert(link_map=link_map)
+    pipeline.insert(
+        link_map={
+            "Horizon:snk:spectrum": spectrum_out_links[ifo],
+            "HorizonSnk:snk:horizon": "Horizon:src:horizon",
+            "HoftSnk:snk:hoft": condition_out_links[ifo],
+        }
+    )
 
     pipeline.run()
 
