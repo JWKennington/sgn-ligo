@@ -18,6 +18,7 @@ dependencies = [
     "ligo-scald",
     "python-ligo-lw",
     "sgn",
+    "sgn-arrakis",
     "sgn-ts",
     "sympy",
 ]
