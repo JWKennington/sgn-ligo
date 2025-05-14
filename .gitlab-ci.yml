@@ -10,7 +10,6 @@ include:
     inputs:
       install_extra: test
       python_versions:
-        - "3.9"
         - "3.10"
         - "3.11"
 #        - "3.12"  # TODO uncomment this when torch support is available for 3.12

@@ -14,6 +14,7 @@ from ligo import segments
 from ligo.lw import utils as ligolw_utils
 from ligo.lw.utils import segments as ligolw_segments
 from sgn import Pipeline
+from sgn_arrakis.source import ArrakisSource
 from sgnts.sources import FakeSeriesSource, SegmentSource
 from sgnts.transforms import Adder, Gate
 
@@ -31,6 +32,7 @@ KNOWN_DATASOURCES = [
     "frames",
     "devshm",
     "devshm-single",
+    "arrakis",
 ]
 FAKE_DATASOURCES = ["white", "sin", "impulse", "white-realtime"]
 OFFLINE_DATASOURCES = ["white", "sin", "impulse", "frames"]
@@ -43,7 +45,7 @@ class DataSourceInfo:
     Args:
         data_source:
             str, the data source, can be one of
-            [white|sin|impulse|white-realtime|frames|devshm|devshm-single]
+            [white|sin|impulse|white-realtime|frames|devshm|devshm-single|arrakis]
         channel_name:
             list[str, ...], a list of channel names ["IFO=CHANNEL_NAME",...].
             For fake sources [white|sin|impulse|white-realtime], channel names are used
@@ -80,7 +82,9 @@ class DataSourceInfo:
             is "devshm" or "devshm-single", in seconds
         source_queue_timeout:
             float, the time to wait for next file from the queue before sending a
-            hearbeat buffer when data_souce is "devshm" or "devshm-single", in seconds
+            hearbeat buffer when data_souce is "devshm" or "devshm-single", in seconds.
+            When data_source is "arrakis", used as the in_queue_timeout for
+            ArrakisSource.
         input_sample_rate:
             int, the sample rate for fake sources [white|sin|impulse|white-realtime]
         impulse_position:
@@ -164,6 +168,18 @@ class DataSourceInfo:
                     "Must not specify gps_start_time or gps_end_time when"
                     " data_source in ['devshm','devshm-single']"
                 )
+        elif self.data_source == "arrakis":
+            # Arrakis source can have optional start_time and end_time
+            # If both are provided, start_time must be less than end_time
+            if self.gps_start_time is not None and self.gps_end_time is not None:
+                if self.gps_start_time >= self.gps_end_time:
+                    raise ValueError("Must specify gps_start_time < gps_end_time")
+                else:
+                    self.seg = segments.segment(
+                        LIGOTimeGPS(self.gps_start_time), LIGOTimeGPS(self.gps_end_time)
+                    )
+        # Input sample rate is not required but will default to 16384 Hz if
+        # not provided
         elif self.data_source == "white-realtime":
             if self.input_sample_rate is None:
                 raise ValueError(
@@ -409,8 +425,8 @@ def datasource(
         frame_segments = segments.segmentlistdict((ifo, None) for ifo in info.ifos)
         info.all_analysis_ifos = info.ifos
 
-    source_out_links = {ifo: None for ifo in info.ifos}
-    pad_names = {ifo: None for ifo in info.ifos}
+    source_out_links = {}
+    pad_names = {}
     if source_latency:
         source_latency_links: Optional[dict[Any, Any]] = {}
     else:
@@ -463,6 +479,38 @@ def datasource(
             )
             source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
 
+    elif info.data_source == "arrakis":
+        # Prepare for ArrakisSource which handles all channels with a single source
+        _channel_names = []
+
+        # Create channel names list and set up pad_names in one loop
+        for ifo in info.ifos:
+            channel_name = f"{ifo}:{info.channel_dict[ifo]}"
+            _channel_names.append(channel_name)
+            pad_names[ifo] = channel_name
+            source_out_links[ifo] = f"ArrakisSource:src:{channel_name}"
+
+        # Create a single ArrakisSource for all channels
+        arrakis_source = ArrakisSource(
+            name="ArrakisSource",
+            source_pad_names=_channel_names,
+            start_time=info.gps_start_time,
+            duration=(
+                None
+                if info.gps_end_time is None
+                else (
+                    info.gps_end_time - info.gps_start_time
+                    if info.gps_start_time is not None
+                    else None
+                )
+            ),
+            in_queue_timeout=int(info.source_queue_timeout),
+        )
+        pipeline.insert(arrakis_source)
+
+        # For Arrakis source, we need to set a default sample rate if not provided
+        if info.input_sample_rate is None:
+            info.input_sample_rate = 16384  # Default LIGO sample rate for h(t) data
     else:
         for ifo in info.ifos:
             if info.data_source == "frames":

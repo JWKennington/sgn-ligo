@@ -124,7 +124,7 @@ def condition(
     data_source: str,
     input_sample_rate: int,
     input_links: list[str],
-    whiten_sample_rate: int = None,
+    whiten_sample_rate: Optional[int] = None,
     whiten_latency: bool = False,
 ):
     """Condition the data with whitening and gating
