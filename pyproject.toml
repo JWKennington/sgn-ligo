@@ -127,7 +127,9 @@ exclude = [
     "build",
     "docs",
     "_version.py",
+    "hack",
 ]
 
 [project.scripts]
 sgn-ligo-ll-dq = "sgnligo.bin.ll_dq:main"
+sgn-ligo-plot-psd = "sgnligo.bin.plot_psd:main"
