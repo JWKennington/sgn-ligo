@@ -13,7 +13,6 @@ dynamic = ["version"]
 dependencies = [
     "confluent-kafka",
     "gwpy",
-    "inotify-simple", # TODO: note this is LINUX only, should remove
     "lalsuite",
     "ligo-scald",
     "python-ligo-lw",
@@ -21,6 +20,7 @@ dependencies = [
     "sgn-arrakis",
     "sgn-ts",
     "sympy",
+    "watchdog",
 ]
 requires-python = ">=3.9"
 authors = [
@@ -46,6 +46,7 @@ Issues = "https://git.ligo.org/greg/sgn-ligo/issues"
 test = [
     "pytest",
     "pytest-cov",
+    "pytest-freezegun",
 ]
 docs = [
     "mkdocs",
