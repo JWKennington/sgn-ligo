@@ -17,10 +17,18 @@ from sgnligo.psd import fake_gwdata_psd
 
 
 def parse_psd(channel_dict):
+    """Parse the PSDs for the given channels.
+
+    Args:
+        channel_dict: Dictionary mapping detector names to channel names
+
+    Returns:
+        Dictionary containing PSD information for each detector
+    """
     _psd = fake_gwdata_psd(channel_dict.keys())
     out = {}
     FIRKernel = PSDFirKernel()
-    # for ifo,psd in _psd.items():
+
     for ifo, channel_name in channel_dict.items():
         assert ifo in _psd
         psd = _psd[ifo]
@@ -30,7 +38,8 @@ def parse_psd(channel_dict):
         assert ln2nyquist == int(ln2nyquist)
         rate = int(nyquist * 2)
         stride = Offset.sample_stride(rate)
-        # create the coloring FIR kernel from reference_psd.psd_to_fir_kernel()
+
+        # Create the coloring FIR kernel from reference_psd.psd_to_fir_kernel()
         fir_matrix, latency, measured_sample_rate = (
             FIRKernel.psd_to_linear_phase_whitening_fir_kernel(psd, invert=False)
         )
@@ -46,7 +55,7 @@ def parse_psd(channel_dict):
 
 
 @dataclass
-class LigoNoiseSource(TSSource):
+class GWDataNoiseSource(TSSource):
     """Source element to generate realistic LIGO-like noise with appropriate PSD.
 
     This source generates noise that matches the expected Advanced LIGO detector
@@ -105,13 +114,17 @@ class LigoNoiseSource(TSSource):
                 rate=info["rate"],
             )
 
+        # Initialize current_end attribute
+        self._current_end = 0.0
+
         if self.verbose:
             if self.end is None:
                 print("No end time specified, will run indefinitely")
             else:
                 print(f"Will run until GPS time: {self.end}")
 
-    def _generate_noise_chunk(self, channel_name: str) -> numpy.ndarray:
+    def _generate_noise_chunk(self, pad: SourcePad) -> numpy.ndarray:
+    #def _generate_noise_chunk(self, channel_name: str) -> numpy.ndarray:
         """Generate a chunk of colored noise with proper continuity.
 
         This method applies an FIR filter to white noise, producing colored noise
@@ -125,14 +138,17 @@ class LigoNoiseSource(TSSource):
             NumPy array containing colored noise
         """
         # Extract detector name from channel name (e.g., 'H1' from 'H1:FAKE-STRAIN')
-        detector = channel_name.split(":", 1)[0]
+        #detector = channel_name.split(":", 1)[0]
 
         # Get the info for this detector
-        info = self.channel_info[detector]
+        info = [info for info in self.channel_info.values() if info["pad"] == pad][0]
+        #info = self.channel_info[detector]
         out = signal.correlate(info["state"], info["fir-matrix"], "valid")
-        print(len(out), len(info["fir-matrix"]), len(info["state"]))
+
+        # Maintain state for the next call
         info["state"][: -len(out)] = info["state"][len(out) :]
         info["state"][-len(out) :] = numpy.random.rand(len(out))
+
         return out
 
     def new(self, pad: SourcePad) -> TSFrame:
@@ -148,20 +164,23 @@ class LigoNoiseSource(TSSource):
             TSFrame containing realistic LIGO noise
         """
         # Get the frame prepared by the base class's prepare_frame method
-        frame = self.prepare_frame(pad)  # Changed from prepare_frames to prepare_frame
+        frame = self.prepare_frame(pad)
 
         # Get the buffer from the frame
         assert len(frame) == 1
         buffer = frame.buffers[0]
 
         # Get the channel name associated with this pad
-        channel_name = self.rsrcs[pad]
+        #channel_name = self.rsrcs[pad]
 
         # Generate noise for this channel
-        noise_chunk = self._generate_noise_chunk(channel_name)
+        #noise_chunk = self._generate_noise_chunk(channel_name)
+        noise_chunk = self._generate_noise_chunk(pad)
 
+        # Set the data in the buffer
         buffer.set_data(noise_chunk)
 
+        # Store the current end time of the frame
         self._current_end = frame.end
 
         return frame
@@ -183,7 +202,7 @@ class LigoNoiseSource(TSSource):
                     # We're falling behind real time
                     if self.verbose:
                         print(
-                            "Warning: LigoNoiseSource falling behind real time"
+                            "Warning: GWDataNoiseSource falling behind real time"
                             + f"({sleep_time:.2f} s)"
                         )
             else:
