@@ -46,7 +46,7 @@ Issues = "https://git.ligo.org/greg/sgn-ligo/issues"
 test = [
     "pytest",
     "pytest-cov",
-    "pytest-freezegun",
+    "pytest-freezer",
 ]
 docs = [
     "mkdocs",
