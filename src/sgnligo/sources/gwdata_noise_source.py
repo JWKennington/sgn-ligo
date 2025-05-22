@@ -64,7 +64,7 @@ def parse_psd(channel_dict):
 class GWDataNoiseSource(TSSource):
     """Source element to generate realistic noise inspired by modern GW detectors.
 
-    This source generates noise with spectral characteristics inspired by 
+    This source generates noise with spectral characteristics inspired by
     Advanced LIGO and Virgo detectors. The noise is colored using realistic
     power spectral density curves suitable for testing and simulation purposes.
 

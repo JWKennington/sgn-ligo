@@ -56,8 +56,11 @@ def test_generate_noise_chunk():
     """Test noise chunk generation."""
     source = GWDataNoiseSource(name="TestSource", channel_dict={"H1": "H1:FAKE-STRAIN"})
 
-    chunk1 = source._generate_noise_chunk("H1:FAKE-STRAIN")
-    chunk2 = source._generate_noise_chunk("H1:FAKE-STRAIN")
+    # Get the actual source pad for H1:FAKE-STRAIN
+    h1_pad = source.srcs["H1:FAKE-STRAIN"]
+
+    chunk1 = source._generate_noise_chunk(h1_pad)
+    chunk2 = source._generate_noise_chunk(h1_pad)
 
     assert isinstance(chunk1, np.ndarray)
     assert len(chunk1) == source.channel_info["H1"]["sample-stride"]
