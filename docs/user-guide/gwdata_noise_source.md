@@ -43,8 +43,8 @@ from sgnligo.sources.gwdata_noise_source import GWDataNoiseSource
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Generate gravitational wave detector noise")
-    parser.add_argument("--duration", type=float, default=10.0,
-                      help="Duration in seconds (default: 10.0)")
+    parser.add_argument("--duration", type=float, default=50.0,
+                      help="Duration in seconds (default: 50.0)")
     parser.add_argument("--detectors", type=str, default="H1,L1",
                       help="Comma-separated list of detectors (default: 'H1,L1')")
     parser.add_argument("--output-dir", type=str, default="./strain_output",
@@ -113,7 +113,7 @@ if __name__ == "__main__":
 Save this script as `generate_strain.py`. You can run it with various options:
 
 ```bash
-# Generate 10 seconds of data for LIGO Hanford (H1) and Livingston (L1)
+# Generate 50 seconds of data for LIGO Hanford (H1) and Livingston (L1)
 python generate_strain.py
 
 # Generate 30 seconds of data for all three detectors (H1, L1, V1)
@@ -303,198 +303,6 @@ Save this script as `analyze_strain.py`. You can run it after generating strain 
 ```bash
 # Analyze and plot strain data
 python analyze_strain.py --input-dir ./strain_output --output-dir ./plots
-```
-
-## Step 3: Combined Pipeline: Generate and Analyze
-
-For convenience, let's create a script that combines data generation and analysis:
-
-```python
-#!/usr/bin/env python3
-"""
-Combined script to generate and analyze LIGO/Virgo strain data.
-
-This script:
-1. Generates simulated gravitational wave detector noise
-2. Creates visualizations of the data
-"""
-
-import argparse
-import os
-import time
-from sgn.apps import Pipeline
-from sgnts.sinks import DumpSeriesSink
-from sgnligo.sources.gwdata_noise_source import GWDataNoiseSource
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import signal
-
-
-def generate_strain_data(detectors, duration, output_dir, real_time=False, verbose=False):
-    """Generate strain data using GWDataNoiseSource."""
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Create channel dictionary
-    channel_dict = {detector: f"{detector}:FAKE-STRAIN" for detector in detectors}
-    
-    # Set up pipeline
-    pipe = Pipeline()
-    
-    # Create noise source
-    source = GWDataNoiseSource(
-        name="NoiseSource",
-        channel_dict=channel_dict,
-        duration=duration,
-        real_time=real_time,
-        verbose=verbose
-    )
-    
-    # Create sinks for each channel
-    sinks = {}
-    for detector, channel_name in channel_dict.items():
-        output_file = os.path.join(output_dir, f"{detector}_strain.txt")
-        sinks[detector] = DumpSeriesSink(
-            name=f"Sink_{detector}",
-            sink_pad_names=[channel_name],
-            fname=output_file,
-            verbose=verbose
-        )
-    
-    # Add source and sinks to pipeline
-    elements = [source] + list(sinks.values())
-    pipe.insert(*elements)
-    
-    # Create link map
-    link_map = {}
-    for detector, channel_name in channel_dict.items():
-        link_map[f"Sink_{detector}:snk:{channel_name}"] = f"NoiseSource:src:{channel_name}"
-    
-    # Add connections to pipeline
-    pipe.insert(link_map=link_map)
-    
-    # Run the pipeline
-    print(f"Generating {duration} seconds of strain data for detectors: {', '.join(detectors)}")
-    start_time = time.time()
-    pipe.run()
-    generation_time = time.time() - start_time
-    
-    print(f"Data generation completed in {generation_time:.2f} seconds")
-    
-    return [os.path.join(output_dir, f"{detector}_strain.txt") for detector in detectors]
-
-
-def analyze_strain_data(strain_files, plots_dir):
-    """Analyze strain data and create visualizations."""
-    os.makedirs(plots_dir, exist_ok=True)
-    
-    # Plot settings
-    sample_rate = 16384  # LIGO/Virgo standard sample rate
-    colors = {"H1": "r", "L1": "b", "V1": "g"}
-    labels = {"H1": "LIGO Hanford", "L1": "LIGO Livingston", "V1": "Virgo"}
-    
-    # Prepare for detector comparison
-    plt.figure(figsize=(12, 8))
-    
-    # Process each file
-    for filename in strain_files:
-        print(f"Processing {filename}")
-        
-        # Load data
-        data = np.loadtxt(filename, comments='#')
-        times = data[:, 0]
-        strain = data[:, 1]
-        
-        # Get detector from filename
-        detector = os.path.basename(filename).split("_")[0]
-        
-        # Create time series plot
-        plt.figure(figsize=(12, 6))
-        rel_times = times - times[0]
-        plt.plot(rel_times, strain, 'k-', linewidth=0.5)
-        plt.title(f"{detector} Strain Data Time Series")
-        plt.xlabel("Time (s)")
-        plt.ylabel("Strain")
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(plots_dir, f"{detector}_timeseries.png"), dpi=300)
-        plt.close()
-        
-        # Create ASD plot
-        plt.figure(figsize=(12, 6))
-        f, Pxx = signal.welch(strain, fs=sample_rate, nperseg=4096, noverlap=2048)
-        asd = np.sqrt(Pxx)
-        plt.loglog(f, asd)
-        plt.title(f"{detector} Amplitude Spectral Density")
-        plt.xlabel("Frequency (Hz)")
-        plt.ylabel("Strain/√Hz")
-        plt.xlim([10, sample_rate/2])
-        plt.grid(True, which="both", alpha=0.3)
-        plt.savefig(os.path.join(plots_dir, f"{detector}_asd.png"), dpi=300)
-        plt.close()
-        
-        # Add to detector comparison plot
-        color = colors.get(detector, "k")
-        label = labels.get(detector, detector)
-        plt.loglog(f, asd, color=color, label=label, alpha=0.8)
-    
-    # Finalize detector comparison plot
-    plt.title("Detector Sensitivity Comparison")
-    plt.xlabel("Frequency (Hz)")
-    plt.ylabel("Strain/√Hz")
-    plt.xlim([10, sample_rate/2])
-    plt.grid(True, which="both", alpha=0.3)
-    plt.legend()
-    plt.savefig(os.path.join(plots_dir, "detector_comparison.png"), dpi=300)
-    plt.close()
-    
-    print(f"Analysis complete. Plots saved to {plots_dir}")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Generate and analyze GW detector noise")
-    parser.add_argument("--detectors", type=str, default="H1,L1",
-                      help="Comma-separated list of detectors (default: 'H1,L1')")
-    parser.add_argument("--duration", type=float, default=10.0,
-                      help="Duration in seconds (default: 10.0)")
-    parser.add_argument("--strain-dir", type=str, default="./strain_output",
-                      help="Directory to save strain data (default: ./strain_output)")
-    parser.add_argument("--plots-dir", type=str, default="./plots",
-                      help="Directory to save plots (default: ./plots)")
-    parser.add_argument("--real-time", action="store_true",
-                      help="Generate data in real time")
-    parser.add_argument("--verbose", action="store_true",
-                      help="Print verbose output")
-    args = parser.parse_args()
-    
-    # Parse detectors
-    detectors = [d.strip() for d in args.detectors.split(",")]
-    
-    # Step 1: Generate data
-    strain_files = generate_strain_data(
-        detectors, 
-        args.duration, 
-        args.strain_dir,
-        args.real_time,
-        args.verbose
-    )
-    
-    # Step 2: Analyze data
-    analyze_strain_data(strain_files, args.plots_dir)
-    
-    print("\nProcessing complete:")
-    print(f"- Strain data: {args.strain_dir}/")
-    print(f"- Plot files: {args.plots_dir}/")
-
-
-if __name__ == "__main__":
-    main()
-```
-
-Save this script as `gw_noise_pipeline.py`. You can run it with:
-
-```bash
-# Generate and analyze data for all three detectors
-python gw_noise_pipeline.py --detectors H1,L1,V1 --duration 30.0
 ```
 
 ## GWDataNoiseSource Details

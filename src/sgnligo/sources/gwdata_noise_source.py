@@ -124,7 +124,6 @@ class GWDataNoiseSource(TSSource):
                 print(f"Will run until GPS time: {self.end}")
 
     def _generate_noise_chunk(self, pad: SourcePad) -> numpy.ndarray:
-    #def _generate_noise_chunk(self, channel_name: str) -> numpy.ndarray:
         """Generate a chunk of colored noise with proper continuity.
 
         This method applies an FIR filter to white noise, producing colored noise
@@ -137,17 +136,14 @@ class GWDataNoiseSource(TSSource):
         Returns:
             NumPy array containing colored noise
         """
-        # Extract detector name from channel name (e.g., 'H1' from 'H1:FAKE-STRAIN')
-        #detector = channel_name.split(":", 1)[0]
 
         # Get the info for this detector
         info = [info for info in self.channel_info.values() if info["pad"] == pad][0]
-        #info = self.channel_info[detector]
         out = signal.correlate(info["state"], info["fir-matrix"], "valid")
 
         # Maintain state for the next call
         info["state"][: -len(out)] = info["state"][len(out) :]
-        info["state"][-len(out) :] = numpy.random.rand(len(out))
+        info["state"][-len(out) :] = numpy.random.randn(len(out))
 
         return out
 
@@ -170,11 +166,7 @@ class GWDataNoiseSource(TSSource):
         assert len(frame) == 1
         buffer = frame.buffers[0]
 
-        # Get the channel name associated with this pad
-        #channel_name = self.rsrcs[pad]
-
         # Generate noise for this channel
-        #noise_chunk = self._generate_noise_chunk(channel_name)
         noise_chunk = self._generate_noise_chunk(pad)
 
         # Set the data in the buffer
