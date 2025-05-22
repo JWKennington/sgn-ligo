@@ -12,7 +12,8 @@ include:
       python_versions:
         - "3.10"
         - "3.11"
-#        - "3.12"  # TODO uncomment this when torch support is available for 3.12
+        - "3.12"
+        - "3.13"
   - component: git.ligo.org/computing/gitlab/components/mkdocs/build@1
     inputs:
       image: python:3.12
@@ -28,12 +29,6 @@ python_test:
     - echo "Manually installing system dependencies"
     - |
       apt-get update
-      apt-get install -yqq graphviz
-    - echo "Manually installing pip dependencies"
-    - |
-      pip install lalsuite
-      pip install torch
-      pip install gwpy
     - echo "Installing SGN Family libraries"
     - |
       pip install -r build_requirements.txt
@@ -43,15 +38,9 @@ mkdocs:
     - echo "Manually installing system dependencies"
     - |
       apt-get update
-      apt-get install -yqq graphviz
     - echo "Upgrading pip"
     - |
       pip install --upgrade pip
-    - echo "Manually installing pip dependencies"
-    - |
-      pip install lalsuite
-      pip install torch
-      pip install gwpy
     - echo "Installing SGN Family libraries"
     - |
       pip install -r build_requirements.txt
@@ -63,12 +52,6 @@ flake8-code_quality:
     - echo "Manually installing system dependencies"
     - |
       apt-get update
-      apt-get install -yqq graphviz
-    - echo "Manually installing pip dependencies"
-    - |
-      pip install lalsuite
-      pip install torch
-      pip install gwpy
     - echo "Installing SGN Family libraries"
     - |
       pip install -r build_requirements.txt

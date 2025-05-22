@@ -16,7 +16,7 @@ import lal
 import lal.series
 import numpy as np
 from gwpy.timeseries import TimeSeries
-from ligo.lw import utils as ligolw_utils
+from igwn_ligolw import utils as ligolw_utils
 from scipy import interpolate
 from scipy.special import loggamma
 from sgnts.base import AdapterConfig, Offset, SeriesBuffer, TSFrame, TSTransform

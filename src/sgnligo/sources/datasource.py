@@ -9,10 +9,10 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import igwn_segments as segments
+from igwn_ligolw import utils as ligolw_utils
+from igwn_ligolw.utils import segments as ligolw_segments
 from lal import LIGOTimeGPS
-from ligo import segments
-from ligo.lw import utils as ligolw_utils
-from ligo.lw.utils import segments as ligolw_segments
 from sgn import Pipeline
 from sgn_arrakis.source import ArrakisSource
 from sgnts.sources import FakeSeriesSource, SegmentSource

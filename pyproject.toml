@@ -13,9 +13,12 @@ dynamic = ["version"]
 dependencies = [
     "confluent-kafka",
     "gwpy",
+    "igwn-ligolw",
+    "igwn-segments",
+    "inotify-simple", # TODO: note this is LINUX only, should remove
     "lalsuite",
     "ligo-scald",
-    "python-ligo-lw",
+    "scipy",
     "sgn",
     "sgn-arrakis",
     "sgn-ts",
