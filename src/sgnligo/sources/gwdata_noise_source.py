@@ -1,4 +1,10 @@
-"""A source element to generate realistic LIGO-like noise with appropriate spectrum."""
+"""A source element to generate realistic noise inspired by modern GW detectors.
+
+This module provides the GWDataNoiseSource class which generates colored noise
+with spectral characteristics inspired by Advanced LIGO and Virgo detectors.
+The noise is generated using FIR filtering of white noise to achieve
+realistic power spectral density characteristics for testing and simulation.
+"""
 
 from __future__ import annotations
 
@@ -56,11 +62,11 @@ def parse_psd(channel_dict):
 
 @dataclass
 class GWDataNoiseSource(TSSource):
-    """Source element to generate realistic LIGO-like noise with appropriate PSD.
+    """Source element to generate realistic noise inspired by modern GW detectors.
 
-    This source generates noise that matches the expected Advanced LIGO detector
-    sensitivity for different observing runs. The noise is colored to match
-    the design or specific observing run sensitivity curves.
+    This source generates noise with spectral characteristics inspired by 
+    Advanced LIGO and Virgo detectors. The noise is colored using realistic
+    power spectral density curves suitable for testing and simulation purposes.
 
     Args:
         channel_dict:
@@ -131,7 +137,7 @@ class GWDataNoiseSource(TSSource):
         there are no discontinuities in the generated noise.
 
         Args:
-            channel_name: Full channel name, e.g., 'H1:FAKE-STRAIN'
+            pad: Source pad requesting new data
 
         Returns:
             NumPy array containing colored noise

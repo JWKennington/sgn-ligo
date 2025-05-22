@@ -1,10 +1,9 @@
 # GWDataNoiseSource Tutorial
 
-The `GWDataNoiseSource` is a data source element that generates realistic but
-not at all accurate gravitational wave detector noise with a reasonable
-appropriate power spectral density (PSD). This tutorial will guide you through
-generating, analyzing, and visualizing simulated gravitational wave strain
-data.
+The `GWDataNoiseSource` is a data source element that generates realistic
+gravitational wave detector noise with an appropriate power spectral density 
+(PSD). This tutorial will guide you through generating, analyzing, and 
+visualizing simulated gravitational wave strain data.
 
 ## Overview
 
@@ -13,7 +12,7 @@ gravitational wave detectors that measure tiny distortions in spacetime caused
 by passing gravitational waves. The background noise in these detectors has
 specific spectral characteristics.
 
-The `GWDataNoiseSource` produces simulated strain data with these realistic noise characteristics, useful for:
+The `GWDataNoiseSource` produces simulated strain data with noise characteristics inspired by modern GW detectors, useful for:
 
 - Testing data analysis pipelines
 - Developing and validating gravitational wave search algorithms 
@@ -305,6 +304,14 @@ Save this script as `analyze_strain.py`. You can run it after generating strain 
 python analyze_strain.py --input-dir ./strain_output --output-dir ./plots
 ```
 
+### Example Output
+
+Here's an example of what the generated strain plots should look like:
+
+![H1 Strain Time Series Example](../assets/img/H1_strain_plot.png)
+
+*Figure: Example H1 strain data time series showing realistic gravitational wave detector noise with characteristic spectral properties.*
+
 ## GWDataNoiseSource Details
 
 The `GWDataNoiseSource` has the following important parameters:
@@ -327,7 +334,7 @@ The source supports the following gravitational wave detectors:
 - `L1`: LIGO Livingston (Louisiana, USA)
 - `V1`: Virgo (Italy)
 
-Each detector has a unique noise spectrum that matches the design sensitivity or specific observing run characteristics of the actual detectors.
+Each detector has a unique noise spectrum inspired by the sensitivity characteristics of the actual detectors.
 
 ### Real-time Mode
 
@@ -353,7 +360,7 @@ The generated strain data has the following characteristics:
 - **Sample Rate**: 16384 Hz (standard for LIGO/Virgo)
 - **Format**: Two columns: GPS time and strain value
 - **Units**: Strain is dimensionless (typically on the order of 10^-21 to 10^-22)
-- **Spectral Shape**: Matches the design sensitivity of each detector
+- **Spectral Shape**: Inspired by the sensitivity characteristics of each detector
 
 The analysis scripts produce several visualizations:
 
