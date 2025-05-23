@@ -3,8 +3,6 @@ which writes time series data to .gwf files.
 The formatting is done using the gwpy library.
 """
 
-import queue
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence

@@ -462,13 +462,8 @@ def datasource(
                 bit_mask,
                 gate,
                 link_map={
-                    ifo
-                    + "_Gate:snk:strain": "DevShm:src:"
-                    + channel_names[ifo][0],
-                    ifo
-                    + "_Mask:snk:"
-                    + ifo: "DevShm:src:"
-                    + channel_names[ifo][1],
+                    ifo + "_Gate:snk:strain": "DevShm:src:" + channel_names[ifo][0],
+                    ifo + "_Mask:snk:" + ifo: "DevShm:src:" + channel_names[ifo][1],
                     ifo + "_Gate:snk:state_vector": ifo + "_Mask:src:" + ifo,
                 },
             )
