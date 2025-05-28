@@ -4,7 +4,6 @@ nav:
   - Home: index.md
   - User Guide:
     - Key Concepts: user-guide/concepts.md
-    - GWDataNoiseSource Tutorial: user-guide/gwdata_noise_source.md
   - Developer Guide:
     - Contributing: dev-guide/contributing.md
   - API Reference:
@@ -15,7 +14,6 @@ nav:
       - DevSHMSource: api/sources/devshmsrc.md
       - FakeRealtime: api/sources/fake_realtime.md
       - FrameCacheSource: api/sources/framecachesrc.md
-      - GWDataNoiseSource: api/sources/gwdata_noise_source.md
     - Transforms:
       - BitMask: api/transforms/bit_mask.md
       - Condition: api/transforms/condition.md
