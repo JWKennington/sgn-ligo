@@ -185,7 +185,19 @@ class DataSourceInfo:
                     f" {FAKE_DATASOURCES}"
                 )
         else:
-            if self.gps_start_time is None or self.gps_end_time is None:
+            # Special case for gwdata-noise with real_time=True
+            if self.data_source == "gwdata-noise" and self.real_time:
+                # For real-time gwdata-noise, gps_end_time can be None
+                if self.gps_start_time is not None and self.gps_end_time is not None:
+                    if self.gps_start_time >= self.gps_end_time:
+                        raise ValueError("Must specify gps_start_time < gps_end_time")
+                    else:
+                        self.seg = segments.segment(
+                            LIGOTimeGPS(self.gps_start_time),
+                            LIGOTimeGPS(self.gps_end_time),
+                        )
+                # If gps_end_time is None, seg remains None (for GWDataNoiseSource)
+            elif self.gps_start_time is None or self.gps_end_time is None:
                 raise ValueError(
                     "Must specify gps_start_time and gps_end_time when "
                     f"data_source is one of {OFFLINE_DATASOURCES}"

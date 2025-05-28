@@ -72,9 +72,12 @@ class GWDataNoiseSource(TSSource):
         channel_dict:
             dict or None. If None use {"H1":"H1:FAKE-STRAIN", "L1":"L1:FAKE-STRAIN"}
         t0:
-            float or None, start GPS time. If None, use current GPS time.
+            float or None, start GPS time. If None and real_time is True, uses current
+            GPS time and syncs with actual wall time. If None and real_time is False,
+            uses current GPS time.
         end:
-            float or None, end GPS time. If None, run indefinitely.
+            float or None, end GPS time. If None, run indefinitely. Can be None only
+            when real_time is True.
         duration:
             float or None, duration GPS time. Cannot be combined with end. Use
             one or the other.
@@ -94,8 +97,15 @@ class GWDataNoiseSource(TSSource):
         """Initialize the source after creation.
 
         This sets up the PSD, filter coefficients, and initial state for noise
-        generation.
+        generation. When real_time is True, allows t0 and end to be None for
+        continuous real-time operation synced with actual GPS time.
         """
+
+        # Validate parameters early
+        if not self.real_time and self.end is None and self.duration is None:
+            raise ValueError(
+                "When real_time is False, either end or duration must be specified"
+            )
 
         if self.channel_dict is None:
             self.channel_dict = {"H1": "H1:FAKE-STRAIN", "L1": "L1:FAKE-STRAIN"}
@@ -108,6 +118,8 @@ class GWDataNoiseSource(TSSource):
         # Set proper t0 value before calling parent's __post_init__
         if self.t0 is None:
             self.t0 = int(now())
+            if self.verbose and self.real_time:
+                print(f"Using current GPS time as start: {self.t0}")
 
         # Call parent's post_init BEFORE setting buffer parameters
         super().__post_init__()
@@ -132,7 +144,10 @@ class GWDataNoiseSource(TSSource):
 
         if self.verbose:
             if self.end is None:
-                print("No end time specified, will run indefinitely")
+                # Only possible when real_time is True due to validation above
+                print(
+                    "Real-time mode: will run indefinitely, synced with wall time"
+                )
             else:
                 print(f"Will run until GPS time: {self.end}")
 

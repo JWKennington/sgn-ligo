@@ -128,7 +128,7 @@ class TestGWDataNoiseSource:
 
     def test_init_defaults(self):
         """Test initialization with default parameters."""
-        source = GWDataNoiseSource(name="TestSource")
+        source = GWDataNoiseSource(name="TestSource", duration=1.0)
         assert source.channel_dict == {"H1": "H1:FAKE-STRAIN", "L1": "L1:FAKE-STRAIN"}
         assert "H1:FAKE-STRAIN" in source.source_pad_names
         assert "L1:FAKE-STRAIN" in source.source_pad_names
@@ -156,6 +156,25 @@ class TestGWDataNoiseSource:
         t0 = 1234567890
         source = GWDataNoiseSource(name="TestSource", t0=t0, duration=10.0)
         assert source.end == t0 + 10.0
+
+    def test_init_realtime_none_t0_none_end(self):
+        """Test real-time mode with None t0 and None end."""
+        source = GWDataNoiseSource(name="TestSource", real_time=True, t0=None, end=None)
+        assert source.t0 is not None  # Should be set to current GPS time
+        assert source.end is None  # Should remain None for indefinite operation
+        assert source.real_time is True
+
+    def test_init_realtime_none_t0_verbose(self, capsys):
+        """Test real-time mode with None t0 shows current GPS time message."""
+        GWDataNoiseSource(real_time=True, t0=None, verbose=True)
+        captured = capsys.readouterr()
+        assert "Using current GPS time as start:" in captured.out
+        assert "Real-time mode: will run indefinitely" in captured.out
+
+    def test_init_non_realtime_none_end_raises_error(self):
+        """Test that non-real-time mode requires end or duration."""
+        with pytest.raises(ValueError, match="When real_time is False"):
+            GWDataNoiseSource(name="TestSource", real_time=False, t0=1000, end=None)
 
     @patch("sgnligo.sources.gwdata_noise_source.time.time")
     @patch("sgnligo.sources.gwdata_noise_source.now")
@@ -185,15 +204,24 @@ class TestGWDataNoiseSource:
         captured = capsys.readouterr()
         assert "Will run until GPS time: 2000" in captured.out
 
-        # Test without end time
-        GWDataNoiseSource(verbose=True, t0=1000)
+        # Test without end time in real-time mode
+        GWDataNoiseSource(verbose=True, t0=1000, real_time=True)
         captured = capsys.readouterr()
-        assert "No end time specified, will run indefinitely" in captured.out
+        assert (
+            "Real-time mode: will run indefinitely, synced with wall time"
+            in captured.out
+        )
+
+        # Test without end time in non-real-time mode (requires duration)
+        GWDataNoiseSource(verbose=True, t0=1000, duration=10.0)
+        captured = capsys.readouterr()
+        # Should not print the real-time message
+        assert "Real-time mode:" not in captured.out
 
     def test_generate_noise_chunk(self):
         """Test noise chunk generation produces different noise."""
         source = GWDataNoiseSource(
-            name="TestSource", channel_dict={"H1": "H1:FAKE-STRAIN"}
+            name="TestSource", channel_dict={"H1": "H1:FAKE-STRAIN"}, duration=1.0
         )
         h1_pad = source.srcs["H1:FAKE-STRAIN"]
 
@@ -224,7 +252,7 @@ class TestGWDataNoiseSource:
         mock_randn.return_value = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
         mock_correlate.return_value = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
 
-        source = GWDataNoiseSource(channel_dict={"H1": "H1:FAKE-STRAIN"})
+        source = GWDataNoiseSource(channel_dict={"H1": "H1:FAKE-STRAIN"}, duration=1.0)
         pad = source.srcs["H1:FAKE-STRAIN"]
 
         result = source._generate_noise_chunk(pad)
@@ -239,7 +267,7 @@ class TestGWDataNoiseSource:
 
     def test_new_frame(self):
         """Test new frame generation with mocking."""
-        source = GWDataNoiseSource()
+        source = GWDataNoiseSource(duration=1.0)
         pad = source.srcs["H1:FAKE-STRAIN"]
 
         # Mock prepare_frame and _generate_noise_chunk
@@ -325,7 +353,7 @@ class TestRealTimeMode:
     @patch("sgnligo.sources.gwdata_noise_source.time.sleep")
     def test_internal_no_real_time(self, mock_sleep):
         """Test no sleeping when not in real-time mode."""
-        source = GWDataNoiseSource(real_time=False)
+        source = GWDataNoiseSource(real_time=False, duration=1.0)
         source.internal()
         mock_sleep.assert_not_called()
 
@@ -356,7 +384,7 @@ class TestRealTimeMode:
         with patch.object(
             GWDataNoiseSource, "set_pad_buffer_params"
         ) as mock_set_params:
-            GWDataNoiseSource()
+            GWDataNoiseSource(duration=1.0)
 
             # Check that set_pad_buffer_params was called for each channel
             assert mock_set_params.call_count == 2
@@ -465,6 +493,7 @@ class TestIntegration:
             channel_dict={"H1": "H1:FAKE-STRAIN"},
             t0=1234567890,
             end=None,  # Indefinite duration
+            real_time=True,  # Required for None end
         )
 
         sink = CountingSink(name="CountingSink", sink_pad_names=["H1:FAKE-STRAIN"])
@@ -495,7 +524,31 @@ class TestIntegration:
         assert "fir-matrix" in psd_info
         assert "state" in psd_info
 
+    def test_realtime_none_t0_none_end_integration(self):
+        """Test real-time mode with None t0 and end in integration."""
+        pipe = Pipeline()
+
+        # This should work - real-time mode allows None t0 and end
+        source = GWDataNoiseSource(
+            name="NoiseSource",
+            channel_dict={"H1": "H1:FAKE-STRAIN"},
+            t0=None,
+            end=None,
+            real_time=True,
+        )
+
+        # Verify t0 was set to current GPS time
+        assert source.t0 is not None
+        assert source.end is None
+
+        sink = NullSeriesSink(name="NullSink", sink_pad_names=["H1:FAKE-STRAIN"])
+
+        pipe.insert(source, sink)
+        pipe.insert(
+            link_map={"NullSink:snk:H1:FAKE-STRAIN": "NoiseSource:src:H1:FAKE-STRAIN"}
+        )
+        # Don't run indefinitely in tests
+
 
 if __name__ == "__main__":
     pytest.main(["-xvs", __file__])
-
