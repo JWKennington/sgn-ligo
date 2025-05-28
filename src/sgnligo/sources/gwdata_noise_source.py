@@ -145,9 +145,7 @@ class GWDataNoiseSource(TSSource):
         if self.verbose:
             if self.end is None:
                 # Only possible when real_time is True due to validation above
-                print(
-                    "Real-time mode: will run indefinitely, synced with wall time"
-                )
+                print("Real-time mode: will run indefinitely, synced with wall time")
             else:
                 print(f"Will run until GPS time: {self.end}")
 
