@@ -16,7 +16,7 @@ import lalsimulation
 import numpy
 import pandas
 from lal import LIGOTimeGPS
-from ligo.lw import utils as ligolw_utils
+from igwn_ligolw import utils as ligolw_utils
 from scipy import interpolate
 
 #
