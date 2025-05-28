@@ -801,25 +801,3 @@ def effective_distance_factor(inclination, fp, fc):
     """
     cos2i = math.cos(inclination) ** 2
     return 1.0 / math.sqrt(fp**2 * (1 + cos2i) ** 2 / 4 + fc**2 * cos2i)
-
-
-def fake_gwdata_psd(ifos=("H1", "L1", "V1")):
-    """
-    Returns a fake spectrum dictionary for a plausible GW detector with 200+
-    MPc Horizon. It will be 1/8 Hz resolution and cover frequencies up to 8192
-    Hz
-    """
-    f = numpy.arange(8192 * 8 + 1) / 8.0
-    out = 3e-48 * ((f / 300) ** 2 + (200 / f) + (100 / f) ** 8)
-    out[f < 10] = out[f < 10][-1]
-
-    psd = lal.CreateREAL8FrequencySeries(
-        "psd",
-        0,
-        0.0,
-        1.0 / 8.0,
-        lal.Unit("strain^2 s"),
-        len(f),
-    )
-    psd.data.data[:] = out[:]
-    return {ifo: psd for ifo in ifos}
