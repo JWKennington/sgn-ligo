@@ -4,22 +4,37 @@
 
 from __future__ import annotations
 
+import json
+import sys
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
+from lal import LIGOTimeGPS
 from ligo.scald.io import kafka
 from sgn.base import SinkElement
 
 from sgnligo.base import now
 
 
+class LIGOJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles LIGO-specific types."""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, LIGOTimeGPS):
+            # Convert LIGOTimeGPS to float (GPS seconds)
+            return float(obj)
+        # Let the base class handle other types
+        return super().default(obj)
+
+
 @dataclass
 class KafkaSink(SinkElement):
-    """Send data to kafka topics
+    """Send data to kafka topics or pretty print to stdout
 
     Args:
         output_kafka_server:
-            str, The kafka server to write data to
+            str or None, The kafka server to write data to. If None, pretty
+            print to stdout
         time_series_topics:
             list[str], The kafka topics to write time-series data to
         trigger_topics:
@@ -40,10 +55,15 @@ class KafkaSink(SinkElement):
     interval: Optional[float] = None
 
     def __post_init__(self):
-        assert isinstance(self.output_kafka_server, str)
         super().__post_init__()
 
-        self.client = kafka.Client("kafka://{}".format(self.output_kafka_server))
+        # Initialize client only if kafka server is provided
+        # Handle both None and the string "None"
+        if self.output_kafka_server is not None and self.output_kafka_server != "None":
+            self.client = kafka.Client("kafka://{}".format(self.output_kafka_server))
+        else:
+            self.client = None
+
         if self.tag is None:
             self.tag = []
 
@@ -63,17 +83,35 @@ class KafkaSink(SinkElement):
 
         self.last_sent = now()
 
+    def _pretty_print(self, topic, data, data_type="time_series"):
+        """Pretty print data to stdout in a formatted way."""
+        output = {
+            "topic": self.prefix + topic,
+            "tags": self.tag,
+            "data_type": data_type,
+            "timestamp": now(),
+            "data": data,
+        }
+        print(json.dumps(output, indent=2, cls=LIGOJSONEncoder))
+        sys.stdout.flush()
+
     def write(self):
         if self.time_series_data is not None:
             for topic, data in self.time_series_data.items():
                 if len(data["time"]) > 0:
-                    self.client.write(self.prefix + topic, data, tags=self.tag)
+                    if self.client is not None:
+                        self.client.write(self.prefix + topic, data, tags=self.tag)
+                    else:
+                        self._pretty_print(topic, data, "time_series")
                     self.time_series_data[topic] = {"time": [], "data": []}
 
         if self.trigger_data is not None:
             for topic, data in self.trigger_data.items():
                 if len(data) > 0:
-                    self.client.write(self.prefix + topic, data, tags=self.tag)
+                    if self.client is not None:
+                        self.client.write(self.prefix + topic, data, tags=self.tag)
+                    else:
+                        self._pretty_print(topic, data, "trigger")
                     self.trigger_data[topic] = []
 
     def pull(self, pad, frame):
@@ -108,4 +146,5 @@ class KafkaSink(SinkElement):
 
         if self.at_eos:
             print("shutdown: KafkaSink: close")
-            self.client.close()
+            if self.client is not None:
+                self.client.close()
