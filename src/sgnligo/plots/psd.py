@@ -9,7 +9,7 @@ import logging
 import math
 
 import numpy
-from ligo.lw import lsctables
+from igwn_ligolw import lsctables
 from matplotlib import figure, ticker
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
@@ -284,7 +284,8 @@ def plot_psds(psds, coinc_xmldoc=None, plot_width=640):
         psds:
             dict, A dictionary of PSDs as REAL8FrequencySeries keyed by instrument
         coinc_xmldoc:
-            ligo.lw.ligolw.Document, An XML document containing a single event with all
+            igwn_ligolw.ligolw.Document, An XML document containing a single
+            event with all
             of the metadata as would be uploaded to gracedb.  This is optional.
         plot_width:
             int, How wide to make the figure object in pixels (ignored if axes is
@@ -311,7 +312,8 @@ def plot_cumulative_snrs(psds, coinc_xmldoc, plot_width=640):
         psds:
             dict, A dictionary of PSDs as REAL8FrequencySeries keyed by instrument
         coinc_xmldoc:
-            ligo.lw.ligolw.Document, An XML document containing a single event with all
+            igwn_ligolw.ligolw.Document, An XML document containing a single
+            event with all
             of the metadata as would be uploaded to gracedb.
         plot_width:
             int, How wide to make the figure object in pixels (ignored if axes is
