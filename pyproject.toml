@@ -24,6 +24,7 @@ dependencies = [
     "sgn-ts",
     "sympy",
     "watchdog",
+    "pandas",
 ]
 requires-python = ">=3.9"
 authors = [
@@ -131,3 +132,4 @@ exclude = [
 
 [project.scripts]
 sgn-ligo-ll-dq = "sgnligo.bin.ll_dq:main"
+sgn-ligo-plot-psd = "sgnligo.bin.plot_psd:main"
