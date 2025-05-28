@@ -58,7 +58,7 @@ def main():
         if options.output:
             outname = options.output
         else:
-            outname = os.path.join(os.path.splitext(fname)[0], ".png")
+            outname = os.path.splitext(fname)[0] + ".png"
 
         fig = plot_psds(read_psd(fname, verbose=options.verbose), plot_width=2400)
         fig.savefig(outname)

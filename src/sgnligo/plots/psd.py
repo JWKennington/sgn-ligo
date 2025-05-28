@@ -55,8 +55,8 @@ def summarize_coinc_xmldoc(coinc_xmldoc):
     return sngl_inspirals, mass1, mass2, end_time, on_instruments
 
 
-def axes_plot_cummulative_snr(axes, psds, coinc_xmldoc):
-    """Places a cummulative snr plot into a matplotlib Axes object.
+def axes_plot_cumulative_snr(axes, psds, coinc_xmldoc):
+    """Places a cumulative snr plot into a matplotlib Axes object.
 
     Args:
         axes:
@@ -329,6 +329,6 @@ def plot_cumulative_snrs(psds, coinc_xmldoc, plot_width=640):
         plot_width / float(fig.get_dpi()),
         int(round(plot_width / plotutil.golden_ratio)) / float(fig.get_dpi()),
     )
-    axes_plot_cummulative_snr(fig.gca(), psds, coinc_xmldoc)
+    axes_plot_cumulative_snr(fig.gca(), psds, coinc_xmldoc)
     fig.tight_layout(pad=0.8)
     return fig
