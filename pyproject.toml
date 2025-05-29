@@ -122,6 +122,7 @@ per-file-ignores = [
     "__init__.py:F401",
     "_version.py:BLK100",
     "docs/conf.py:E501",
+    "tests/test_datasource.py:S108",
     "tests/*.py:E731",
 ]
 exclude = [

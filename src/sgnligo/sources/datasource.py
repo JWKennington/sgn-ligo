@@ -238,14 +238,9 @@ class DataSourceInfo:
                                 " noiseless_inj_channel_name as {Detector:name}"
                             )
 
-                # Validate noiseless injection frame cache comes with hoft frame cache
+                # Validate noiseless injection frame cache exists
                 if self.noiseless_inj_frame_cache:
-                    if not self.frame_cache:
-                        raise ValueError(
-                            "Must specify hoft frame_cache to add to"
-                            " noiseless_inj_frame_cache"
-                        )
-                    elif not os.path.exists(self.noiseless_inj_frame_cache):
+                    if not os.path.exists(self.noiseless_inj_frame_cache):
                         raise ValueError("Inj frame cahce file does not exist")
 
             elif self.data_source in FAKE_DATASOURCES:
