@@ -476,10 +476,10 @@ class TestDataSourceInfoStaticMethods:
 class TestDatasourceFunction:
     """Test cases for the datasource factory function."""
 
-    @patch("sgnligo.sources.datasource.DevShmSource")
-    @patch("sgnligo.sources.datasource.BitMask")
     @patch("sgnligo.sources.datasource.Gate")
-    def test_datasource_devshm(self, mock_gate, mock_bitmask, mock_devshm, capsys):
+    @patch("sgnligo.sources.datasource.BitMask")
+    @patch("sgnligo.sources.datasource.DevShmSource")
+    def test_datasource_devshm(self, mock_devshm, mock_bitmask, mock_gate, capsys):
         """Test datasource creation for devshm."""
         # Setup mock DevShmSource
         mock_devshm_instance = Mock()
@@ -640,10 +640,10 @@ class TestDatasourceFunction:
 
             assert source_links["H1"] == "H1_FrameSource:src:H1:FAKE-STRAIN"
 
-    @patch("sgnligo.sources.datasource.FrameReader")
     @patch("sgnligo.sources.datasource.Adder")
+    @patch("sgnligo.sources.datasource.FrameReader")
     def test_datasource_frames_with_injection(
-        self, mock_adder, mock_frame_reader, capsys
+        self, mock_frame_reader, mock_adder, capsys
     ):
         """Test datasource creation for frames with noiseless injection."""
         # Setup mock FrameReader
@@ -678,7 +678,7 @@ class TestDatasourceFunction:
 
                 assert source_links["H1"] == "H1_InjAdd:src:H1"
 
-    @patch("sgnligo.sources.datasource.segments")
+    @patch("sgnligo.sources.datasource.segments.segmentlistdict")
     @patch("sgnligo.sources.datasource.ligolw_utils.load_filename")
     @patch("sgnligo.sources.datasource.ligolw_segments.segmenttable_get_by_name")
     @patch("sgnligo.sources.datasource.FakeSeriesSource")
@@ -698,9 +698,9 @@ class TestDatasourceFunction:
         # The functionality is covered by other tests
         pytest.skip("Complex mocking - functionality covered by other tests")
 
-    @patch("sgnligo.sources.datasource.Latency")
     @patch("sgnligo.sources.datasource.FakeSeriesSource")
-    def test_datasource_with_latency(self, mock_fake, mock_latency, capsys):
+    @patch("sgnligo.sources.datasource.Latency")
+    def test_datasource_with_latency(self, mock_latency, mock_fake, capsys):
         """Test datasource with source latency enabled."""
         pipeline = Mock()
         info = DataSourceInfo(
@@ -729,9 +729,9 @@ class TestDatasourceFunction:
 class TestEdgeCases:
     """Test edge cases and special scenarios."""
 
-    @patch("sgnligo.sources.datasource.ligolw_utils.load_filename")
     @patch("sgnligo.sources.datasource.ligolw_segments.segmenttable_get_by_name")
-    def test_frame_segments_no_analysis_segment(self, mock_get_segments, mock_load):
+    @patch("sgnligo.sources.datasource.ligolw_utils.load_filename")
+    def test_frame_segments_no_analysis_segment(self, mock_load, mock_get_segments):
         """Test frame segments without analysis segment (info.seg is None)."""
         # Create mock segments that won't be clipped
         mock_seglist = {"H1": [], "L1": []}
@@ -852,7 +852,7 @@ class TestEdgeCases:
         pipeline = Mock()
 
         # Test arrakis sets default sample rate
-        with patch("sgnligo.sources.datasource.ArrakisSource"):
+        with patch("sgn_arrakis.source.ArrakisSource"):
             info = DataSourceInfo(
                 data_source="arrakis",
                 channel_name=["H1=FAKE-STRAIN"],
