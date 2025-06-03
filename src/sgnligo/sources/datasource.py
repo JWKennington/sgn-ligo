@@ -21,6 +21,7 @@ from sgnts.transforms import Adder, Gate
 from sgnligo.base import parse_list_to_dict
 from sgnligo.sources.devshmsrc import DevShmSource
 from sgnligo.sources.framecachesrc import FrameReader
+from sgnligo.sources.gwdata_noise_source import GWDataNoiseSource
 from sgnligo.transforms import BitMask, Latency
 
 KNOWN_DATASOURCES = [
@@ -31,9 +32,10 @@ KNOWN_DATASOURCES = [
     "frames",
     "devshm",
     "arrakis",
+    "gwdata-noise",
 ]
-FAKE_DATASOURCES = ["white", "sin", "impulse", "white-realtime"]
-OFFLINE_DATASOURCES = ["white", "sin", "impulse", "frames"]
+FAKE_DATASOURCES = ["white", "sin", "impulse", "white-realtime", "gwdata-noise"]
+OFFLINE_DATASOURCES = ["white", "sin", "impulse", "frames", "gwdata-noise"]
 
 
 @dataclass
@@ -106,6 +108,7 @@ class DataSourceInfo:
     source_queue_timeout: float = 1
     input_sample_rate: Optional[int] = None
     impulse_position: int = -1
+    real_time: bool = False
 
     def __post_init__(self):
         self.channel_dict = parse_list_to_dict(self.channel_name)
@@ -182,7 +185,19 @@ class DataSourceInfo:
                     f" {FAKE_DATASOURCES}"
                 )
         else:
-            if self.gps_start_time is None or self.gps_end_time is None:
+            # Special case for gwdata-noise with real_time=True
+            if self.data_source == "gwdata-noise" and self.real_time:
+                # For real-time gwdata-noise, gps_end_time can be None
+                if self.gps_start_time is not None and self.gps_end_time is not None:
+                    if self.gps_start_time >= self.gps_end_time:
+                        raise ValueError("Must specify gps_start_time < gps_end_time")
+                    else:
+                        self.seg = segments.segment(
+                            LIGOTimeGPS(self.gps_start_time),
+                            LIGOTimeGPS(self.gps_end_time),
+                        )
+                # If gps_end_time is None, seg remains None (for GWDataNoiseSource)
+            elif self.gps_start_time is None or self.gps_end_time is None:
                 raise ValueError(
                     "Must specify gps_start_time and gps_end_time when "
                     f"data_source is one of {OFFLINE_DATASOURCES}"
@@ -223,21 +238,20 @@ class DataSourceInfo:
                                 " noiseless_inj_channel_name as {Detector:name}"
                             )
 
-                # Validate noiseless injection frame cache comes with hoft frame cache
+                # Validate noiseless injection frame cache exists
                 if self.noiseless_inj_frame_cache:
-                    if not self.frame_cache:
-                        raise ValueError(
-                            "Must specify hoft frame_cache to add to"
-                            " noiseless_inj_frame_cache"
-                        )
-                    elif not os.path.exists(self.noiseless_inj_frame_cache):
+                    if not os.path.exists(self.noiseless_inj_frame_cache):
                         raise ValueError("Inj frame cahce file does not exist")
 
             elif self.data_source in FAKE_DATASOURCES:
-                if self.input_sample_rate is None:
+                # gwdata-noise determines its own sample rate from PSD
+                if (
+                    self.data_source != "gwdata-noise"
+                    and self.input_sample_rate is None
+                ):
                     raise ValueError(
                         "Must specify input_sample_rate when data_source is one of"
-                        f" {FAKE_DATASOURCES}"
+                        f" {[ds for ds in FAKE_DATASOURCES if ds != 'gwdata-noise']}"
                     )
 
     @staticmethod
@@ -259,6 +273,7 @@ class DataSourceInfo:
             source_queue_timeout=options.source_queue_timeout,
             input_sample_rate=options.input_sample_rate,
             impulse_position=options.impulse_position,
+            real_time=getattr(options, "real_time", False),
         )
 
     @staticmethod
@@ -374,6 +389,12 @@ class DataSourceInfo:
             type=int,
             action="store",
             help="The sample point to put the impulse at.",
+        )
+        group.add_argument(
+            "--real-time",
+            action="store_true",
+            help="Generate data in real time (for white-realtime and "
+            "gwdata-noise sources).",
         )
 
 
@@ -556,6 +577,10 @@ def datasource(
                     )
                     source_name = "_InjAdd"
                     pad_names[ifo] = ifo
+            elif info.data_source == "gwdata-noise":
+                # Handle GWDataNoiseSource differently as it creates all
+                # channels at once
+                break  # Exit the loop after setting up pad_names
             elif info.data_source == "white-realtime":
                 pad_names[ifo] = ifo
                 source_name = "_FakeSource"
@@ -609,6 +634,40 @@ def datasource(
                 )
                 assert source_out_links is not None
                 source_out_links[ifo] = ifo + "_Gate:src:" + ifo
+
+        # Handle GWDataNoiseSource after the loop since it creates all channels at once
+        if info.data_source == "gwdata-noise":
+            # Prepare channel dict with full channel names for GWDataNoiseSource
+            gwdata_channel_dict = {}
+            for ifo in info.ifos:
+                # If channel name doesn't start with IFO:, add it
+                channel = info.channel_dict[ifo]
+                if not channel.startswith(f"{ifo}:"):
+                    channel = f"{ifo}:{channel}"
+                gwdata_channel_dict[ifo] = channel
+
+            # GWDataNoiseSource handles all channels in a single source
+            gwdata_source = GWDataNoiseSource(
+                name="GWDataNoiseSource",
+                channel_dict=gwdata_channel_dict,
+                t0=info.gps_start_time,
+                end=info.gps_end_time,
+                real_time=info.real_time,
+                verbose=verbose,
+            )
+            pipeline.insert(gwdata_source)
+
+            # Set up the output links for each channel
+            for ifo in info.ifos:
+                # Use the full channel name from gwdata_channel_dict
+                channel_name = gwdata_channel_dict[ifo]
+                pad_names[ifo] = channel_name
+                source_out_links[ifo] = f"GWDataNoiseSource:src:{channel_name}"
+
+            # Set the input sample rate from the source
+            if info.input_sample_rate is None:
+                # GWDataNoiseSource uses detector-specific rates, default to 16384 Hz
+                info.input_sample_rate = 16384
 
     if source_latency:
         for ifo in info.ifos:
