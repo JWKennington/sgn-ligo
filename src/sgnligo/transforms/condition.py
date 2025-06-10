@@ -12,9 +12,12 @@ from typing import Optional
 
 from sgn import Pipeline
 from sgnts.transforms import Threshold
+from strike.config import get_analysis_config
 
 from sgnligo.transforms.latency import Latency
 from sgnligo.transforms.whiten import Whiten
+
+default_config = get_analysis_config()["default"]
 
 
 @dataclass
@@ -126,6 +129,7 @@ def condition(
     input_links: list[str],
     whiten_sample_rate: Optional[int] = None,
     whiten_latency: bool = False,
+    highpass_filter: bool = default_config["highpass_filter"],
 ):
     """Condition the data with whitening and gating
 
@@ -165,6 +169,7 @@ def condition(
                 fft_length=condition_info.psd_fft_length,
                 whitening_method=condition_info.whitening_method,
                 reference_psd=condition_info.reference_psd,
+                highpass_filter=highpass_filter,
             ),
             link_map={
                 ifo + "_Whitener:snk:" + ifo: input_links[ifo],  # type: ignore

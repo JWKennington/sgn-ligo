@@ -18,9 +18,13 @@ import numpy as np
 from gwpy.timeseries import TimeSeries
 from igwn_ligolw import utils as ligolw_utils
 from scipy import interpolate
+from scipy.signal import butter, sosfilt
 from scipy.special import loggamma
 from sgnts.base import AdapterConfig, Offset, SeriesBuffer, TSFrame, TSTransform
+from strike.config import get_analysis_config
 from sympy import EulerGamma
+
+default_config = get_analysis_config()["default"]
 
 EULERGAMMA = float(EulerGamma.evalf())
 
@@ -133,6 +137,7 @@ class Whiten(TSTransform):
     nmed: int = 7
     navg: int = 64
     reference_psd: Optional[str] = None
+    highpass_filter: bool = default_config["highpass_filter"]
 
     def __post_init__(self):
         assert len(self.sink_pad_names) == 1, "Only supports one sink pad"
@@ -502,6 +507,11 @@ class Whiten(TSTransform):
                 whitened_data = np.array(whitened_data)
 
             elif self.whitening_method == "gstlal":
+                if self.highpass_filter:
+                    sos = butter(
+                        4, 8, btype="highpass", fs=self.input_sample_rate, output="sos"
+                    )
+                    this_seg_data = sosfilt(sos, this_seg_data)
                 # apply the window function
                 this_seg_data = (
                     self.hann_input[self.z_input : -self.z_input]
