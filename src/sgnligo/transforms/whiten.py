@@ -170,6 +170,10 @@ class Whiten(TSTransform):
             self.adapter_config.stride, self.whiten_sample_rate
         )
 
+        assert self.whitening_method in [
+            "gstlal"
+        ], "whitening_method must be set to 'gstlal' (Currently only one supported)"
+
         super().__post_init__()
 
         self.latest_psd = None
