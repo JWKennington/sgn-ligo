@@ -126,6 +126,7 @@ def condition(
     input_links: list[str],
     whiten_sample_rate: Optional[int] = None,
     whiten_latency: bool = False,
+    highpass_filter: bool = False,
 ):
     """Condition the data with whitening and gating
 
@@ -165,6 +166,7 @@ def condition(
                 fft_length=condition_info.psd_fft_length,
                 whitening_method=condition_info.whitening_method,
                 reference_psd=condition_info.reference_psd,
+                highpass_filter=highpass_filter,
             ),
             link_map={
                 ifo + "_Whitener:snk:" + ifo: input_links[ifo],  # type: ignore
