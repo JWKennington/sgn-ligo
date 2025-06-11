@@ -15,7 +15,6 @@ from typing import Optional
 import lal
 import lal.series
 import numpy as np
-from gwpy.timeseries import TimeSeries
 from igwn_ligolw import utils as ligolw_utils
 from scipy import interpolate
 from scipy.signal import butter, sosfilt
@@ -107,7 +106,7 @@ class Whiten(TSTransform):
         instrument:
             str, instrument to process. Used if reference-psd is given
         whitening-method:
-            str, currently supported types: (1) 'gwpy', (2) 'gstlal'
+            str, currently supported types: 'gstlal'
         sample-rate:
             int, sample rate of the data
         fft-length:
@@ -492,21 +491,7 @@ class Whiten(TSTransform):
             buf = frame.buffers[0]
             this_seg_data = buf.data
 
-            if self.whitening_method == "gwpy":
-                # check the type of the timeseries data.
-                # transform it to a gwpy.timeseries object
-                if not isinstance(this_seg_data, TimeSeries):
-                    this_seg_data = TimeSeries(this_seg_data)
-
-                # whiten it
-                whitened_data = this_seg_data.whiten(
-                    fftlength=self.fft_length, overlap=0, window="hann"
-                )
-
-                # transform back to a numpy array
-                whitened_data = np.array(whitened_data)
-
-            elif self.whitening_method == "gstlal":
+            if self.whitening_method == "gstlal":
                 if self.highpass_filter:
                     sos = butter(
                         4, 8, btype="highpass", fs=self.input_sample_rate, output="sos"

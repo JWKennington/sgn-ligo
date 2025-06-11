@@ -27,7 +27,7 @@ class ConditionInfo:
         psd_fft_length:
             int, the fft length for the psd calculation, in seconds
         whitening_method:
-            str, the whitening method, must be either 'gwpy' or 'gstlal'
+            str, the whitening method, can only be 'gstlal' right now
         ht_gate_threshold:
             float, the threshold above which to gate out data
         reference_psd:
@@ -47,8 +47,10 @@ class ConditionInfo:
         self.validate()
 
     def validate(self):
-        if self.whitening_method not in ["gwpy", "gstlal"]:
-            raise ValueError("Whitening method must be either 'gwpy' or 'gstlal'")
+        if self.whitening_method not in ["gstlal"]:
+            raise ValueError(
+                "Whitening method must be 'gstlal' (only one supported right now)"
+            )
 
         if self.reference_psd is None and self.track_psd is False:
             raise ValueError("Must enable track_psd if reference_psd not provided")
@@ -63,7 +65,7 @@ class ConditionInfo:
             metavar="algorithm",
             default="gstlal",
             help="Algorithm to use for whitening the data. Supported options are"
-            " 'gwpy' or 'gstlal'. Default is gstlal.",
+            " only 'gstlal' currently. Default is gstlal.",
         )
         group.add_argument(
             "--psd-fft-length",
