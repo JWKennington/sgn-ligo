@@ -45,23 +45,16 @@ class Latency(TransformElement):
         """Calculate buffer latency. Latency is defined as the current time subtracted
         by the buffer start time.
         """
-
         frame = self.frame
+        assert isinstance(frame, (EventFrame, TSFrame))
         time = now().ns()
-        if isinstance(frame, TSFrame):
-            framets = frame.buffers[0].t0
-            framete = frame.buffers[-1].end
-        elif isinstance(frame, EventFrame):
-            framets = next(iter(frame.events.values())).ts
-            framete = next(iter(frame.events.values())).te
-
-        latency = (time - framets) / 1_000_000_000
+        latency = (time - frame.start) / 1_000_000_000
 
         if self.interval is None:
             event_data = {
                 self.route: {
                     "time": [
-                        framets / 1_000_000_000,
+                        frame.start / 1_000_000_000,
                     ],
                     "data": [
                         latency,
@@ -74,7 +67,7 @@ class Latency(TransformElement):
                 event_data = {
                     self.route: {
                         "time": [
-                            framets / 1_000_000_000,
+                            frame.start / 1_000_000_000,
                         ],
                         "data": [
                             max(self.latencies),
@@ -84,9 +77,10 @@ class Latency(TransformElement):
                 self.latencies = []
                 self.last_time = time / 1e9
             else:
-                event_data = None
+                event_data = {}
 
+        event_buffer = EventBuffer.from_span(frame.start, frame.end, [event_data])
         return EventFrame(
-            events={"kafka": EventBuffer(ts=framets, te=framete, data=event_data)},
+            data=[event_buffer],
             EOS=frame.EOS,
         )

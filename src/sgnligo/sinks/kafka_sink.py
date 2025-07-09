@@ -115,21 +115,24 @@ class KafkaSink(SinkElement):
                     self.trigger_data[topic] = []
 
     def pull(self, pad, frame):
-        """Incoming frames are expected to be an EventFrame containing {"kafka":
-        EventBuffer}. The data in the EventBuffer are expected to in the format of
+        """Incoming frames are expected to be an EventFrame containing EventBuffers.
+        The data in the EventBuffer are expected to in the format of
         {topic: {"time": [t1, t2, ...], "data": [d1, d2, ...]}}
         """
-        events = frame["kafka"].data
-        if events is not None:
-            for topic, data in events.items():
-                if (
-                    self.time_series_topics is not None
-                    and topic in self.time_series_topics
-                ):
-                    self.time_series_data[topic]["time"].extend(data["time"])
-                    self.time_series_data[topic]["data"].extend(data["data"])
-                elif self.trigger_topics is not None and topic in self.trigger_topics:
-                    self.trigger_data[topic].extend(data)
+        for event_buffer in frame.data:
+            events = event_buffer.data
+            if events is not None and isinstance(events, dict):
+                for topic, data in events.items():
+                    if (
+                        self.time_series_topics is not None
+                        and topic in self.time_series_topics
+                    ):
+                        self.time_series_data[topic]["time"].extend(data["time"])
+                        self.time_series_data[topic]["data"].extend(data["data"])
+                    elif (
+                        self.trigger_topics is not None and topic in self.trigger_topics
+                    ):
+                        self.trigger_data[topic].extend(data)
 
         if frame.EOS:
             self.mark_eos(pad)

@@ -75,12 +75,7 @@ class HorizonDistanceTracker(TSTransform):
             data["n_samples"] = None
             data["epoch"] = metadata["epoch"]
 
-        if self.range is True:
-            events = {"kafka": EventBuffer(ts, te, data)}
-        else:
-            events = {"data": EventBuffer(ts, te, data)}
-
         return EventFrame(
-            events=events,
+            data=[EventBuffer.from_span(ts, te, data)],
             EOS=EOS,
         )

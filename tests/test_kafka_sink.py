@@ -5,29 +5,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 from lal import LIGOTimeGPS
+from sgnts.base import EventBuffer, EventFrame
 
 from sgnligo.sinks.kafka_sink import KafkaSink, LIGOJSONEncoder
-
-
-# Mock classes for testing
-class MockBuffer:
-    """Mock buffer with data attribute."""
-
-    def __init__(self, data):
-        self.data = data
-
-
-class MockFrame:
-    """Mock frame that supports dictionary-like access."""
-
-    def __init__(self, data=None, eos=False):
-        self.EOS = eos
-        self._buffers = {}
-        # Always create kafka buffer, even with None data
-        self._buffers["kafka"] = MockBuffer(data)
-
-    def __getitem__(self, key):
-        return self._buffers[key]
 
 
 class TestLIGOJSONEncoder:
@@ -251,14 +231,15 @@ class TestKafkaSinkPull:
             name="TestSink", sink_pad_names=["data"], time_series_topics=["channel1"]
         )
 
-        # Create mock frame
+        # Create EventFrame with EventBuffer
         frame_data = {
             "channel1": {
                 "time": [1, 2, 3],
                 "data": [10, 20, 30],
             }
         }
-        frame = MockFrame(data=frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
         sink.pull(pad, frame)
@@ -273,14 +254,15 @@ class TestKafkaSinkPull:
             name="TestSink", sink_pad_names=["data"], trigger_topics=["trigger1"]
         )
 
-        # Create mock frame
+        # Create EventFrame with EventBuffer
         frame_data = {
             "trigger1": [
                 {"time": 1, "snr": 10},
                 {"time": 2, "snr": 20},
             ]
         }
-        frame = MockFrame(data=frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
         sink.pull(pad, frame)
@@ -294,7 +276,8 @@ class TestKafkaSinkPull:
             name="TestSink", sink_pad_names=["data"], time_series_topics=["channel1"]
         )
 
-        frame = MockFrame(data=None)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, None)
+        frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
         sink.pull(pad, frame)  # Should not raise
@@ -309,7 +292,8 @@ class TestKafkaSinkPull:
             "unknown_topic": {"time": [1], "data": [10]},
             "known_topic": {"time": [2], "data": [20]},
         }
-        frame = MockFrame(data=frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
         sink.pull(pad, frame)
@@ -323,7 +307,8 @@ class TestKafkaSinkPull:
         sink = KafkaSink(name="TestSink", sink_pad_names=["data"])
         sink.mark_eos = Mock()
 
-        frame = MockFrame(data=None, eos=True)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, None)
+        frame = EventFrame(data=[event_buffer], EOS=True)
 
         pad = Mock()
         sink.pull(pad, frame)
@@ -432,7 +417,8 @@ class TestKafkaSinkIntegration:
                 "ts1": {"time": [1, 2], "data": [10, 20]},
                 "trig1": [{"snr": 15}],
             }
-            frame = MockFrame(data=frame_data)
+            event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+            frame = EventFrame(data=[event_buffer], EOS=False)
 
             pad = Mock()
             sink.pull(pad, frame)
@@ -448,7 +434,8 @@ class TestKafkaSinkIntegration:
             assert mock_client.write.call_count == 2  # One for each topic
 
             # Pull EOS frame
-            eos_frame = MockFrame(data=None, eos=True)
+            eos_event_buffer = EventBuffer.from_span(1000000000, 2000000000, None)
+            eos_frame = EventFrame(data=[eos_event_buffer], EOS=True)
             sink.pull(pad, eos_frame)
 
             # Internal at EOS
@@ -470,7 +457,8 @@ class TestKafkaSinkIntegration:
             "channel1": {"time": [1], "data": [10]},
             "trigger1": [{"snr": 20}],
         }
-        frame = MockFrame(data=frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
         sink.pull(pad, frame)
