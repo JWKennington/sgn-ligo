@@ -16,7 +16,6 @@ PATH_PSD = PATH_DATA / "H1L1-GSTLAL-MEDIAN.xml.gz"
 
 def build_pipeline(
     instrument: str,
-    whitening_method,
     sample_rate: int = 16384,
 ):
     pipeline = Pipeline()
@@ -37,7 +36,6 @@ def build_pipeline(
             input_sample_rate=sample_rate,
             whiten_sample_rate=2048,
             fft_length=4,
-            whitening_method=whitening_method,
             reference_psd=PATH_PSD.as_posix(),
             psd_pad_name="spectrum",
             whiten_pad_name="hoft",
@@ -75,7 +73,6 @@ class TestCondition:
         """Build the pipeline as a fixture"""
         return build_pipeline(
             instrument="H1",
-            whitening_method="gstlal",
             sample_rate=16384,
         )
 
