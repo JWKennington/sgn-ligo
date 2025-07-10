@@ -105,8 +105,6 @@ class Whiten(TSTransform):
     Args:
         instrument:
             str, instrument to process. Used if reference-psd is given
-        whitening-method:
-            str, currently supported types: 'gstlal'
         sample-rate:
             int, sample rate of the data
         fft-length:
@@ -129,7 +127,6 @@ class Whiten(TSTransform):
     instrument: Optional[str] = None
     psd_pad_name: str = ""
     whiten_pad_name: str = ""
-    whitening_method: str = "gstlal"
     input_sample_rate: int = 16384
     whiten_sample_rate: int = 2048
     fft_length: int = 8
@@ -170,81 +167,76 @@ class Whiten(TSTransform):
             self.adapter_config.stride, self.whiten_sample_rate
         )
 
-        assert self.whitening_method in [
-            "gstlal"
-        ], "whitening_method must be set to 'gstlal' (Currently only one supported)"
-
         super().__post_init__()
 
         self.latest_psd = None
         self.output_frames = {p: None for p in self.source_pads}
 
-        # set up for gstlal method:
-        if self.whitening_method == "gstlal":
-            # the offset of the first output buffer
-            self.first_output_offset = None
+        # set up for whitening:
+        # the offset of the first output buffer
+        self.first_output_offset = None
 
-            # keep track of number of instantaneous PSDs
-            # we have calculated up to navg
-            self.n_samples = 0
+        # keep track of number of instantaneous PSDs
+        # we have calculated up to navg
+        self.n_samples = 0
 
-            # set requested sampling rates
-            self.delta_f_whiten = 1 / (1 / self.whiten_sample_rate) / self.n_whiten
-            self.delta_t_whiten = 1 / self.whiten_sample_rate
-            self.lal_normalization_constant_whiten = 2 * self.delta_f_whiten
+        # set requested sampling rates
+        self.delta_f_whiten = 1 / (1 / self.whiten_sample_rate) / self.n_whiten
+        self.delta_t_whiten = 1 / self.whiten_sample_rate
+        self.lal_normalization_constant_whiten = 2 * self.delta_f_whiten
 
-            # store last nmed instantaneous PSDs
-            self.square_data_bufs = deque(maxlen=self.nmed)
-            self.prev_data = None
+        # store last nmed instantaneous PSDs
+        self.square_data_bufs = deque(maxlen=self.nmed)
+        self.prev_data = None
 
-            # initialize window functions
-            # we apply a hann window to incoming raw data
-            self.hann_input, self.hann_norm_input = self.hann_window(
-                self.n_input, self.z_input
+        # initialize window functions
+        # we apply a hann window to incoming raw data
+        self.hann_input, self.hann_norm_input = self.hann_window(
+            self.n_input, self.z_input
+        )
+        self.hann_whiten, self.hann_norm_whiten = self.hann_window(
+            self.n_whiten, self.z_whiten
+        )
+
+        # we apply a tukey window on whitened data if we have zero-padding
+        if self.z_whiten:
+            self.tukey = self.tukey_window(
+                self.n_whiten, 2 * self.z_whiten / self.n_whiten
             )
-            self.hann_whiten, self.hann_norm_whiten = self.hann_window(
-                self.n_whiten, self.z_whiten
+        else:
+            self.tukey = None
+
+        # load reference PSD if provided
+        if self.reference_psd:
+            psd = lal.series.read_psd_xmldoc(
+                ligolw_utils.load_filename(
+                    self.reference_psd,
+                    verbose=True,
+                    contenthandler=lal.series.PSDContentHandler,
+                )
             )
+            psd = psd[self.instrument]
 
-            # we apply a tukey window on whitened data if we have zero-padding
-            if self.z_whiten:
-                self.tukey = self.tukey_window(
-                    self.n_whiten, 2 * self.z_whiten / self.n_whiten
-                )
-            else:
-                self.tukey = None
+            # gstlal.condition
+            # def psd_units_or_resolution_changed(elem, pspec, psd):
+            # make sure units are set, compute scale factor
+            # FIXME: what is this units?
+            # units = lal.Unit(elem.get_property("psd-units"))
+            # if units == lal.DimensionlessUnit:
+            #    return
+            # scale = float(psd.sampleUnits / units)
+            scale = 1
 
-            # load reference PSD if provided
-            if self.reference_psd:
-                psd = lal.series.read_psd_xmldoc(
-                    ligolw_utils.load_filename(
-                        self.reference_psd,
-                        verbose=True,
-                        contenthandler=lal.series.PSDContentHandler,
-                    )
-                )
-                psd = psd[self.instrument]
+            # get frequency resolution and number of bins
+            fnyquist = self.whiten_sample_rate / 2
+            n = int(round(fnyquist / self.delta_f_whiten) + 1)
 
-                # gstlal.condition
-                # def psd_units_or_resolution_changed(elem, pspec, psd):
-                # make sure units are set, compute scale factor
-                # FIXME: what is this units?
-                # units = lal.Unit(elem.get_property("psd-units"))
-                # if units == lal.DimensionlessUnit:
-                #    return
-                # scale = float(psd.sampleUnits / units)
-                scale = 1
+            # interpolate and rescale PSD
+            psd = interpolate_psd(psd, self.delta_f_whiten)
+            ref_psd_data = psd.data.data[:n] * scale
 
-                # get frequency resolution and number of bins
-                fnyquist = self.whiten_sample_rate / 2
-                n = int(round(fnyquist / self.delta_f_whiten) + 1)
-
-                # interpolate and rescale PSD
-                psd = interpolate_psd(psd, self.delta_f_whiten)
-                ref_psd_data = psd.data.data[:n] * scale
-
-                # install PSD in buffer history
-                self.set_psd(ref_psd_data, self.navg)
+            # install PSD in buffer history
+            self.set_psd(ref_psd_data, self.navg)
 
     def tukey_window(self, length, beta):
         """
@@ -454,7 +446,6 @@ class Whiten(TSTransform):
             self.z_whiten, self.whiten_sample_rate
         )
 
-        # FIXME: haven't tested whether this works for gwpy method
         # FIXME: can we make this more general?
         if padded_data_offset < self.first_output_offset:
             # we are in the startup stage, don't output yet
@@ -495,87 +486,80 @@ class Whiten(TSTransform):
             buf = frame.buffers[0]
             this_seg_data = buf.data
 
-            if self.whitening_method == "gstlal":
-                if self.highpass_filter:
-                    sos = butter(
-                        4, 8, btype="highpass", fs=self.input_sample_rate, output="sos"
-                    )
-                    this_seg_data = sosfilt(sos, this_seg_data)
-                # apply the window function
-                this_seg_data = (
-                    self.hann_input[self.z_input : -self.z_input]
-                    * this_seg_data
-                    * 1
+            if self.highpass_filter:
+                sos = butter(
+                    4, 8, btype="highpass", fs=self.input_sample_rate, output="sos"
+                )
+                this_seg_data = sosfilt(sos, this_seg_data)
+            # apply the window function
+            this_seg_data = (
+                self.hann_input[self.z_input : -self.z_input]
+                * this_seg_data
+                * 1
+                / self.input_sample_rate
+                * self.hann_norm_input
+            )
+            this_seg_data = np.pad(this_seg_data, (self.z_input, self.z_input))
+
+            # apply fourier transform
+            freq_data = np.fft.rfft(this_seg_data)
+
+            # get frequency bins
+            freqs = np.fft.rfftfreq(this_seg_data.size, d=1 / self.input_sample_rate)
+
+            # downsampling
+            freq_data = freq_data[
+                : int(
+                    self.whiten_sample_rate
                     / self.input_sample_rate
-                    * self.hann_norm_input
+                    * freq_data.shape[-1]
                 )
-                this_seg_data = np.pad(this_seg_data, (self.z_input, self.z_input))
+                + 1
+            ]
 
-                # apply fourier transform
-                freq_data = np.fft.rfft(this_seg_data)
+            # get the latest PSD
+            this_psd = self.get_psd(freq_data)
+            # store the latest spectrum so we can output on spectrum pad
+            f0 = freqs[0]
+            self.latest_psd = lal.CreateREAL8FrequencySeries(
+                "new_psd",
+                psd_epoch / 1e9,
+                f0,
+                self.delta_f_whiten,
+                "s strain^2",
+                len(this_psd),
+            )
+            self.latest_psd.data.data = this_psd
 
-                # get frequency bins
-                freqs = np.fft.rfftfreq(
-                    this_seg_data.size, d=1 / self.input_sample_rate
-                )
+            # push freq data into psd history
+            self.add_psd(freq_data)
 
-                # downsampling
-                freq_data = freq_data[
-                    : int(
-                        self.whiten_sample_rate
-                        / self.input_sample_rate
-                        * freq_data.shape[-1]
-                    )
-                    + 1
-                ]
+            # Whitening
+            # the DC and Nyquist terms are zero
+            freq_data_whitened = np.zeros_like(freq_data)
+            freq_data_whitened[1:-1] = freq_data[1:-1] * np.sqrt(
+                self.lal_normalization_constant_whiten / this_psd[1:-1]
+            )
 
-                # get the latest PSD
-                this_psd = self.get_psd(freq_data)
+            # Fourier Transform back to the time domain
+            # # see arxiv: 1604.04324 (13)
+            # self.delta_f scaling https://lscsoft.docs.ligo.org/lalsuite/lal/
+            # _time_freq_f_f_t_8c_source.html#l00183
+            whitened_data = (
+                np.fft.irfft(freq_data_whitened, self.n_whiten, norm="forward")
+                * self.delta_f_whiten
+            )
+            whitened_data *= self.delta_t_whiten * np.sqrt(np.sum(self.hann_whiten**2))
 
-                # store the latest spectrum so we can output on spectrum pad
-                f0 = freqs[0]
-                self.latest_psd = lal.CreateREAL8FrequencySeries(
-                    "new_psd",
-                    psd_epoch / 1e9,
-                    f0,
-                    self.delta_f_whiten,
-                    "s strain^2",
-                    len(this_psd),
-                )
-                self.latest_psd.data.data = this_psd
+            if self.tukey is not None:
+                whitened_data *= self.tukey
 
-                # push freq data into psd history
-                self.add_psd(freq_data)
+            # accounts for overlap by summing with prev_data over the
+            # stride of the adapter
+            if self.prev_data is not None:
+                whitened_data[: self.prev_data.shape[-1]] += self.prev_data
+            self.prev_data = whitened_data[self.stride_samples :]
 
-                # Whitening
-                # the DC and Nyquist terms are zero
-                freq_data_whitened = np.zeros_like(freq_data)
-                freq_data_whitened[1:-1] = freq_data[1:-1] * np.sqrt(
-                    self.lal_normalization_constant_whiten / this_psd[1:-1]
-                )
-
-                # Fourier Transform back to the time domain
-                # # see arxiv: 1604.04324 (13)
-                # self.delta_f scaling https://lscsoft.docs.ligo.org/lalsuite/lal/
-                # _time_freq_f_f_t_8c_source.html#l00183
-                whitened_data = (
-                    np.fft.irfft(freq_data_whitened, self.n_whiten, norm="forward")
-                    * self.delta_f_whiten
-                )
-                whitened_data *= self.delta_t_whiten * np.sqrt(
-                    np.sum(self.hann_whiten**2)
-                )
-
-                if self.tukey is not None:
-                    whitened_data *= self.tukey
-
-                # accounts for overlap by summing with prev_data over the
-                # stride of the adapter
-                if self.prev_data is not None:
-                    whitened_data[: self.prev_data.shape[-1]] += self.prev_data
-                self.prev_data = whitened_data[self.stride_samples :]
-
-            # FIXME: haven't tested whether this works for gwpy method
             # FIXME: can we make this more general?
             # only output data up till the length of the adapter stride
             if padded_data_offset < self.first_output_offset:

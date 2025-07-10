@@ -54,13 +54,6 @@ def parse_command_line():
         "--channel-name", metavar="channel", help="Name of the data channel to analyze."
     )
     parser.add_option(
-        "--whitening-method",
-        metavar="algorithm",
-        default="gstlal",
-        help="Algorithm to use for whitening the data. Supported options are 'gwpy' or"
-        " 'gstlal'. Default is gstlal.",
-    )
-    parser.add_option(
         "--reference-psd",
         metavar="file",
         help="load the spectrum from this LIGO light-weight XML file (optional).",
@@ -89,10 +82,6 @@ def test_whitengraph(capsys):
 
     if not (options.gps_start_time and options.gps_end_time):
         raise ValueError("Must provide both --gps-start-time and --gps-end-time.")
-
-    # sanity check the whitening method given
-    if options.whitening_method not in ("gwpy", "gstlal"):
-        raise ValueError("Unknown whitening method, exiting.")
 
     if options.reference_psd is None:
         options.track_psd = True  # FIXME not implemented
@@ -141,7 +130,6 @@ def test_whitengraph(capsys):
             instrument=options.instrument,
             sample_rate=2048,
             fft_length=4,
-            whitening_method=options.whitening_method,
             reference_psd=options.reference_psd,
             psd_pad_name="spectrum",
             whiten_pad_name="hoft",

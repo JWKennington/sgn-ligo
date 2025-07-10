@@ -26,19 +26,16 @@ class ConditionInfo:
             int, the sample rate to perform the whitening
         psd_fft_length:
             int, the fft length for the psd calculation, in seconds
-        whitening_method:
-            str, the whitening method, can only be 'gstlal' right now
         ht_gate_threshold:
             float, the threshold above which to gate out data
         reference_psd:
             str, the filename for the reference psd used in the Whiten element
         track_psd:
-            bool, default True, whether to track psd in gstlal whitening method
+            bool, default True, whether to track psd
     """
 
     whiten_sample_rate: int = 2048
     psd_fft_length: int = 8
-    whitening_method: str = "gstlal"
     reference_psd: Optional[str] = None
     ht_gate_threshold: float = float("+inf")
     track_psd: bool = True
@@ -47,11 +44,6 @@ class ConditionInfo:
         self.validate()
 
     def validate(self):
-        if self.whitening_method not in ["gstlal"]:
-            raise ValueError(
-                "Whitening method must be 'gstlal' (only one supported right now)"
-            )
-
         if self.reference_psd is None and self.track_psd is False:
             raise ValueError("Must enable track_psd if reference_psd not provided")
 
@@ -59,13 +51,6 @@ class ConditionInfo:
     def append_options(parser: ArgumentParser):
         group = parser.add_argument_group(
             "PSD Options", "Adjust noise spectrum estimation parameters"
-        )
-        group.add_argument(
-            "--whitening-method",
-            metavar="algorithm",
-            default="gstlal",
-            help="Algorithm to use for whitening the data. Supported options are"
-            " only 'gstlal' currently. Default is gstlal.",
         )
         group.add_argument(
             "--psd-fft-length",
@@ -112,7 +97,6 @@ class ConditionInfo:
         return ConditionInfo(
             whiten_sample_rate=options.whiten_sample_rate,
             psd_fft_length=options.psd_fft_length,
-            whitening_method=options.whitening_method,
             reference_psd=options.reference_psd,
             ht_gate_threshold=options.ht_gate_threshold,
             track_psd=options.track_psd,
@@ -166,7 +150,6 @@ def condition(
                 input_sample_rate=input_sample_rate,
                 whiten_sample_rate=whiten_sample_rate,
                 fft_length=condition_info.psd_fft_length,
-                whitening_method=condition_info.whitening_method,
                 reference_psd=condition_info.reference_psd,
                 highpass_filter=highpass_filter,
             ),
