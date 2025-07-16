@@ -3,6 +3,7 @@
 
 from unittest.mock import Mock, patch
 
+import lal
 import numpy as np
 import pytest
 from sgn.apps import Pipeline
@@ -15,8 +16,6 @@ from sgnligo.sources.gwdata_noise_source import GWDataNoiseSource, parse_psd
 @pytest.fixture
 def mock_psd():
     """Create a mock PSD for testing."""
-    import lal
-
     psd = lal.CreateREAL8FrequencySeries(
         name="test_psd",
         epoch=lal.LIGOTimeGPS(0),
@@ -108,8 +107,6 @@ class TestParsePSD:
     @patch("sgnligo.sources.gwdata_noise_source.fake_gwdata_psd")
     def test_parse_psd_invalid_nyquist(self, mock_fake_psd, mock_kernel_class):
         """Test parse_psd with non-power-of-two Nyquist frequency."""
-        import lal
-
         bad_psd = lal.CreateREAL8FrequencySeries(
             name="bad_psd",
             epoch=lal.LIGOTimeGPS(0),

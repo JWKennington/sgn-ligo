@@ -375,7 +375,7 @@ class TestFrameSink:
 class TestFrameSinkCoverage:
     """Additional tests for full coverage of FrameSink"""
 
-    def test_frame_sink_circular_buffer_cleanup(self):
+    def test_frame_sink_circular_buffer_cleanup(self, tmp_path):
         """Test the circular buffer cleanup functionality directly"""
         from unittest.mock import patch
 
@@ -385,18 +385,17 @@ class TestFrameSinkCoverage:
             channels=("H1:TEST",),
             duration=1,
             max_files=2,
-            path=(
-                "/tmp/"  # noqa: S108
-                "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
+            path=str(
+                tmp_path / "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
             ),
         )
 
         # Manually populate the file cache with 4 files
         sink._file_cache = [
-            "/tmp/H1-TEST-1234567700-10.gwf",  # oldest - delete
-            "/tmp/H1-TEST-1234567750-10.gwf",  # second oldest - delete
-            "/tmp/H1-TEST-1234567785-10.gwf",  # third - keep
-            "/tmp/H1-TEST-1234567850-10.gwf",  # newest - keep
+            str(tmp_path / "H1-TEST-1234567700-10.gwf"),  # oldest - delete
+            str(tmp_path / "H1-TEST-1234567750-10.gwf"),  # second oldest - delete
+            str(tmp_path / "H1-TEST-1234567785-10.gwf"),  # third - keep
+            str(tmp_path / "H1-TEST-1234567850-10.gwf"),  # newest - keep
         ]
 
         # Mock os.path.exists to return True for all files
@@ -411,16 +410,16 @@ class TestFrameSinkCoverage:
                 # Should delete 2 oldest files to maintain max_files=2
                 assert mock_remove.call_count == 2
                 # Verify which files were deleted
-                mock_remove.assert_any_call("/tmp/H1-TEST-1234567700-10.gwf")
-                mock_remove.assert_any_call("/tmp/H1-TEST-1234567750-10.gwf")
+                mock_remove.assert_any_call(str(tmp_path / "H1-TEST-1234567700-10.gwf"))
+                mock_remove.assert_any_call(str(tmp_path / "H1-TEST-1234567750-10.gwf"))
                 # Should keep 2 newest files in cache
                 assert len(sink._file_cache) == 2
                 assert sink._file_cache == [
-                    "/tmp/H1-TEST-1234567785-10.gwf",
-                    "/tmp/H1-TEST-1234567850-10.gwf",
+                    str(tmp_path / "H1-TEST-1234567785-10.gwf"),
+                    str(tmp_path / "H1-TEST-1234567850-10.gwf"),
                 ]
 
-    def test_frame_sink_circular_buffer_error_handling(self):
+    def test_frame_sink_circular_buffer_error_handling(self, tmp_path):
         """Test circular buffer cleanup error handling"""
         from unittest.mock import patch
 
@@ -429,31 +428,30 @@ class TestFrameSinkCoverage:
             channels=("H1:TEST",),
             duration=1,
             max_files=1,  # Keep only 1 file
-            path=(
-                "/tmp/"  # noqa: S108
-                "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
+            path=str(
+                tmp_path / "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
             ),
         )
 
         # Populate cache with 2 files (one will be deleted)
         sink._file_cache = [
-            "/tmp/H1-TEST-1234567700-10.gwf",  # noqa: S108
-            "/tmp/H1-TEST-1234567750-10.gwf",  # noqa: S108
+            str(tmp_path / "H1-TEST-1234567700-10.gwf"),
+            str(tmp_path / "H1-TEST-1234567750-10.gwf"),
         ]
-        
+
         with patch("os.path.exists") as mock_exists:
             mock_exists.return_value = True
-            
+
             # Mock os.remove to raise an exception
             with patch("os.remove") as mock_remove:
                 mock_remove.side_effect = OSError("Permission denied")
 
                 # Should not raise, just log warning
                 sink._cleanup_old_frames()
-                
+
                 # Should keep only the newest file in cache
                 assert len(sink._file_cache) == 1
-                assert sink._file_cache == ["/tmp/H1-TEST-1234567750-10.gwf"]  # noqa: S108
+                assert sink._file_cache == [str(tmp_path / "H1-TEST-1234567750-10.gwf")]
 
     def test_frame_sink_hdf5_output(self):
         """Test frame sink with HDF5 output format"""
@@ -514,42 +512,23 @@ class TestFrameSinkCoverage:
                 duration=-1,
             )
 
-    def test_frame_sink_missing_path_params(self):
+    @pytest.mark.parametrize(
+        "path,missing_param",
+        [
+            ("test-{description}-{gps_start_time}-{duration}.gwf", "instruments"),
+            ("{instruments}-test-{gps_start_time}-{duration}.gwf", "description"),
+            ("{instruments}-{description}-test-{duration}.gwf", "gps_start_time"),
+            ("{instruments}-{description}-{gps_start_time}-test.gwf", "duration"),
+        ],
+    )
+    def test_frame_sink_missing_path_params(self, path, missing_param):
         """Test missing required path parameters"""
-        # Missing instruments
         with pytest.raises(ValueError, match="Path must contain parameter"):
             FrameSink(
                 name="test",
                 channels=("H1:TEST",),
                 duration=1,
-                path="test-{description}-{gps_start_time}-{duration}.gwf",
-            )
-
-        # Missing description
-        with pytest.raises(ValueError, match="Path must contain parameter"):
-            FrameSink(
-                name="test",
-                channels=("H1:TEST",),
-                duration=1,
-                path="{instruments}-test-{gps_start_time}-{duration}.gwf",
-            )
-
-        # Missing gps_start_time
-        with pytest.raises(ValueError, match="Path must contain parameter"):
-            FrameSink(
-                name="test",
-                channels=("H1:TEST",),
-                duration=1,
-                path="{instruments}-{description}-test-{duration}.gwf",
-            )
-
-        # Missing duration
-        with pytest.raises(ValueError, match="Path must contain parameter"):
-            FrameSink(
-                name="test",
-                channels=("H1:TEST",),
-                duration=1,
-                path="{instruments}-{description}-{gps_start_time}-test.gwf",
+                path=path,
             )
 
     def test_frame_sink_circular_buffer_disabled(self):
@@ -580,7 +559,7 @@ class TestFrameSinkCoverage:
         sink2._cleanup_old_frames()
         sink3._cleanup_old_frames()
 
-    def test_frame_sink_no_cleanup_when_under_limit(self):
+    def test_frame_sink_no_cleanup_when_under_limit(self, tmp_path):
         """Test that cleanup does nothing when file count is under the limit"""
         from unittest.mock import patch
 
@@ -593,15 +572,15 @@ class TestFrameSinkCoverage:
 
         # Populate cache with only 3 files (under the limit)
         sink._file_cache = [
-            "/tmp/H1-TEST-1.gwf",  # noqa: S108
-            "/tmp/H1-TEST-2.gwf",  # noqa: S108  
-            "/tmp/H1-TEST-3.gwf",  # noqa: S108
+            str(tmp_path / "H1-TEST-1.gwf"),
+            str(tmp_path / "H1-TEST-2.gwf"),
+            str(tmp_path / "H1-TEST-3.gwf"),
         ]
 
         with patch("os.remove") as mock_remove:
             # Call cleanup
             sink._cleanup_old_frames()
-            
+
             # Should not delete anything since we're under the limit
             mock_remove.assert_not_called()
             # Cache should remain unchanged

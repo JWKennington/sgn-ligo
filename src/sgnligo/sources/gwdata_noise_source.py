@@ -16,6 +16,7 @@ import numpy
 from scipy import signal
 from sgn.base import SourcePad
 from sgnts.base import Offset, TSFrame, TSSource
+from sgnts.base.time import Time
 
 from sgnligo.base import now
 from sgnligo.kernels import PSDFirKernel
@@ -206,7 +207,7 @@ class GWDataNoiseSource(TSSource):
 
             # Calculate how much data time has been generated
             # current_end is in nanoseconds, convert to seconds
-            current_gps_end = self.current_end / 1e9
+            current_gps_end = self.current_end / Time.SECONDS
             data_time_elapsed = current_gps_end - self._start_gps_time
 
             # Calculate how much wall time has elapsed

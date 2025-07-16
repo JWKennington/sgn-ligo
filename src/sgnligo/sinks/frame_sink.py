@@ -132,7 +132,7 @@ class FrameSink(TSSink):
 
         LOGGER.info("Writing file %s...", outpath)
         tsd.write(outpath)
-        
+
         # Add to file cache and check if cleanup is needed
         if self.max_files is not None:
             self._file_cache.append(str(outpath))
@@ -210,7 +210,7 @@ class FrameSink(TSSink):
         # Calculate how many files to delete
         files_to_delete = len(self._file_cache) - self.max_files
         deleted_count = 0
-        
+
         # Delete the oldest files (from the beginning of the list)
         for i in range(files_to_delete):
             filepath = self._file_cache[i]
@@ -221,10 +221,10 @@ class FrameSink(TSSink):
                     LOGGER.debug("Deleted old frame file: %s", filepath)
             except Exception as e:
                 LOGGER.warning("Error deleting file %s", filepath, exc_info=e)
-        
+
         # Remove deleted files from cache (keep only the most recent max_files)
-        self._file_cache = self._file_cache[-self.max_files:]
-        
+        self._file_cache = self._file_cache[-self.max_files :]
+
         if deleted_count > 0:
             LOGGER.info(
                 "Circular buffer cleanup: deleted %d old frame files", deleted_count
