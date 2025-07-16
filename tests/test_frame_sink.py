@@ -379,50 +379,46 @@ class TestFrameSinkCoverage:
         """Test the circular buffer cleanup functionality directly"""
         from unittest.mock import patch
 
-        # Create a FrameSink with circular buffer
+        # Create a FrameSink with circular buffer limited to 2 files
         sink = FrameSink(
             name="test_sink",
             channels=("H1:TEST",),
             duration=1,
-            history_seconds=100,
-            cleanup_interval=60,
+            max_files=2,
             path=(
                 "/tmp/"  # noqa: S108
                 "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
             ),
         )
 
-        # Mock the now() function to return a specific GPS time
-        with patch("sgnligo.base.utils.now") as mock_now:
-            mock_now.return_value = 1234567890.0
+        # Manually populate the file cache with 4 files
+        sink._file_cache = [
+            "/tmp/H1-TEST-1234567700-10.gwf",  # oldest - delete
+            "/tmp/H1-TEST-1234567750-10.gwf",  # second oldest - delete
+            "/tmp/H1-TEST-1234567785-10.gwf",  # third - keep
+            "/tmp/H1-TEST-1234567850-10.gwf",  # newest - keep
+        ]
 
-            # Mock glob.glob to return test files
-            with patch("glob.glob") as mock_glob:
-                # Files with frame end time = start + duration
-                # Current time is 1234567890, history is 100s, so cutoff is 1234567790
-                # Files ending before 1234567790 should be deleted
-                test_files = [
-                    # ends at 1234567710 < 1234567790 (delete)
-                    "/tmp/H1-TEST-1234567700-10.gwf",  # noqa: S108
-                    # ends at 1234567760 < 1234567790 (delete)
-                    "/tmp/H1-TEST-1234567750-10.gwf",  # noqa: S108
-                    # ends at 1234567795 > 1234567790 (keep)
-                    "/tmp/H1-TEST-1234567785-10.gwf",  # noqa: S108
-                    # ends at 1234567860 > 1234567790 (keep)
-                    "/tmp/H1-TEST-1234567850-10.gwf",  # noqa: S108
-                    # Invalid format (skip)
-                    "/tmp/H1-TEST-invalid-name.gwf",  # noqa: S108
+        # Mock os.path.exists to return True for all files
+        with patch("os.path.exists") as mock_exists:
+            mock_exists.return_value = True
+
+            # Mock os.remove
+            with patch("os.remove") as mock_remove:
+                # Call cleanup
+                sink._cleanup_old_frames()
+
+                # Should delete 2 oldest files to maintain max_files=2
+                assert mock_remove.call_count == 2
+                # Verify which files were deleted
+                mock_remove.assert_any_call("/tmp/H1-TEST-1234567700-10.gwf")
+                mock_remove.assert_any_call("/tmp/H1-TEST-1234567750-10.gwf")
+                # Should keep 2 newest files in cache
+                assert len(sink._file_cache) == 2
+                assert sink._file_cache == [
+                    "/tmp/H1-TEST-1234567785-10.gwf",
+                    "/tmp/H1-TEST-1234567850-10.gwf",
                 ]
-                mock_glob.return_value = test_files
-
-                # Mock os.remove
-                with patch("os.remove") as mock_remove:
-                    # Call cleanup
-                    sink._cleanup_old_frames()
-
-                    # The cleanup function is being called and is deleting files
-                    # Just verify that os.remove was called
-                    assert mock_remove.call_count > 0
 
     def test_frame_sink_circular_buffer_error_handling(self):
         """Test circular buffer cleanup error handling"""
@@ -432,27 +428,32 @@ class TestFrameSinkCoverage:
             name="test_sink",
             channels=("H1:TEST",),
             duration=1,
-            history_seconds=100,
+            max_files=1,  # Keep only 1 file
             path=(
                 "/tmp/"  # noqa: S108
                 "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
             ),
         )
 
-        with patch("sgnligo.base.utils.now") as mock_now:
-            mock_now.return_value = 1234567890.0
+        # Populate cache with 2 files (one will be deleted)
+        sink._file_cache = [
+            "/tmp/H1-TEST-1234567700-10.gwf",  # noqa: S108
+            "/tmp/H1-TEST-1234567750-10.gwf",  # noqa: S108
+        ]
+        
+        with patch("os.path.exists") as mock_exists:
+            mock_exists.return_value = True
+            
+            # Mock os.remove to raise an exception
+            with patch("os.remove") as mock_remove:
+                mock_remove.side_effect = OSError("Permission denied")
 
-            with patch("glob.glob") as mock_glob:
-                mock_glob.return_value = [
-                    "/tmp/H1-TEST-1234567700-10.gwf"  # noqa: S108
-                ]
-
-                # Mock os.remove to raise an exception
-                with patch("os.remove") as mock_remove:
-                    mock_remove.side_effect = OSError("Permission denied")
-
-                    # Should not raise, just log warning
-                    sink._cleanup_old_frames()
+                # Should not raise, just log warning
+                sink._cleanup_old_frames()
+                
+                # Should keep only the newest file in cache
+                assert len(sink._file_cache) == 1
+                assert sink._file_cache == ["/tmp/H1-TEST-1234567750-10.gwf"]  # noqa: S108
 
     def test_frame_sink_hdf5_output(self):
         """Test frame sink with HDF5 output format"""
@@ -552,26 +553,26 @@ class TestFrameSinkCoverage:
             )
 
     def test_frame_sink_circular_buffer_disabled(self):
-        """Test that cleanup returns early when history_seconds is None or <= 0"""
+        """Test that cleanup returns early when max_files is None or <= 0"""
         sink1 = FrameSink(
             name="test_sink1",
             channels=("H1:TEST",),
             duration=1,
-            history_seconds=None,
+            max_files=None,
         )
 
         sink2 = FrameSink(
             name="test_sink2",
             channels=("H1:TEST",),
             duration=1,
-            history_seconds=0,
+            max_files=0,
         )
 
         sink3 = FrameSink(
             name="test_sink3",
             channels=("H1:TEST",),
             duration=1,
-            history_seconds=-10,
+            max_files=-10,
         )
 
         # These should all return without doing anything
@@ -579,62 +580,29 @@ class TestFrameSinkCoverage:
         sink2._cleanup_old_frames()
         sink3._cleanup_old_frames()
 
-    def test_frame_sink_cleanup_timing(self):
-        """Test that cleanup is called based on timing"""
+    def test_frame_sink_no_cleanup_when_under_limit(self):
+        """Test that cleanup does nothing when file count is under the limit"""
         from unittest.mock import patch
 
         sink = FrameSink(
             name="test_sink",
             channels=("H1:TEST",),
             duration=1,
-            history_seconds=10,
-            cleanup_interval=5,  # 5 second interval
+            max_files=5,  # Allow up to 5 files
         )
 
-        # Test the cleanup timing logic directly
-        # Initialize last cleanup time
-        sink._last_cleanup = None
+        # Populate cache with only 3 files (under the limit)
+        sink._file_cache = [
+            "/tmp/H1-TEST-1.gwf",  # noqa: S108
+            "/tmp/H1-TEST-2.gwf",  # noqa: S108  
+            "/tmp/H1-TEST-3.gwf",  # noqa: S108
+        ]
 
-        # Mock time.time() to control timing
-        with patch("time.time") as mock_time:
-            # First call - should trigger cleanup (no previous cleanup)
-            mock_time.return_value = 100.0
-            with patch.object(sink, "_cleanup_old_frames") as mock_cleanup:
-                # Call the cleanup check logic directly
-                if sink.history_seconds and sink.history_seconds > 0:
-                    current_time = mock_time.return_value
-                    if (
-                        sink._last_cleanup is None
-                        or (current_time - sink._last_cleanup) >= sink.cleanup_interval
-                    ):
-                        sink._cleanup_old_frames()
-                        sink._last_cleanup = current_time
-                mock_cleanup.assert_called_once()
-
-            # Second call - within interval, no cleanup
-            mock_time.return_value = 102.0  # Only 2 seconds later
-            with patch.object(sink, "_cleanup_old_frames") as mock_cleanup:
-                # Call the cleanup check logic directly
-                if sink.history_seconds and sink.history_seconds > 0:
-                    current_time = mock_time.return_value
-                    if (
-                        sink._last_cleanup is None
-                        or (current_time - sink._last_cleanup) >= sink.cleanup_interval
-                    ):
-                        sink._cleanup_old_frames()
-                        sink._last_cleanup = current_time
-                mock_cleanup.assert_not_called()
-
-            # Third call - after interval, cleanup again
-            mock_time.return_value = 106.0  # 6 seconds later
-            with patch.object(sink, "_cleanup_old_frames") as mock_cleanup:
-                # Call the cleanup check logic directly
-                if sink.history_seconds and sink.history_seconds > 0:
-                    current_time = mock_time.return_value
-                    if (
-                        sink._last_cleanup is None
-                        or (current_time - sink._last_cleanup) >= sink.cleanup_interval
-                    ):
-                        sink._cleanup_old_frames()
-                        sink._last_cleanup = current_time
-                mock_cleanup.assert_called_once()
+        with patch("os.remove") as mock_remove:
+            # Call cleanup
+            sink._cleanup_old_frames()
+            
+            # Should not delete anything since we're under the limit
+            mock_remove.assert_not_called()
+            # Cache should remain unchanged
+            assert len(sink._file_cache) == 3

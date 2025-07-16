@@ -6,9 +6,7 @@ The formatting is done using the gwpy library.
 
 from __future__ import annotations
 
-import glob
 import os
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Sequence
@@ -52,13 +50,10 @@ class FrameSink(TSSink):
             bool, whether to overwrite existing files. Default: False
         description:
             str, description string to include in the filename. Default: "SGN"
-        history_seconds:
+        max_files:
             int or None, when set to a positive value, enables circular buffer
-            mode that automatically deletes frame files older than this many
-            seconds. Default: None (disabled)
-        cleanup_interval:
-            int, how often (in seconds) to check for old files to delete when
-            circular buffer mode is enabled. Default: 300
+            mode that keeps only the N most recent frame files. Older files
+            are automatically deleted. Default: None (disabled)
 
     This sink element automatically creates an AdapterConfig for
     buffering the data needed to create frames of the requested
@@ -72,8 +67,7 @@ class FrameSink(TSSink):
     path: str = "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
     force: bool = False
     description: str = "SGN"
-    history_seconds: Optional[int] = None
-    cleanup_interval: int = 300
+    max_files: Optional[int] = None
 
     def __post_init__(self):
         """Post init for setting up the FrameSink"""
@@ -108,7 +102,8 @@ class FrameSink(TSSink):
         )
 
         # Initialize circular buffer tracking
-        self._last_cleanup_time = None
+        # Cache of created files: list of filepaths in order of creation
+        self._file_cache = []
 
     def _write_tsd(self, tsd):
         """Write a gwf file using the gwpy library"""
@@ -137,16 +132,11 @@ class FrameSink(TSSink):
 
         LOGGER.info("Writing file %s...", outpath)
         tsd.write(outpath)
-
-        # Check if circular buffer cleanup is needed
-        if self.history_seconds is not None:
-            current_time = time.time()
-            if (
-                self._last_cleanup_time is None
-                or current_time - self._last_cleanup_time >= self.cleanup_interval
-            ):
-                self._cleanup_old_frames()
-                self._last_cleanup_time = current_time
+        
+        # Add to file cache and check if cleanup is needed
+        if self.max_files is not None:
+            self._file_cache.append(str(outpath))
+            self._cleanup_old_frames()
 
     def internal(self):
         """Internal method, checks if sufficient data is present in the audioadapters to
@@ -209,66 +199,33 @@ class FrameSink(TSSink):
         self._write_tsd(tsd)
 
     def _cleanup_old_frames(self):
-        """Clean up old frame files beyond the history window"""
-        if self.history_seconds is None or self.history_seconds <= 0:
+        """Clean up old frame files to maintain max_files limit"""
+        if self.max_files is None or self.max_files <= 0:
             return
 
-        # Get current GPS time
-        from sgnligo.base import now
+        # Check if we have more files than the limit
+        if len(self._file_cache) <= self.max_files:
+            return
 
-        current_gps_time = float(now())
-
-        # Get the directory from the path template
-        path_dir = os.path.dirname(self.path)
-        if not path_dir:
-            path_dir = "."
-
-        # Create a pattern to match frame files
-        # Replace format placeholders with wildcards
-        filename_pattern = os.path.basename(self.path)
-        for param in FILENAME_PARAMS:
-            filename_pattern = filename_pattern.replace(f"{{{param}}}", "*")
-
-        pattern = os.path.join(path_dir, filename_pattern)
-
-        # Find all matching frame files
-        frame_files = glob.glob(pattern)
-
+        # Calculate how many files to delete
+        files_to_delete = len(self._file_cache) - self.max_files
         deleted_count = 0
-        for filepath in frame_files:
+        
+        # Delete the oldest files (from the beginning of the list)
+        for i in range(files_to_delete):
+            filepath = self._file_cache[i]
             try:
-                # Extract GPS time and duration from filename
-                basename = os.path.basename(filepath)
-
-                # Try to parse GPS time and duration from filename
-                # Assuming format like "H1-SGN-1234567890-32.gwf"
-                parts = basename.split("-")
-                if len(parts) >= 4:
-                    try:
-                        gps_start = float(parts[-2])
-                        duration_str = parts[-1].split(".")[0]
-                        frame_duration = float(duration_str)
-
-                        # Calculate when this frame ends
-                        frame_end_time = gps_start + frame_duration
-
-                        # Delete if frame is older than history window
-                        if frame_end_time < (current_gps_time - self.history_seconds):
-                            os.remove(filepath)
-                            deleted_count += 1
-                            LOGGER.debug("Deleted old frame file: %s", filepath)
-                    except (ValueError, IndexError):
-                        # Skip files that don't match expected format
-                        continue
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    deleted_count += 1
+                    LOGGER.debug("Deleted old frame file: %s", filepath)
             except Exception as e:
-                LOGGER.warning("Error processing file %s", filepath, exc_info=e)
-
+                LOGGER.warning("Error deleting file %s", filepath, exc_info=e)
+        
+        # Remove deleted files from cache (keep only the most recent max_files)
+        self._file_cache = self._file_cache[-self.max_files:]
+        
         if deleted_count > 0:
             LOGGER.info(
                 "Circular buffer cleanup: deleted %d old frame files", deleted_count
-            )
-        elif len(frame_files) > 0:
-            LOGGER.debug(
-                "Circular buffer cleanup: checked %d files, none old enough to delete",
-                len(frame_files),
             )
