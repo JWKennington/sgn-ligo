@@ -134,9 +134,6 @@ class GWDataNoiseSource(TSSource):
                 rate=info["rate"],
             )
 
-        # Initialize current_end attribute
-        self._current_end = 0.0
-
         # Initialize real-time tracking
         if self.real_time:
             self._start_wall_time = time.time()
@@ -198,9 +195,6 @@ class GWDataNoiseSource(TSSource):
         # Set the data in the buffer
         buffer.set_data(noise_chunk)
 
-        # Store the current end time of the frame
-        self._current_end = frame.end
-
         return frame
 
     def internal(self) -> None:
@@ -209,12 +203,11 @@ class GWDataNoiseSource(TSSource):
 
         if self.real_time:
             # In real-time mode, ensure that wall time elapsed matches data time elapsed
-            from sgnts.base.time import Time
 
             # Calculate how much data time has been generated
-            data_time_elapsed = (
-                self._current_end - self._start_gps_time * Time.SECONDS
-            ) / Time.SECONDS
+            # current_end is in nanoseconds, convert to seconds
+            current_gps_end = self.current_end / 1e9
+            data_time_elapsed = current_gps_end - self._start_gps_time
 
             # Calculate how much wall time has elapsed
             wall_time_elapsed = time.time() - self._start_wall_time
