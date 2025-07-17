@@ -1,11 +1,16 @@
-"""This module contains the FrameSink class,
-which writes time series data to .gwf files.
+"""This module contains the FrameSink class.
+
+Writes time series data to .gwf files.
 The formatting is done using the gwpy library.
 """
 
+from __future__ import annotations
+
+import os
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 from gwpy.timeseries import TimeSeries, TimeSeriesDict
 from sgn.base import get_sgn_logger
@@ -36,11 +41,20 @@ class FrameSink(TSSink):
             must contain the following format parameters (in curly braces):
             - {instruments}, the sorted list of instruments inferred from
                 the included channel names (e.g. "H1" for "H1:GDS-CAL...")
+            - {description}, the description string for the frame
             - {gps_start_time}, the start time of the data in GPS seconds
             - {duration}, the duration of the data in seconds
             The extension on the the path determines the output file
             type.  Currently ".gwf" and ".hdf5" are supported.
-            default: "{instruments}-{gps_start_time}-{duration}.gwf"
+            default: "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
+        force:
+            bool, whether to overwrite existing files. Default: False
+        description:
+            str, description string to include in the filename. Default: "SGN"
+        max_files:
+            int or None, when set to a positive value, enables circular buffer
+            mode that keeps only the N most recent frame files. Older files
+            are automatically deleted. Default: None (disabled)
 
     This sink element automatically creates an AdapterConfig for
     buffering the data needed to create frames of the requested
@@ -54,6 +68,7 @@ class FrameSink(TSSink):
     path: str = "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
     force: bool = False
     description: str = "SGN"
+    max_files: Optional[int] = None
 
     def __post_init__(self):
         """Post init for setting up the FrameSink"""
@@ -87,6 +102,10 @@ class FrameSink(TSSink):
             sorted({chan.split(":")[0] for chan in self.channels})
         )
 
+        # Initialize circular buffer tracking
+        # Cache of created files: deque of filepaths in order of creation
+        self._file_cache = deque()
+
     def _write_tsd(self, tsd):
         """Write a gwf file using the gwpy library"""
         span = tsd.span
@@ -114,6 +133,11 @@ class FrameSink(TSSink):
 
         LOGGER.info("Writing file %s...", outpath)
         tsd.write(outpath)
+
+        # Add to file cache and check if cleanup is needed
+        if self.max_files is not None:
+            self._file_cache.append(str(outpath))
+            self._cleanup_old_frames()
 
     def internal(self):
         """Internal method, checks if sufficient data is present in the audioadapters to
@@ -174,3 +198,26 @@ class FrameSink(TSSink):
             tsd[name] = ts
 
         self._write_tsd(tsd)
+
+    def _cleanup_old_frames(self):
+        """Clean up old frame files to maintain max_files limit"""
+        if self.max_files is None or self.max_files <= 0:
+            return
+
+        deleted_count = 0
+
+        # Delete oldest files until we're within the limit
+        while len(self._file_cache) > self.max_files:
+            filepath = self._file_cache.popleft()
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    deleted_count += 1
+                    LOGGER.debug("Deleted old frame file: %s", filepath)
+            except Exception as e:
+                LOGGER.warning("Error deleting file %s", filepath, exc_info=e)
+
+        if deleted_count > 0:
+            LOGGER.info(
+                "Circular buffer cleanup: deleted %d old frame files", deleted_count
+            )
