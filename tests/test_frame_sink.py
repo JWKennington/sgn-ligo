@@ -377,6 +377,7 @@ class TestFrameSinkCoverage:
 
     def test_frame_sink_circular_buffer_cleanup(self, tmp_path):
         """Test the circular buffer cleanup functionality directly"""
+        from collections import deque
         from unittest.mock import patch
 
         # Create a FrameSink with circular buffer limited to 2 files
@@ -391,12 +392,14 @@ class TestFrameSinkCoverage:
         )
 
         # Manually populate the file cache with 4 files
-        sink._file_cache = [
-            str(tmp_path / "H1-TEST-1234567700-10.gwf"),  # oldest - delete
-            str(tmp_path / "H1-TEST-1234567750-10.gwf"),  # second oldest - delete
-            str(tmp_path / "H1-TEST-1234567785-10.gwf"),  # third - keep
-            str(tmp_path / "H1-TEST-1234567850-10.gwf"),  # newest - keep
-        ]
+        sink._file_cache = deque(
+            [
+                str(tmp_path / "H1-TEST-1234567700-10.gwf"),  # oldest - delete
+                str(tmp_path / "H1-TEST-1234567750-10.gwf"),  # second oldest - delete
+                str(tmp_path / "H1-TEST-1234567785-10.gwf"),  # third - keep
+                str(tmp_path / "H1-TEST-1234567850-10.gwf"),  # newest - keep
+            ]
+        )
 
         # Mock os.path.exists to return True for all files
         with patch("os.path.exists") as mock_exists:
@@ -414,13 +417,14 @@ class TestFrameSinkCoverage:
                 mock_remove.assert_any_call(str(tmp_path / "H1-TEST-1234567750-10.gwf"))
                 # Should keep 2 newest files in cache
                 assert len(sink._file_cache) == 2
-                assert sink._file_cache == [
+                assert list(sink._file_cache) == [
                     str(tmp_path / "H1-TEST-1234567785-10.gwf"),
                     str(tmp_path / "H1-TEST-1234567850-10.gwf"),
                 ]
 
     def test_frame_sink_circular_buffer_error_handling(self, tmp_path):
         """Test circular buffer cleanup error handling"""
+        from collections import deque
         from unittest.mock import patch
 
         sink = FrameSink(
@@ -434,10 +438,12 @@ class TestFrameSinkCoverage:
         )
 
         # Populate cache with 2 files (one will be deleted)
-        sink._file_cache = [
-            str(tmp_path / "H1-TEST-1234567700-10.gwf"),
-            str(tmp_path / "H1-TEST-1234567750-10.gwf"),
-        ]
+        sink._file_cache = deque(
+            [
+                str(tmp_path / "H1-TEST-1234567700-10.gwf"),
+                str(tmp_path / "H1-TEST-1234567750-10.gwf"),
+            ]
+        )
 
         with patch("os.path.exists") as mock_exists:
             mock_exists.return_value = True
@@ -451,7 +457,9 @@ class TestFrameSinkCoverage:
 
                 # Should keep only the newest file in cache
                 assert len(sink._file_cache) == 1
-                assert sink._file_cache == [str(tmp_path / "H1-TEST-1234567750-10.gwf")]
+                assert list(sink._file_cache) == [
+                    str(tmp_path / "H1-TEST-1234567750-10.gwf")
+                ]
 
     def test_frame_sink_hdf5_output(self):
         """Test frame sink with HDF5 output format"""
@@ -561,6 +569,7 @@ class TestFrameSinkCoverage:
 
     def test_frame_sink_no_cleanup_when_under_limit(self, tmp_path):
         """Test that cleanup does nothing when file count is under the limit"""
+        from collections import deque
         from unittest.mock import patch
 
         sink = FrameSink(
@@ -571,11 +580,13 @@ class TestFrameSinkCoverage:
         )
 
         # Populate cache with only 3 files (under the limit)
-        sink._file_cache = [
-            str(tmp_path / "H1-TEST-1.gwf"),
-            str(tmp_path / "H1-TEST-2.gwf"),
-            str(tmp_path / "H1-TEST-3.gwf"),
-        ]
+        sink._file_cache = deque(
+            [
+                str(tmp_path / "H1-TEST-1.gwf"),
+                str(tmp_path / "H1-TEST-2.gwf"),
+                str(tmp_path / "H1-TEST-3.gwf"),
+            ]
+        )
 
         with patch("os.remove") as mock_remove:
             # Call cleanup

@@ -7,6 +7,7 @@ The formatting is done using the gwpy library.
 from __future__ import annotations
 
 import os
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Sequence
@@ -102,8 +103,8 @@ class FrameSink(TSSink):
         )
 
         # Initialize circular buffer tracking
-        # Cache of created files: list of filepaths in order of creation
-        self._file_cache = []
+        # Cache of created files: deque of filepaths in order of creation
+        self._file_cache = deque()
 
     def _write_tsd(self, tsd):
         """Write a gwf file using the gwpy library"""
@@ -203,17 +204,11 @@ class FrameSink(TSSink):
         if self.max_files is None or self.max_files <= 0:
             return
 
-        # Check if we have more files than the limit
-        if len(self._file_cache) <= self.max_files:
-            return
-
-        # Calculate how many files to delete
-        files_to_delete = len(self._file_cache) - self.max_files
         deleted_count = 0
 
-        # Delete the oldest files (from the beginning of the list)
-        for i in range(files_to_delete):
-            filepath = self._file_cache[i]
+        # Delete oldest files until we're within the limit
+        while len(self._file_cache) > self.max_files:
+            filepath = self._file_cache.popleft()
             try:
                 if os.path.exists(filepath):
                     os.remove(filepath)
@@ -221,9 +216,6 @@ class FrameSink(TSSink):
                     LOGGER.debug("Deleted old frame file: %s", filepath)
             except Exception as e:
                 LOGGER.warning("Error deleting file %s", filepath, exc_info=e)
-
-        # Remove deleted files from cache (keep only the most recent max_files)
-        self._file_cache = self._file_cache[-self.max_files :]
 
         if deleted_count > 0:
             LOGGER.info(
