@@ -199,7 +199,23 @@ class TestGenerateFakeFrames:
         mock_pipe_instance = Mock()
         mock_pipeline.return_value = mock_pipe_instance
 
-        generate_fake_frames(options, segments, values)
+        generate_fake_frames(
+            state_channel=options.state_channel,
+            strain_channel=options.strain_channel,
+            state_sample_rate=options.state_sample_rate,
+            strain_sample_rate=options.strain_sample_rate,
+            frame_duration=options.frame_duration,
+            gps_start_time=options.gps_start_time,
+            gps_end_time=options.gps_end_time,
+            output_path=options.output_path,
+            description=options.description,
+            segments=segments,
+            values=values,
+            verbose=options.verbose,
+            real_time=options.real_time,
+            history=options.history,
+            cleanup_interval=options.cleanup_interval,
+        )
 
         # Check pipeline was created and run
         mock_pipeline.assert_called_once()
@@ -244,7 +260,23 @@ class TestGenerateFakeFrames:
         mock_sink_instance = Mock()
         mock_frame_sink.return_value = mock_sink_instance
 
-        generate_fake_frames(options, segments, values)
+        generate_fake_frames(
+            state_channel=options.state_channel,
+            strain_channel=options.strain_channel,
+            state_sample_rate=options.state_sample_rate,
+            strain_sample_rate=options.strain_sample_rate,
+            frame_duration=options.frame_duration,
+            gps_start_time=options.gps_start_time,
+            gps_end_time=options.gps_end_time,
+            output_path=options.output_path,
+            description=options.description,
+            segments=segments,
+            values=values,
+            verbose=options.verbose,
+            real_time=options.real_time,
+            history=options.history,
+            cleanup_interval=options.cleanup_interval,
+        )
 
         # Check components were created with correct parameters
         mock_segment_source.assert_called_once()
@@ -295,7 +327,23 @@ class TestGenerateFakeFrames:
         mock_resampler_instance = Mock()
         mock_resampler.return_value = mock_resampler_instance
 
-        generate_fake_frames(options, segments, values)
+        generate_fake_frames(
+            state_channel=options.state_channel,
+            strain_channel=options.strain_channel,
+            state_sample_rate=options.state_sample_rate,
+            strain_sample_rate=options.strain_sample_rate,
+            frame_duration=options.frame_duration,
+            gps_start_time=options.gps_start_time,
+            gps_end_time=options.gps_end_time,
+            output_path=options.output_path,
+            description=options.description,
+            segments=segments,
+            values=values,
+            verbose=options.verbose,
+            real_time=options.real_time,
+            history=options.history,
+            cleanup_interval=options.cleanup_interval,
+        )
 
         # Check resampler was created
         mock_resampler.assert_called_once()
@@ -329,7 +377,23 @@ class TestGenerateFakeFrames:
         mock_pipe_instance = Mock()
         mock_pipeline.return_value = mock_pipe_instance
 
-        generate_fake_frames(options, segments, values)
+        generate_fake_frames(
+            state_channel=options.state_channel,
+            strain_channel=options.strain_channel,
+            state_sample_rate=options.state_sample_rate,
+            strain_sample_rate=options.strain_sample_rate,
+            frame_duration=options.frame_duration,
+            gps_start_time=options.gps_start_time,
+            gps_end_time=options.gps_end_time,
+            output_path=options.output_path,
+            description=options.description,
+            segments=segments,
+            values=values,
+            verbose=options.verbose,
+            real_time=options.real_time,
+            history=options.history,
+            cleanup_interval=options.cleanup_interval,
+        )
 
         captured = capsys.readouterr()
         assert "Creating pipeline with:" in captured.out
@@ -370,7 +434,23 @@ class TestGenerateFakeFrames:
         mock_pipe_instance = Mock()
         mock_pipeline.return_value = mock_pipe_instance
 
-        generate_fake_frames(options, segments, values)
+        generate_fake_frames(
+            state_channel=options.state_channel,
+            strain_channel=options.strain_channel,
+            state_sample_rate=options.state_sample_rate,
+            strain_sample_rate=options.strain_sample_rate,
+            frame_duration=options.frame_duration,
+            gps_start_time=options.gps_start_time,
+            gps_end_time=options.gps_end_time,
+            output_path=options.output_path,
+            description=options.description,
+            segments=segments,
+            values=values,
+            verbose=options.verbose,
+            real_time=options.real_time,
+            history=options.history,
+            cleanup_interval=options.cleanup_interval,
+        )
 
         captured = capsys.readouterr()
         assert "Real-time mode: will run indefinitely" in captured.out
@@ -406,7 +486,23 @@ class TestGenerateFakeFrames:
         mock_pipe_instance = Mock()
         mock_pipeline.return_value = mock_pipe_instance
 
-        generate_fake_frames(options, segments, values)
+        generate_fake_frames(
+            state_channel=options.state_channel,
+            strain_channel=options.strain_channel,
+            state_sample_rate=options.state_sample_rate,
+            strain_sample_rate=options.strain_sample_rate,
+            frame_duration=options.frame_duration,
+            gps_start_time=options.gps_start_time,
+            gps_end_time=options.gps_end_time,
+            output_path=options.output_path,
+            description=options.description,
+            segments=segments,
+            values=values,
+            verbose=options.verbose,
+            real_time=options.real_time,
+            history=options.history,
+            cleanup_interval=options.cleanup_interval,
+        )
 
         captured = capsys.readouterr()
         assert "Segments provided: 3" in captured.out
@@ -438,7 +534,23 @@ class TestGenerateFakeFrames:
             ValueError,
             match="IFO mismatch: state channel uses L1, strain channel uses H1",
         ):
-            generate_fake_frames(options, segments, values)
+            generate_fake_frames(
+            state_channel=options.state_channel,
+            strain_channel=options.strain_channel,
+            state_sample_rate=options.state_sample_rate,
+            strain_sample_rate=options.strain_sample_rate,
+            frame_duration=options.frame_duration,
+            gps_start_time=options.gps_start_time,
+            gps_end_time=options.gps_end_time,
+            output_path=options.output_path,
+            description=options.description,
+            segments=segments,
+            values=values,
+            verbose=options.verbose,
+            real_time=options.real_time,
+            history=options.history,
+            cleanup_interval=options.cleanup_interval,
+        )
 
 
 class TestMain:

@@ -1,17 +1,3 @@
-"""Generate fake frame files with multiple channels for testing.
-
-This tool creates GW frame files containing:
-1. A state vector channel with bitmask data that changes over time segments
-2. A strain channel with realistic colored noise based on LIGO/Virgo PSDs
-
-The state vector uses custom segments from a file with three columns: start end value
-where start and end are absolute GPS times in seconds.
-
-This is useful for testing state-based gating and monitoring tools.
-"""
-
-# Copyright (C) 2025
-
 from argparse import ArgumentParser
 
 import numpy as np
@@ -171,7 +157,23 @@ def read_segments_from_file(filename, verbose=False):
     return tuple(segments), tuple(values)
 
 
-def generate_fake_frames(options, segments, values):
+def generate_fake_frames(
+    state_channel,
+    strain_channel,
+    state_sample_rate,
+    strain_sample_rate,
+    frame_duration,
+    gps_start_time,
+    gps_end_time,
+    output_path,
+    description,
+    segments,
+    values,
+    verbose=False,
+    real_time=False,
+    history=None,
+    cleanup_interval=300,
+):
     """Create and run the pipeline to generate fake frame files.
 
     Pipeline structure:
@@ -185,14 +187,26 @@ def generate_fake_frames(options, segments, values):
                           FrameSink
 
     Args:
-        options: Command line options
+        state_channel: State vector channel name
+        strain_channel: Strain channel name
+        state_sample_rate: Sample rate for state vector channel in Hz
+        strain_sample_rate: Sample rate for strain channel in Hz
+        frame_duration: Duration of each frame file in seconds
+        gps_start_time: GPS start time in seconds
+        gps_end_time: GPS end time in seconds (None for real-time mode)
+        output_path: Output path pattern for frame files
+        description: Description for frame files
         segments: Segment time ranges in nanoseconds
         values: Bitmask values for segments
+        verbose: Whether to print verbose output
+        real_time: Enable real-time mode for continuous frame generation
+        history: How many seconds of history to keep in real-time mode
+        cleanup_interval: How often to check for old files to delete in seconds
     """
 
     # Extract IFO from channel names and ensure consistency
-    state_ifo = options.state_channel.split(":")[0]
-    strain_ifo = options.strain_channel.split(":")[0]
+    state_ifo = state_channel.split(":")[0]
+    strain_ifo = strain_channel.split(":")[0]
 
     if state_ifo != strain_ifo:
         raise ValueError(
@@ -202,17 +216,17 @@ def generate_fake_frames(options, segments, values):
 
     ifo = state_ifo
 
-    gps_start = options.gps_start_time
-    gps_end = options.gps_end_time
+    gps_start = gps_start_time
+    gps_end = gps_end_time
 
-    if options.verbose:
+    if verbose:
         print("\nCreating pipeline with:")
         print(f"  IFO: {ifo}")
-        print(f"  State channel: {options.state_channel}")
-        print(f"  Strain channel: {options.strain_channel}")
-        print(f"  State sample rate: {options.state_sample_rate} Hz")
-        print(f"  Strain sample rate: {options.strain_sample_rate} Hz")
-        print(f"  Frame duration: {options.frame_duration} seconds")
+        print(f"  State channel: {state_channel}")
+        print(f"  Strain channel: {strain_channel}")
+        print(f"  State sample rate: {state_sample_rate} Hz")
+        print(f"  Strain sample rate: {strain_sample_rate} Hz")
+        print(f"  Frame duration: {frame_duration} seconds")
         print(
             "  Time range: {} - {}".format(
                 gps_start,
@@ -235,7 +249,7 @@ def generate_fake_frames(options, segments, values):
     state_source = SegmentSource(
         name="StateSrc",
         source_pad_names=("state",),
-        rate=options.state_sample_rate,
+        rate=state_sample_rate,
         t0=gps_start,
         end=segment_end,
         segments=segments,
@@ -246,23 +260,23 @@ def generate_fake_frames(options, segments, values):
     # GWDataNoiseSource generates at 16384 Hz based on the PSD
     noise_source = GWDataNoiseSource(
         name="NoiseSrc",
-        channel_dict={ifo: options.strain_channel},
+        channel_dict={ifo: strain_channel},
         t0=gps_start,
         end=gps_end,
-        verbose=options.verbose,
-        real_time=options.real_time if hasattr(options, "real_time") else False,
+        verbose=verbose,
+        real_time=real_time,
     )
 
     # Resample strain to match the requested sample rate if needed
     # GWDataNoiseSource always outputs at 16384 Hz based on PSDs
     # State and strain channels can have different sample rates in output frames
-    if options.strain_sample_rate != 16384:
+    if strain_sample_rate != 16384:
         resampler = Resampler(
             name="Resampler",
-            source_pad_names=(options.strain_channel,),
-            sink_pad_names=(options.strain_channel,),
+            source_pad_names=(strain_channel,),
+            sink_pad_names=(strain_channel,),
             inrate=16384,  # GWDataNoiseSource outputs at this rate
-            outrate=options.strain_sample_rate,
+            outrate=strain_sample_rate,
         )
         use_resampler = True
     else:
@@ -272,19 +286,12 @@ def generate_fake_frames(options, segments, values):
     # Create frame sink for both channels
     frame_sink = FrameSink(
         name="FrameSnk",
-        channels=[options.state_channel, options.strain_channel],
-        duration=options.frame_duration,
-        path=options.output_path,
-        description=options.description,
+        channels=[state_channel, strain_channel],
+        duration=frame_duration,
+        path=output_path,
+        description=description,
         force=True,
-        history_seconds=(
-            options.history
-            if hasattr(options, "real_time")
-            and options.real_time
-            and hasattr(options, "history")
-            else None
-        ),
-        cleanup_interval=options.cleanup_interval,
+        max_files=history if real_time and history else None,
     )
 
     # Add elements to pipeline
@@ -295,43 +302,43 @@ def generate_fake_frames(options, segments, values):
 
     # Connect the elements
     link_map = {
-        f"FrameSnk:snk:{options.state_channel}": "StateSrc:src:state",
+        f"FrameSnk:snk:{state_channel}": "StateSrc:src:state",
     }
 
     if use_resampler:
-        link_map[f"Resampler:snk:{options.strain_channel}"] = (
-            f"NoiseSrc:src:{options.strain_channel}"
+        link_map[f"Resampler:snk:{strain_channel}"] = (
+            f"NoiseSrc:src:{strain_channel}"
         )
-        link_map[f"FrameSnk:snk:{options.strain_channel}"] = (
-            f"Resampler:src:{options.strain_channel}"
+        link_map[f"FrameSnk:snk:{strain_channel}"] = (
+            f"Resampler:src:{strain_channel}"
         )
     else:
-        link_map[f"FrameSnk:snk:{options.strain_channel}"] = (
-            f"NoiseSrc:src:{options.strain_channel}"
+        link_map[f"FrameSnk:snk:{strain_channel}"] = (
+            f"NoiseSrc:src:{strain_channel}"
         )
 
     pipeline.insert(link_map=link_map)
 
-    if options.verbose:
+    if verbose:
         print("\nRunning pipeline...")
         if gps_end is not None:
             print(f"Expected duration: {gps_end - gps_start} seconds")
-            print(f"Frame duration: {options.frame_duration} seconds")
-            expected_frames = (gps_end - gps_start) / options.frame_duration
+            print(f"Frame duration: {frame_duration} seconds")
+            expected_frames = (gps_end - gps_start) / frame_duration
             print(f"Expected number of frames: {expected_frames}")
         else:
             print("Real-time mode: will run indefinitely, synced with wall time")
 
     # Run the pipeline
-    if options.verbose:
+    if verbose:
         print("Starting pipeline.run()...")
 
     pipeline.run()
 
-    if options.verbose:
+    if verbose:
         print("Pipeline execution completed.")
         if gps_end is not None:
-            expected_frames = (gps_end - gps_start) / options.frame_duration
+            expected_frames = (gps_end - gps_start) / frame_duration
             print(f"\nExpected number of frames: {int(expected_frames)}")
             print(f"Total duration: {gps_end - gps_start} seconds")
 
@@ -376,7 +383,23 @@ def main():
                 )
 
     # Generate frames (same function for both real-time and batch modes)
-    generate_fake_frames(options, segments, values)
+    generate_fake_frames(
+        state_channel=options.state_channel,
+        strain_channel=options.strain_channel,
+        state_sample_rate=options.state_sample_rate,
+        strain_sample_rate=options.strain_sample_rate,
+        frame_duration=options.frame_duration,
+        gps_start_time=options.gps_start_time,
+        gps_end_time=options.gps_end_time,
+        output_path=options.output_path,
+        description=options.description,
+        segments=segments,
+        values=values,
+        verbose=options.verbose,
+        real_time=options.real_time,
+        history=options.history,
+        cleanup_interval=options.cleanup_interval,
+    )
 
 
 if __name__ == "__main__":
