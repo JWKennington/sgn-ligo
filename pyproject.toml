@@ -110,7 +110,7 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "-p no:warnings --cov=sgnligo --cov-report=term-missing"
+addopts = "-p no:warnings --cov-config=.coveragerc --cov=sgnligo --cov-report=term-missing"
 
 [tool.flake8]
 max-line-length = 88
@@ -134,3 +134,4 @@ exclude = [
 [project.scripts]
 sgn-ligo-ll-dq = "sgnligo.bin.ll_dq:main"
 sgn-ligo-plot-psd = "sgnligo.bin.plot_psd:main"
+sgn-ligo-fake-frames = "sgnligo.bin.fake_frames:main"
