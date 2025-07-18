@@ -1,3 +1,5 @@
+"""Generate fake frame files containing strain and state vector data for testing."""
+
 from argparse import ArgumentParser
 
 import numpy as np
@@ -82,10 +84,10 @@ def parse_command_line():
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Be verbose")
     parser.add_argument(
-        "--segment-file",
+        "--state-file",
         metavar="path",
         required=True,
-        help=("Path to segment file with three columns: " "start end value (required)"),
+        help=("Path to state file with three columns: " "start end value (required)"),
     )
     parser.add_argument(
         "--real-time",
@@ -117,7 +119,7 @@ def read_segments_from_file(filename, verbose=False):
     which are converted to nanoseconds for internal use.
 
     Args:
-        filename: Path to the segment file
+        filename: Path to the state file
         verbose: Whether to print verbose output
 
     Returns:
@@ -137,7 +139,7 @@ def read_segments_from_file(filename, verbose=False):
 
     if data.shape[1] != 3:
         raise ValueError(
-            f"Segment file must have 3 columns (start end value), got {data.shape[1]}"
+            f"State file must have 3 columns (start end value), got {data.shape[1]}"
         )
 
     segments = []
@@ -306,16 +308,10 @@ def generate_fake_frames(
     }
 
     if use_resampler:
-        link_map[f"Resampler:snk:{strain_channel}"] = (
-            f"NoiseSrc:src:{strain_channel}"
-        )
-        link_map[f"FrameSnk:snk:{strain_channel}"] = (
-            f"Resampler:src:{strain_channel}"
-        )
+        link_map[f"Resampler:snk:{strain_channel}"] = f"NoiseSrc:src:{strain_channel}"
+        link_map[f"FrameSnk:snk:{strain_channel}"] = f"Resampler:src:{strain_channel}"
     else:
-        link_map[f"FrameSnk:snk:{strain_channel}"] = (
-            f"NoiseSrc:src:{strain_channel}"
-        )
+        link_map[f"FrameSnk:snk:{strain_channel}"] = f"NoiseSrc:src:{strain_channel}"
 
     pipeline.insert(link_map=link_map)
 
@@ -347,7 +343,7 @@ def main():
     options = parse_command_line()
 
     # Read segments from file first
-    segments, values = read_segments_from_file(options.segment_file, options.verbose)
+    segments, values = read_segments_from_file(options.state_file, options.verbose)
 
     if options.verbose:
         print(f"\nSegments loaded successfully: {len(segments)} segments")

@@ -22,10 +22,10 @@ class TestParseCommandLine:
         """Test parsing with minimal required arguments."""
         with patch(
             "sys.argv",
-            ["fake_frames", "--segment-file", "segments.txt"],
+            ["fake_frames", "--state-file", "segments.txt"],
         ):
             args = parse_command_line()
-            assert args.segment_file == "segments.txt"
+            assert args.state_file == "segments.txt"
             assert args.state_channel == "L1:FAKE-STATE_VECTOR"  # default
             assert args.strain_channel == "L1:FAKE-STRAIN"  # default
             assert args.state_sample_rate == 16  # default
@@ -39,7 +39,7 @@ class TestParseCommandLine:
             "sys.argv",
             [
                 "fake_frames",
-                "--segment-file",
+                "--state-file",
                 "segments.txt",
                 "--state-channel",
                 "H1:TEST-STATE",
@@ -70,7 +70,7 @@ class TestParseCommandLine:
             ],
         ):
             args = parse_command_line()
-            assert args.segment_file == "segments.txt"
+            assert args.state_file == "segments.txt"
             assert args.state_channel == "H1:TEST-STATE"
             assert args.strain_channel == "H1:TEST-STRAIN"
             assert args.state_sample_rate == 32
@@ -89,7 +89,7 @@ class TestParseCommandLine:
             assert args.history == 600
             assert args.cleanup_interval == 60
 
-    def test_required_segment_file(self):
+    def test_required_state_file(self):
         """Test that segment file is required."""
         with patch("sys.argv", ["fake_frames"]):
             with pytest.raises(SystemExit):
@@ -101,10 +101,10 @@ class TestReadSegmentsFromFile:
 
     def test_read_single_segment(self, tmp_path):
         """Test reading a file with a single segment."""
-        segment_file = tmp_path / "segments.txt"
-        segment_file.write_text("1000000000 1000000010 3\n")
+        state_file = tmp_path / "segments.txt"
+        state_file.write_text("1000000000 1000000010 3\n")
 
-        segments, values = read_segments_from_file(str(segment_file))
+        segments, values = read_segments_from_file(str(state_file))
         assert len(segments) == 1
         assert len(values) == 1
         assert segments[0] == (1000000000000000000, 1000000010000000000)  # nanoseconds
@@ -112,14 +112,14 @@ class TestReadSegmentsFromFile:
 
     def test_read_multiple_segments(self, tmp_path):
         """Test reading a file with multiple segments."""
-        segment_file = tmp_path / "segments.txt"
-        segment_file.write_text(
+        state_file = tmp_path / "segments.txt"
+        state_file.write_text(
             "1000000000 1000000010 1\n"
             "1000000010 1000000020 2\n"
             "1000000020 1000000030 3\n"
         )
 
-        segments, values = read_segments_from_file(str(segment_file))
+        segments, values = read_segments_from_file(str(state_file))
         assert len(segments) == 3
         assert len(values) == 3
         assert segments[0] == (1000000000000000000, 1000000010000000000)
@@ -129,42 +129,42 @@ class TestReadSegmentsFromFile:
 
     def test_read_segments_verbose(self, tmp_path, capsys):
         """Test verbose output when reading segments."""
-        segment_file = tmp_path / "segments.txt"
-        segment_file.write_text("1000000000 1000000010 5\n")
+        state_file = tmp_path / "segments.txt"
+        state_file.write_text("1000000000 1000000010 5\n")
 
-        segments, values = read_segments_from_file(str(segment_file), verbose=True)
+        segments, values = read_segments_from_file(str(state_file), verbose=True)
         captured = capsys.readouterr()
-        assert f"Reading segments from {segment_file}" in captured.out
+        assert f"Reading segments from {state_file}" in captured.out
         assert "Segment 1: 1000000000.0s - 1000000010.0s, Value: 5" in captured.out
 
     def test_read_segments_single_row(self, tmp_path):
         """Test reading a file with a single row (edge case)."""
-        segment_file = tmp_path / "segments.txt"
-        segment_file.write_text("1000000000 1000000010 7")  # No newline
+        state_file = tmp_path / "segments.txt"
+        state_file.write_text("1000000000 1000000010 7")  # No newline
 
-        segments, values = read_segments_from_file(str(segment_file))
+        segments, values = read_segments_from_file(str(state_file))
         assert len(segments) == 1
         assert values[0] == 7
 
     def test_read_segments_wrong_columns(self, tmp_path):
         """Test error when file has wrong number of columns."""
-        segment_file = tmp_path / "segments.txt"
-        segment_file.write_text("1000000000 1000000010\n")  # Only 2 columns
+        state_file = tmp_path / "segments.txt"
+        state_file.write_text("1000000000 1000000010\n")  # Only 2 columns
 
         with pytest.raises(ValueError, match="must have 3 columns"):
-            read_segments_from_file(str(segment_file))
+            read_segments_from_file(str(state_file))
 
     def test_read_segments_with_comments(self, tmp_path):
         """Test reading a file with comments."""
-        segment_file = tmp_path / "segments.txt"
-        segment_file.write_text(
+        state_file = tmp_path / "segments.txt"
+        state_file.write_text(
             "# This is a comment\n"
             "1000000000 1000000010 1\n"
             "# Another comment\n"
             "1000000010 1000000020 2\n"
         )
 
-        segments, values = read_segments_from_file(str(segment_file))
+        segments, values = read_segments_from_file(str(state_file))
         assert len(segments) == 2
         assert values == (1, 2)
 
@@ -535,22 +535,22 @@ class TestGenerateFakeFrames:
             match="IFO mismatch: state channel uses L1, strain channel uses H1",
         ):
             generate_fake_frames(
-            state_channel=options.state_channel,
-            strain_channel=options.strain_channel,
-            state_sample_rate=options.state_sample_rate,
-            strain_sample_rate=options.strain_sample_rate,
-            frame_duration=options.frame_duration,
-            gps_start_time=options.gps_start_time,
-            gps_end_time=options.gps_end_time,
-            output_path=options.output_path,
-            description=options.description,
-            segments=segments,
-            values=values,
-            verbose=options.verbose,
-            real_time=options.real_time,
-            history=options.history,
-            cleanup_interval=options.cleanup_interval,
-        )
+                state_channel=options.state_channel,
+                strain_channel=options.strain_channel,
+                state_sample_rate=options.state_sample_rate,
+                strain_sample_rate=options.strain_sample_rate,
+                frame_duration=options.frame_duration,
+                gps_start_time=options.gps_start_time,
+                gps_end_time=options.gps_end_time,
+                output_path=options.output_path,
+                description=options.description,
+                segments=segments,
+                values=values,
+                verbose=options.verbose,
+                real_time=options.real_time,
+                history=options.history,
+                cleanup_interval=options.cleanup_interval,
+            )
 
 
 class TestMain:
@@ -563,7 +563,7 @@ class TestMain:
         """Test main function basic flow."""
         # Mock command line arguments
         mock_options = Namespace(
-            segment_file="segments.txt",
+            state_file="segments.txt",
             verbose=False,
             real_time=False,
             gps_start_time=None,
@@ -571,6 +571,13 @@ class TestMain:
             duration=80,
             history=3600,
             cleanup_interval=300,
+            state_channel="L1:FAKE-STATE_VECTOR",
+            strain_channel="L1:FAKE-STRAIN",
+            state_sample_rate=16,
+            strain_sample_rate=16384,
+            frame_duration=16,
+            output_path="{instruments}-{description}-{gps_start_time}-{duration}.gwf",
+            description="BITMASK_TEST",
         )
         mock_parse.return_value = mock_options
 
@@ -598,7 +605,7 @@ class TestMain:
 
         # Mock command line arguments for real-time mode
         mock_options = Namespace(
-            segment_file="segments.txt",
+            state_file="segments.txt",
             sample_rate=None,
             verbose=True,
             real_time=True,
@@ -607,6 +614,13 @@ class TestMain:
             duration=80,
             history=600,
             cleanup_interval=300,
+            state_channel="L1:FAKE-STATE_VECTOR",
+            strain_channel="L1:FAKE-STRAIN",
+            state_sample_rate=16,
+            strain_sample_rate=16384,
+            frame_duration=16,
+            output_path="{instruments}-{description}-{gps_start_time}-{duration}.gwf",
+            description="BITMASK_TEST",
         )
         mock_parse.return_value = mock_options
 
@@ -640,7 +654,7 @@ class TestMain:
 
         # Mock command line arguments for batch mode
         mock_options = Namespace(
-            segment_file="segments.txt",
+            state_file="segments.txt",
             sample_rate=None,
             verbose=True,
             real_time=False,
@@ -649,6 +663,13 @@ class TestMain:
             duration=100,
             history=3600,
             cleanup_interval=300,
+            state_channel="L1:FAKE-STATE_VECTOR",
+            strain_channel="L1:FAKE-STRAIN",
+            state_sample_rate=16,
+            strain_sample_rate=16384,
+            frame_duration=16,
+            output_path="{instruments}-{description}-{gps_start_time}-{duration}.gwf",
+            description="BITMASK_TEST",
         )
         mock_parse.return_value = mock_options
 
@@ -679,7 +700,7 @@ class TestMain:
         """Test main function in batch mode with specified times."""
         # Mock command line arguments with explicit times
         mock_options = Namespace(
-            segment_file="segments.txt",
+            state_file="segments.txt",
             verbose=False,
             real_time=False,
             gps_start_time=1000000000.0,
@@ -687,6 +708,13 @@ class TestMain:
             duration=80,  # Ignored when end time is specified
             history=3600,
             cleanup_interval=300,
+            state_channel="L1:FAKE-STATE_VECTOR",
+            strain_channel="L1:FAKE-STRAIN",
+            state_sample_rate=16,
+            strain_sample_rate=16384,
+            frame_duration=16,
+            output_path="{instruments}-{description}-{gps_start_time}-{duration}.gwf",
+            description="BITMASK_TEST",
         )
         mock_parse.return_value = mock_options
 
@@ -708,7 +736,7 @@ class TestMain:
         """Test verbose output during segment loading."""
         # Mock command line arguments
         mock_options = Namespace(
-            segment_file="test_segments.txt",
+            state_file="test_segments.txt",
             sample_rate=None,
             verbose=True,
             real_time=False,
@@ -717,6 +745,13 @@ class TestMain:
             duration=16,
             history=3600,
             cleanup_interval=300,
+            state_channel="L1:FAKE-STATE_VECTOR",
+            strain_channel="L1:FAKE-STRAIN",
+            state_sample_rate=16,
+            strain_sample_rate=16384,
+            frame_duration=16,
+            output_path="{instruments}-{description}-{gps_start_time}-{duration}.gwf",
+            description="BITMASK_TEST",
         )
         mock_parse.return_value = mock_options
 
