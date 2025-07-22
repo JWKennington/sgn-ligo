@@ -134,4 +134,5 @@ exclude = [
 [project.scripts]
 sgn-ligo-ll-dq = "sgnligo.bin.ll_dq:main"
 sgn-ligo-plot-psd = "sgnligo.bin.plot_psd:main"
+sgn-ligo-gwistat = "sgnligo.bin.gwistat:main"
 sgn-ligo-fake-frames = "sgnligo.bin.fake_frames:main"
