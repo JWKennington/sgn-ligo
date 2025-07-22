@@ -1,0 +1,39 @@
+{
+  "bits": {
+    "0": "HOFT_OK",
+    "1": "OBSERVATION_INTENT",
+    "2": "OBSERVATION_READY",
+    "3": "DMT_ANALYSIS_READY",
+    "4": "CBC_CAT1_OK",
+    "5": "CBC_CAT2_OK",
+    "6": "CBC_CAT3_OK",
+    "7": "BURST_CAT1_OK",
+    "8": "BURST_CAT2_OK",
+    "9": "BURST_CAT3_OK",
+    "10": "CW_OK",
+    "11": "STOCHASTIC_OK",
+    "12": "UP",
+    "13": "SINGLE_ARM_DATA_EXISTS",
+    "14": "DATA_INGESTION_OK",
+    "15": "OVERFLOW_OK"
+  },
+  "values": {
+    "0": "NO_DATA",
+    "1": "HOFT_ONLY",
+    "3": "OBSERVATION_INTENT_DECLARED",
+    "7": "OBSERVATION_READY",
+    "15": "DMT_ANALYSIS_READY",
+    "31": "CBC_CAT1_READY",
+    "63": "CBC_CAT2_READY",
+    "127": "CBC_CAT3_READY",
+    "255": "BURST_CAT1_READY",
+    "511": "BURST_CAT2_READY",
+    "1023": "BURST_CAT3_READY",
+    "2047": "CW_READY",
+    "4095": "STOCHASTIC_READY",
+    "8191": "UP_STATE",
+    "16383": "SINGLE_ARM_DATA",
+    "32767": "DATA_INGESTION_OK",
+    "65535": "ALL_SYSTEMS_OK"
+  }
+}
