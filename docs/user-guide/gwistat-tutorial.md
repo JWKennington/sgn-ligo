@@ -31,17 +31,17 @@ When multiple bits are set, the state vector represents multiple simultaneous co
 
 First, let's generate some test frame files containing state vector data. The `sgn-ligo-fake-frames` tool creates frames with:
 
-- A state vector channel with bitmask patterns defined in a segment file
+- A state vector channel with bitmask patterns defined in a state file
 - A strain channel with realistic colored noise
 
-### Create a Segment File
+### Create a State File
 
-The `sgn-ligo-fake-frames` tool requires a segment file that defines the bitmask values over time. Create a file called `segments.txt`:
+The `sgn-ligo-fake-frames` tool requires a state file that defines the bitmask values over time. Create a file called `state_data.txt`:
 
 ```bash
-# Create segment file
-cat > segments.txt << EOF
-# Segment file for test data
+# Create state file
+cat > state_data.txt << EOF
+# State file for test data
 # Format: start_gps end_gps bitmask_value
 1400000000 1400000016 1    # Only HOFT_OK
 1400000016 1400000032 2    # Only OBS_INTENT
@@ -59,7 +59,7 @@ mkdir -p test_frames
 
 # Generate frames with state vector data
 sgn-ligo-fake-frames \
-    --segment-file segments.txt \
+    --state-file state_data.txt \
     --state-channel L1:FAKE-STATE_VECTOR \
     --strain-channel L1:FAKE-STRAIN \
     --state-sample-rate 16 \
@@ -76,7 +76,7 @@ This creates frame files with:
 - State vector data at 16 Hz (typical for state monitoring)
 - Strain data at 16384 Hz (standard for gravitational wave analysis)
 
-The state vector data follows the pattern defined in your segment file:
+The state vector data follows the pattern defined in your state file:
 
 1. **Segment 1 (0-16s)**: Value 1 (0b01) - Only HOFT_OK
 2. **Segment 2 (16-32s)**: Value 2 (0b10) - Only OBS_INTENT
@@ -88,11 +88,15 @@ The state vector data follows the pattern defined in your segment file:
     State vector channels typically use lower sample rates (16 Hz) since they change infrequently. Strain channels require much higher sample rates (16384 Hz or 4096 Hz minimum) to capture gravitational wave signals. The tool supports different sample rates for each channel type.
 
 !!! info "Frame Generation"
-    We generate 90 seconds of data to ensure all 5 frames are written due to FrameSink's internal stride buffering. The segment file defines patterns up to 80 seconds.
+    We generate 90 seconds of data to ensure all 5 frames are written due to FrameSink's internal stride buffering. The state file defines patterns up to 80 seconds.
 
 ## Step 3: Creating a Bit Mapping File
 
-GWIStat uses a JSON file to map bit positions to their meanings. Create a file called `bitmask_mapping.json`:
+GWIStat uses a JSON file to map bit positions to their meanings. The file supports two formats:
+
+### Simple Format (Backward Compatible)
+
+Create a file called `bitmask_mapping.json`:
 
 ```json
 {
@@ -107,7 +111,41 @@ GWIStat uses a JSON file to map bit positions to their meanings. Create a file c
 }
 ```
 
-You can define meanings for any bit positions (0-31) that are relevant to your detector configuration.
+### Extended Format (With Value Meanings)
+
+For more advanced use cases, you can define both individual bit meanings and composite value meanings:
+
+```json
+{
+  "bits": {
+    "0": "HOFT_OK",
+    "1": "OBS_INTENT",
+    "2": "SCIENCE_MODE",
+    "3": "INJECTION_MODE",
+    "4": "EXCITATION_ACTIVE",
+    "5": "TIMING_OK",
+    "6": "OVERFLOW_DETECTED",
+    "7": "DATA_VALID"
+  },
+  "values": {
+    "0": "NO_DATA",
+    "1": "OBSERVING_READY",
+    "3": "SCIENCE_OBSERVING",
+    "7": "SCIENCE_WITH_INJECTION",
+    "255": "ALL_SYSTEMS_GO"
+  }
+}
+```
+
+The extended format allows you to:
+- Define meanings for specific bit combinations (e.g., value 3 = bits 0 and 1 set)
+- Provide semantic interpretations of states beyond individual bits
+- Create higher-level status descriptions for monitoring dashboards
+
+!!! tip "Example Files"
+    The repository includes example mapping files in the `examples/` directory:
+    - `gwistat_mapping_simple.json` - Simple format example with basic bit mappings
+    - `gwistat_mapping_example.json` - Extended format example with both bit and value mappings for a realistic detector configuration
 
 ## Step 4: Running GWIStat
 
@@ -144,12 +182,13 @@ The output will be JSON formatted like this:
       {
         "value": 1,
         "active_bits": [0],
-        "meanings": ["HOFT_OK"]
+        "bit_meanings": ["HOFT_OK"]
       },
       {
-        "value": 1,
-        "active_bits": [0],
-        "meanings": ["HOFT_OK"]
+        "value": 3,
+        "active_bits": [0, 1],
+        "bit_meanings": ["HOFT_OK", "OBS_INTENT"],
+        "value_meaning": "SCIENCE_OBSERVING"
       },
       ...
     ]
@@ -160,7 +199,8 @@ The output will be JSON formatted like this:
 Each entry in the data array contains:
 - `value`: The decimal value of the state vector
 - `active_bits`: List of bit positions that are set to 1
-- `meanings`: Human-readable meanings for the active bits
+- `bit_meanings`: Human-readable meanings for the active bits
+- `value_meaning` (optional): Composite meaning for the specific value (when using extended format)
 
 ## Step 5: Sending to Kafka
 
@@ -182,7 +222,71 @@ sgn-ligo-gwistat \
 
 This sends the interpreted state vector data to the Kafka topic `gwistat.state_vector_analysis` with the tag `L1`.
 
-## Step 6: Real-Time Analysis with DevShm
+## Step 6: Using Advanced Mapping Features
+
+The extended mapping format is particularly useful when certain bit combinations have specific operational meanings. Here's a practical example:
+
+### Creating an Advanced Mapping File
+
+```json
+{
+  "bits": {
+    "0": "HOFT_OK",
+    "1": "OBS_INTENT", 
+    "2": "SCIENCE_MODE",
+    "3": "INJECTION_MODE",
+    "4": "EXCITATION_ACTIVE",
+    "5": "TIMING_OK",
+    "6": "OVERFLOW_DETECTED",
+    "7": "DATA_VALID"
+  },
+  "values": {
+    "0": "DETECTOR_OFFLINE",
+    "1": "MAINTENANCE_MODE",
+    "3": "OBSERVING_MODE",
+    "7": "SCIENCE_OBSERVING",
+    "15": "SCIENCE_WITH_INJECTION",
+    "255": "ALL_SYSTEMS_ACTIVE"
+  }
+}
+```
+
+### Running with Advanced Mappings
+
+When you run GWIStat with this mapping file:
+
+```bash
+sgn-ligo-gwistat \
+    --data-source frames \
+    --frame-cache "test_frames/*.gwf" \
+    --channel-name L1:FAKE-STATE_VECTOR \
+    --mapping-file advanced_mapping.json \
+    --gps-start-time 1400000000 \
+    --gps-end-time 1400000080 \
+    --verbose
+```
+
+The verbose output will show both interpretations:
+```
+t=1400000032.000: value=3 -> OBSERVING_MODE (bits: ['HOFT_OK', 'OBS_INTENT'])
+```
+
+And the JSON output will include both fields:
+```json
+{
+  "value": 3,
+  "active_bits": [0, 1],
+  "bit_meanings": ["HOFT_OK", "OBS_INTENT"],
+  "value_meaning": "OBSERVING_MODE"
+}
+```
+
+This allows monitoring systems to:
+- Use `bit_meanings` for detailed diagnostics
+- Use `value_meaning` for high-level status displays
+- Alert on specific composite states
+
+## Step 7: Real-Time Analysis with DevShm
 
 GWIStat can read from shared memory for real-time analysis. You can either connect to an existing data stream or generate test data using `sgn-ligo-fake-frames`.
 
@@ -191,9 +295,9 @@ GWIStat can read from shared memory for real-time analysis. You can either conne
 First, let's create real-time test data that simulates a live data stream:
 
 ```bash
-# Create a segment file with state changes
-cat > devshm_segments.txt << EOF
-# Single segment for continuous observing mode (GPS times in seconds)
+# Create a state file with state changes
+cat > devshm_state.txt << EOF
+# Single state for continuous observing mode (GPS times in seconds)
 1400000000  2000000000  3     # Normal observing (HOFT_OK + OBS_INTENT)
 EOF
 
@@ -202,7 +306,7 @@ mkdir -p ./dev/shm/kafka/L1_test
 
 # Start real-time frame generation (run in separate terminal)
 sgn-ligo-fake-frames \
-    --segment-file devshm_segments.txt \
+    --state-file devshm_state.txt \
     --state-channel L1:TEST-STATE_VECTOR \
     --strain-channel L1:TEST-STRAIN \
     --state-sample-rate 16 \
@@ -270,7 +374,7 @@ sgn-ligo-gwistat \
 
 3. **Time mismatch**: Ensure GPS times match the data in your frames
 
-4. **Segment file required**: The `sgn-ligo-fake-frames` tool requires a segment file via the `--segment-file` argument. The file must have three columns: start_gps, end_gps, and bitmask_value
+4. **State file required**: The `sgn-ligo-fake-frames` tool requires a state file via the `--state-file` argument. The file must have three columns: start_gps, end_gps, and bitmask_value
 
 ### Debugging Output
 
@@ -301,9 +405,9 @@ cat > "$TEST_DIR/mapping.json" << EOF
 }
 EOF
 
-# Create segment file for frame generation
-cat > "$TEST_DIR/segments.txt" << EOF
-# Test segments
+# Create state file for frame generation
+cat > "$TEST_DIR/state_data.txt" << EOF
+# Test state data
 1400000000 1400000016 1
 1400000016 1400000032 2
 1400000032 1400000048 3
@@ -313,7 +417,7 @@ EOF
 
 echo "=== Generating test frames ==="
 sgn-ligo-fake-frames \
-    --segment-file "$TEST_DIR/segments.txt" \
+    --state-file "$TEST_DIR/state_data.txt" \
     --state-channel L1:TEST-STATE_VECTOR \
     --strain-channel L1:TEST-STRAIN \
     --state-sample-rate 16 \
