@@ -167,6 +167,29 @@ class DataSourceInfo:
                     " data_source is 'devshm'"
                 )
         elif self.data_source == "arrakis":
+            # Validate state vector configuration for arrakis
+            if self.state_channel_name is not None:
+                self.state_channel_dict = parse_list_to_dict(self.state_channel_name)
+                if sorted(self.state_channel_dict.keys()) != self.ifos:
+                    raise ValueError(
+                        "Must specify same number of state_channel_name as channel_name"
+                    )
+
+                if self.state_vector_on_bits is None:
+                    raise ValueError(
+                        "Must specify state_vector_on_bits when state_channel_name is"
+                        " provided for 'arrakis'"
+                    )
+                else:
+                    self.state_vector_on_dict = parse_list_to_dict(
+                        self.state_vector_on_bits
+                    )
+                    if sorted(self.state_vector_on_dict.keys()) != self.ifos:
+                        raise ValueError(
+                            "Must specify same number of state_vector_on_bits as"
+                            " channel_name"
+                        )
+
             # Arrakis source can have optional start_time and end_time
             # If both are provided, start_time must be less than end_time
             if self.gps_start_time is not None and self.gps_end_time is not None:
@@ -491,6 +514,11 @@ def datasource(
             source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
 
     elif info.data_source == "arrakis":
+        # Check if state vector gating is enabled
+        use_state_vector = (
+            hasattr(info, "state_channel_dict") and info.state_channel_dict is not None
+        )
+
         # Prepare for ArrakisSource which handles all channels with a single source
         _channel_names = []
 
@@ -498,8 +526,15 @@ def datasource(
         for ifo in info.ifos:
             channel_name = f"{ifo}:{info.channel_dict[ifo]}"
             _channel_names.append(channel_name)
-            pad_names[ifo] = channel_name
-            source_out_links[ifo] = f"ArrakisSource:src:{channel_name}"
+
+            if use_state_vector:
+                # Add state vector channel
+                state_channel_name = f"{ifo}:{info.state_channel_dict[ifo]}"
+                _channel_names.append(state_channel_name)
+                pad_names[ifo] = ifo  # Use IFO name for gated output
+            else:
+                pad_names[ifo] = channel_name
+                source_out_links[ifo] = f"ArrakisSource:src:{channel_name}"
 
         # Create a single ArrakisSource for all channels
         arrakis_source = ArrakisSource(
@@ -518,6 +553,39 @@ def datasource(
             in_queue_timeout=int(info.source_queue_timeout),
         )
         pipeline.insert(arrakis_source)
+
+        # If state vector gating is enabled, add BitMask and Gate transforms
+        if use_state_vector:
+            source_name = "_Gate"
+            for ifo in info.ifos:
+                channel_name = f"{ifo}:{info.channel_dict[ifo]}"
+                state_channel_name = f"{ifo}:{info.state_channel_dict[ifo]}"
+
+                bit_mask = BitMask(
+                    name=ifo + "_Mask",
+                    sink_pad_names=(ifo,),
+                    source_pad_names=(ifo,),
+                    bit_mask=int(info.state_vector_on_dict[ifo]),
+                )
+                gate = Gate(
+                    name=ifo + source_name,
+                    sink_pad_names=("strain", "state_vector"),
+                    control="state_vector",
+                    source_pad_names=(ifo,),
+                )
+                pipeline.insert(
+                    bit_mask,
+                    gate,
+                    link_map={
+                        ifo + "_Gate:snk:strain": "ArrakisSource:src:" + channel_name,
+                        ifo
+                        + "_Mask:snk:"
+                        + ifo: "ArrakisSource:src:"
+                        + state_channel_name,
+                        ifo + "_Gate:snk:state_vector": ifo + "_Mask:src:" + ifo,
+                    },
+                )
+                source_out_links[ifo] = ifo + source_name + ":src:" + pad_names[ifo]
 
         # For Arrakis source, we need to set a default sample rate if not provided
         if info.input_sample_rate is None:

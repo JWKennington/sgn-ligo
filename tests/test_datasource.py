@@ -211,6 +211,55 @@ class TestDataSourceInfoArrakis:
                 gps_end_time=1000,
             )
 
+    def test_arrakis_with_state_vector_missing_bits(self):
+        """Test arrakis with state channel but missing state vector bits."""
+        with pytest.raises(
+            ValueError,
+            match=(
+                "Must specify state_vector_on_bits when state_channel_name is"
+                " provided for 'arrakis'"
+            ),
+        ):
+            DataSourceInfo(
+                data_source="arrakis",
+                channel_name=["H1=FAKE-STRAIN"],
+                state_channel_name=["H1=STATE"],
+            )
+
+    def test_arrakis_with_state_vector_mismatched_channels(self):
+        """Test arrakis with mismatched state channel count."""
+        with pytest.raises(
+            ValueError, match="same number of state_channel_name as channel_name"
+        ):
+            DataSourceInfo(
+                data_source="arrakis",
+                channel_name=["H1=FAKE-STRAIN", "L1=FAKE-STRAIN"],
+                state_channel_name=["H1=STATE"],
+            )
+
+    def test_arrakis_with_state_vector_mismatched_bits(self):
+        """Test arrakis with mismatched state vector bits count."""
+        with pytest.raises(
+            ValueError, match="same number of state_vector_on_bits as channel_name"
+        ):
+            DataSourceInfo(
+                data_source="arrakis",
+                channel_name=["H1=FAKE-STRAIN", "L1=FAKE-STRAIN"],
+                state_channel_name=["H1=STATE", "L1=STATE"],
+                state_vector_on_bits=["H1=511"],
+            )
+
+    def test_arrakis_with_valid_state_vector(self, capsys):
+        """Test arrakis with valid state vector configuration."""
+        info = DataSourceInfo(
+            data_source="arrakis",
+            channel_name=["H1=FAKE-STRAIN", "L1=FAKE-STRAIN"],
+            state_channel_name=["H1=STATE", "L1=STATE"],
+            state_vector_on_bits=["H1=511", "L1=511"],
+        )
+        assert info.state_channel_dict == {"H1": "STATE", "L1": "STATE"}
+        assert info.state_vector_on_dict == {"H1": "511", "L1": "511"}
+
 
 class TestDataSourceInfoFrames:
     """Test cases for frames data source validation."""
@@ -543,6 +592,73 @@ class TestDatasourceFunction:
         # Check output links
         assert source_links["H1"] == "ArrakisSource:src:H1:FAKE-STRAIN"
         assert source_links["L1"] == "ArrakisSource:src:L1:FAKE-STRAIN"
+
+    @skip_on_py310
+    @patch("sgnligo.sources.datasource.Gate")
+    @patch("sgnligo.sources.datasource.BitMask")
+    @patch("sgnligo.sources.datasource.ArrakisSource")
+    def test_datasource_arrakis_with_state_vector(
+        self, mock_arrakis, mock_bitmask, mock_gate, capsys
+    ):
+        """Test datasource creation for arrakis with state vector gating."""
+        pipeline = Mock()
+        info = DataSourceInfo(
+            data_source="arrakis",
+            channel_name=["H1=FAKE-STRAIN", "L1=FAKE-STRAIN"],
+            state_channel_name=["H1=STATE", "L1=STATE"],
+            state_vector_on_bits=["H1=511", "L1=511"],
+            gps_start_time=1000,
+            gps_end_time=2000,
+        )
+
+        source_links, latency_links = datasource(pipeline, info)
+
+        # Verify ArrakisSource was created with both strain and state channels
+        mock_arrakis.assert_called_once_with(
+            name="ArrakisSource",
+            source_pad_names=[
+                "H1:FAKE-STRAIN",
+                "H1:STATE",
+                "L1:FAKE-STRAIN",
+                "L1:STATE",
+            ],
+            start_time=1000,
+            duration=1000,
+            in_queue_timeout=1,
+        )
+
+        # Verify BitMask and Gate were created for each IFO
+        assert mock_bitmask.call_count == 2
+        assert mock_gate.call_count == 2
+
+        # Check BitMask calls
+        bitmask_calls = mock_bitmask.call_args_list
+        assert any(
+            call[1]["name"] == "H1_Mask" and call[1]["bit_mask"] == 511
+            for call in bitmask_calls
+        )
+        assert any(
+            call[1]["name"] == "L1_Mask" and call[1]["bit_mask"] == 511
+            for call in bitmask_calls
+        )
+
+        # Check Gate calls
+        gate_calls = mock_gate.call_args_list
+        assert any(
+            call[1]["name"] == "H1_Gate" and call[1]["control"] == "state_vector"
+            for call in gate_calls
+        )
+        assert any(
+            call[1]["name"] == "L1_Gate" and call[1]["control"] == "state_vector"
+            for call in gate_calls
+        )
+
+        # Check output links point to Gate outputs
+        assert source_links["H1"] == "H1_Gate:src:H1"
+        assert source_links["L1"] == "L1_Gate:src:L1"
+
+        # Verify pipeline insertions with proper linking
+        assert pipeline.insert.call_count >= 3  # ArrakisSource + 2x(BitMask, Gate)
 
     @skip_on_py310
     @patch("sgnligo.sources.datasource.FakeSeriesSource")
@@ -892,3 +1008,29 @@ class TestEdgeCases:
             )
             datasource(pipeline, info)
             assert info.input_sample_rate == 16384
+
+    @skip_on_py310
+    def test_datasource_arrakis_with_state_vector_no_hasattr(self, capsys):
+        """Test arrakis datasource when state_channel_dict doesn't exist."""
+        with patch("sgnligo.sources.datasource.ArrakisSource") as mock_arrakis:
+            pipeline = Mock()
+            info = DataSourceInfo(
+                data_source="arrakis",
+                channel_name=["H1=FAKE-STRAIN"],
+            )
+            # Ensure the attribute doesn't exist
+            if hasattr(info, "state_channel_dict"):
+                delattr(info, "state_channel_dict")
+
+            source_links, latency_links = datasource(pipeline, info)
+
+            # Should create ArrakisSource without state channels
+            mock_arrakis.assert_called_once_with(
+                name="ArrakisSource",
+                source_pad_names=["H1:FAKE-STRAIN"],
+                start_time=None,
+                duration=None,
+                in_queue_timeout=1,
+            )
+
+            assert source_links["H1"] == "ArrakisSource:src:H1:FAKE-STRAIN"
