@@ -248,6 +248,9 @@ class DevShmSource(TSSource):
                     # prematurely decides to send a gap buffer
                     # if send_gap_all:
                     next_file, t0 = self.queues[ifo].get(timeout=self.queue_timeout)
+                    if not os.path.exists(next_file):
+                        # the file doesn't exist anymore, get the next file
+                        continue
                     self.file_t0[ifo] = t0
                     if self.verbose:
                         print(next_file, t0, flush=True)
