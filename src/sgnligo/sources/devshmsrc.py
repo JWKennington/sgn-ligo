@@ -149,6 +149,7 @@ class DevShmSource(TSSource):
         self.send_gap_duration = {}
         # Read in the first gwf file to get the sample rates for each channel name
         for ifo in ifos:
+            self.file_t0[ifo] = None
             files = os.listdir(self.shared_memory_dirs[ifo])
             for f in reversed(sorted(files)):
                 if f.endswith(self.watch_suffix):
