@@ -317,6 +317,8 @@ class DevShmSource(TSSource):
                     )
                 except RuntimeError:
                     print(f"Could not read file {next_file}", traceback.format_exc(), file=sys.stderr)
+                    self.send_gap[ifo] = True
+                    self.send_gap_duration[ifo] = self.buffer_duration
                 else:
                     self.file_t0[ifo] = t0
 
