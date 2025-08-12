@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import os
+import traceback
+import sys
 import queue
 from dataclasses import dataclass
 
@@ -99,7 +101,7 @@ class DevShmSource(TSSource):
             if self.source_pad_names != tuple(self.channel_names):
                 raise ValueError("Expected source pad names to match channel names")
         else:
-            print(f"Generating source pads from channel names {self.channel_names}...")
+            print(f"Generating source pads from channel names {self.channel_names}...", file=sys.stderr)
 
             self.source_pad_names = tuple(
                 ci for c in self.channel_names.values() for ci in c
@@ -119,7 +121,7 @@ class DevShmSource(TSSource):
         self.next_buffer_t0 = {ifo: start for ifo in ifos}
         self.next_buffer_end = {ifo: start for ifo in ifos}
         if self.verbose:
-            print(f"Start up t0: {self.next_buffer_t0}", flush=True)
+            print(f"Start up t0: {self.next_buffer_t0}", file=sys.stderr)
 
         # Start the observer and set the stop attribute
         self._stop = False
@@ -164,7 +166,7 @@ class DevShmSource(TSSource):
             channel = self.channel_names[ifo][0]
             self.buffer_duration = _data_dict[channel].duration.value
 
-            print("sample rates:", self.rates[ifo])
+            print("sample rates:", self.rates[ifo], file=sys.stderr)
 
             self.data_dict[ifo] = {c: None for c in self.channel_names[ifo]}
             self.send_gaps[ifo] = False
@@ -199,12 +201,14 @@ class DevShmSource(TSSource):
                         self.send_gap[ifo] = False
                         print(
                             f"old data cont. | file_t0 {self.file_t0[ifo]} | "
-                            f"next_buffer_t0 {self.next_buffer_t0[ifo]} | ifo: {ifo}"
+                            f"next_buffer_t0 {self.next_buffer_t0[ifo]} | ifo: {ifo}",
+                            file=sys.stderr,
                         )
                     elif self.file_t0[ifo] > self.next_buffer_t0[ifo]:
                         print(
                             f"old data discont. | file_t0 {self.file_t0[ifo]} | "
-                            f"next_buffer_t0 {self.next_buffer_t0[ifo]} | ifo: {ifo}"
+                            f"next_buffer_t0 {self.next_buffer_t0[ifo]} | ifo: {ifo}",
+                            file=sys.stderr,
                         )
                         self.discont[ifo] = True
                         self.send_gap[ifo] = True
@@ -227,7 +231,7 @@ class DevShmSource(TSSource):
         for ifo in self.next_buffer_t0.keys():
             if old_data[ifo] is True:
                 # There is old data in the data_dict, don't read in new data
-                print(ifo, "There is old data in the data_dict, skip reading new file")
+                print(ifo, "There is old data in the data_dict, skip reading new file", file=sys.stderr)
                 continue
 
             if send_gap_sync:
@@ -237,7 +241,7 @@ class DevShmSource(TSSource):
                 self.send_gap[ifo] = True
                 self.send_gap_duration[ifo] = 0
                 if self.verbose:
-                    print(ifo, "send_gap_sync")
+                    print(ifo, "send_gap_sync", file=sys.stderr)
                 continue
 
             try:
@@ -250,11 +254,11 @@ class DevShmSource(TSSource):
                     next_file, t0 = self.queues[ifo].get(timeout=self.queue_timeout)
                     if not os.path.exists(next_file):
                         # the file doesn't exist anymore, get the next file
+                        print(f"File does not exist anymore {next_file} {t0}", file=sys.stderr)
                         continue
-                    self.file_t0[ifo] = t0
                     if self.verbose:
-                        print(next_file, t0, flush=True)
-                        print(self.next_buffer_t0)
+                        print(next_file, t0, file=sys.stderr)
+                        print(self.next_buffer_t0, file=sys.stderr)
                     if t0 < self.next_buffer_t0[ifo]:
                         continue
                     elif t0 == self.next_buffer_t0[ifo]:
@@ -282,7 +286,8 @@ class DevShmSource(TSSource):
                     print(
                         f"{ifo} Reached wait time, sending a gap buffer with t0 "
                         f"{self.next_buffer_t0[ifo]} | duration {self.buffer_duration}"
-                        f" | now {now()}"
+                        f" | now {now()}",
+                        file=sys.stderr,
                     )
                     self.send_gap[ifo] = True
                     self.send_gap_duration[ifo] = self.buffer_duration
@@ -298,16 +303,23 @@ class DevShmSource(TSSource):
                     self.send_gap_duration[ifo] = self.buffer_duration
                     print(
                         f"discont t0 {t0} | file_t0 {self.file_t0[ifo]} | "
-                        f"next_buffer_t0 {self.next_buffer_t0[ifo]} | ifo: {ifo}"
+                        f"next_buffer_t0 {self.next_buffer_t0[ifo]} | ifo: {ifo}",
+                        file=sys.stderr,
                     )
                 else:
                     self.send_gap[ifo] = False
                 # load data from the file using gwpy
                 assert self.channel_names is not None
-                self.data_dict[ifo] = TimeSeriesDict.read(
-                    next_file,
-                    self.channel_names[ifo],
-                )
+                try:
+                    self.data_dict[ifo] = TimeSeriesDict.read(
+                        next_file,
+                        self.channel_names[ifo],
+                    )
+                except RuntimeError:
+                    print(f"Could not read file {next_file}", traceback.format_exc(), file=sys.stderr)
+                else:
+                    self.file_t0[ifo] = t0
+
 
     def new(self, pad: SourcePad) -> TSFrame:
         """New frames are created on "pad" with an instance specific count and a name
@@ -331,7 +343,7 @@ class DevShmSource(TSSource):
                     f"{self.next_buffer_t0[ifo]} | Durtaion: "
                     f"{self.send_gap_duration[ifo]} | Time now: {now()} | ifo: "
                     f"{pad.name} | Time delay: {now() - self.next_buffer_t0[ifo]}",
-                    flush=True,
+                    file=sys.stderr,
                 )
             shape = (int(self.send_gap_duration[ifo] * self.rates[ifo][channel]),)
             outbuf = SeriesBuffer(
@@ -376,7 +388,7 @@ class DevShmSource(TSSource):
                 print(
                     f"{pad.name} Buffer t0: {t0} | Time Now: {now()} |"
                     f" Time delay: {float(now()) - t0:.3e}",
-                    flush=True,
+                    file=sys.stderr,
                 )
 
         # if at EOS, stop watching for new frame files, wait for threads to finish
