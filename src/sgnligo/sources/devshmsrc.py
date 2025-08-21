@@ -52,7 +52,7 @@ class _FrameFileEventHandler(PatternMatchingEventHandler):
 @dataclass
 class DevShmSource(TSSource):
     """Source element to read low-latency data streamed to /dev/shm in real-time for
-    multiple ifos. An inotify handler is created for each shared memory dir. The
+    multiple ifos. A watchdog handler is created for each shared memory dir. The
     internal pad will try to sync the ifos if one is falling behind.
 
 
