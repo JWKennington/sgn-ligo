@@ -78,6 +78,18 @@ dev = [
     "sgn-ligo[test]",
 ]
 
+[project.entry-points.sgn_elements]
+DevShmSource = "sgnligo.sources:DevShmSource"
+FrameReader = "sgnligo.sources:FrameReader"
+GWDataNoiseSource = "sgnligo.sources:GWDataNoiseSource"
+BitMask = "sgnligo.transforms:BitMask"
+HorizonDistanceTracker = "sgnligo.transforms.horizon:HorizonDistanceTracker"
+Latency = "sgnligo.transforms:Latency"
+Whiten = "sgnligo.transforms:Whiten"
+FrameSink = "sgnligo.sinks:FrameSink"
+InfluxSink = "sgnligo.sinks:InfluxSink"
+KafkaSink = "sgnligo.sinks:KafkaSink"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
