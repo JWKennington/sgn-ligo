@@ -6,6 +6,7 @@ The formatting is done using the gwpy library.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections import deque
 from dataclasses import dataclass, field
@@ -13,10 +14,9 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from gwpy.timeseries import TimeSeries, TimeSeriesDict
-from sgn.base import get_sgn_logger
 from sgnts.base import AdapterConfig, Offset, TSSink
 
-LOGGER = get_sgn_logger(__name__)
+logger = logging.getLogger("sgn")
 
 # filename format parameters
 FILENAME_PARAMS = (
@@ -131,7 +131,7 @@ class FrameSink(TSSink):
             else:
                 raise FileExistsError(f"output file exists: {outpath}")
 
-        LOGGER.info("Writing file %s...", outpath)
+        logger.getChild(self.name).info("Writing file %s...", outpath)
         tsd.write(outpath)
 
         # Add to file cache and check if cleanup is needed
@@ -174,7 +174,7 @@ class FrameSink(TSSink):
             #  segments
             exp_samples = self.duration * data.sample_rate
             if data.samples < exp_samples:
-                LOGGER.warning(
+                logger.getChild(self.name).warning(
                     "Data does not contain enough samples for duration %d. Skipping",
                     self.duration,
                 )
@@ -213,11 +213,15 @@ class FrameSink(TSSink):
                 if os.path.exists(filepath):
                     os.remove(filepath)
                     deleted_count += 1
-                    LOGGER.debug("Deleted old frame file: %s", filepath)
+                    logger.getChild(self.name).debug(
+                        "Deleted old frame file: %s", filepath
+                    )
             except Exception as e:
-                LOGGER.warning("Error deleting file %s", filepath, exc_info=e)
+                logger.getChild(self.name).warning(
+                    "Error deleting file %s", filepath, exc_info=e
+                )
 
         if deleted_count > 0:
-            LOGGER.info(
+            logger.getChild(self.name).info(
                 "Circular buffer cleanup: deleted %d old frame files", deleted_count
             )
