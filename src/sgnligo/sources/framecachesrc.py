@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -12,10 +13,10 @@ import numpy as np
 from gwpy.timeseries import TimeSeriesDict
 from lal import LIGOTimeGPS
 from lal.utils import CacheEntry
-from sgn.base import SourcePad, get_sgn_logger
+from sgn.base import SourcePad
 from sgnts.base import Audioadapter, Offset, SeriesBuffer, TSFrame, TSSource
 
-LOGGER = get_sgn_logger("FrameReader")
+logger = logging.getLogger("sgn")
 
 
 @dataclass
@@ -118,7 +119,7 @@ class FrameReader(TSSource):
             missing_segments.append(segment_remaining)
 
         if missing_segments:
-            LOGGER.warning(
+            logger.getChild(self.name).warning(
                 "%s has missing segment %s, padding with gaps",
                 self.name,
                 missing_segments,
