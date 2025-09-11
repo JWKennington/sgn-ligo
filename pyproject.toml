@@ -15,7 +15,6 @@ dependencies = [
     "gwpy",
     "igwn-ligolw",
     "igwn-segments",
-    "inotify-simple", # TODO: note this is LINUX only, should remove
     "lalsuite>=7.26",
     "ligo-scald",
     "scipy",
