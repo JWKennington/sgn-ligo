@@ -55,3 +55,13 @@ flake8-code_quality:
     - echo "Installing SGN Family libraries"
     - |
       pip install -r build_requirements.txt
+
+check_makefile:
+  image: python:3.12
+  stage: test
+  script:
+    - apt-get update
+    - apt-get install -yqq make
+    - pip install -r build_requirements.txt
+    - pip install ".[dev]"
+    - make all
