@@ -990,7 +990,12 @@ class TestEdgeCases:
         pipeline = Mock()
 
         # Test arrakis sets default sample rate
-        with patch("sgn_arrakis.source.ArrakisSource"):
+        with patch("sgnligo.sources.datasource.ArrakisSource") as mock_arrakis:
+            # Create a mock instance that will be returned when
+            # ArrakisSource is instantiated
+            mock_instance = Mock()
+            mock_arrakis.return_value = mock_instance
+
             info = DataSourceInfo(
                 data_source="arrakis",
                 channel_name=["H1=FAKE-STRAIN"],
@@ -999,7 +1004,12 @@ class TestEdgeCases:
             assert info.input_sample_rate == 16384
 
         # Test gwdata-noise sets default sample rate
-        with patch("sgnligo.sources.datasource.GWDataNoiseSource"):
+        with patch("sgnligo.sources.datasource.GWDataNoiseSource") as mock_gwdata:
+            # Create a mock instance that will be returned when
+            # GWDataNoiseSource is instantiated
+            mock_instance = Mock()
+            mock_gwdata.return_value = mock_instance
+
             info = DataSourceInfo(
                 data_source="gwdata-noise",
                 channel_name=["H1=FAKE-STRAIN"],
