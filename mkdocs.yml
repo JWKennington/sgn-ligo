@@ -6,6 +6,7 @@ nav:
     - Key Concepts: user-guide/concepts.md
     - GWDataNoiseSource Tutorial: user-guide/gwdata_noise_source.md
     - GWIStat Tutorial: user-guide/gwistat-tutorial.md
+    - LL-DQ Tutorial: user-guide/ll-dq-tutorial.md
   - Developer Guide:
     - Contributing: dev-guide/contributing.md
   - API Reference:
@@ -41,6 +42,8 @@ plugins:
 theme:
   name: material
   logo: assets/img/sgnligo-small.png
+  features:
+    - content.code.copy
 
 extra_css:
   - assets/css/sgn.css

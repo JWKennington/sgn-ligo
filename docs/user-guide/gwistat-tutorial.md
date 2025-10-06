@@ -4,10 +4,11 @@
 
 GWIStat (Gravitational Wave Interferometer Status) is a tool for reading and interpreting state vector data from gravitational wave detectors. State vectors are bitmask values where each bit represents a different detector state or condition. This tutorial will walk you through:
 
-1. Creating fake frame files with state vector data
-2. Reading and interpreting the state vectors
-3. Understanding the JSON output format
-4. Sending results to Kafka or viewing them locally
+1. Using a simulated real-time data source to test GWIStat
+2. Creating fake frame files with state vector data
+3. Reading and interpreting the state vectors
+4. Understanding the JSON output format
+5. Sending results to Kafka or viewing them locally
 
 ## Prerequisites
 
@@ -17,7 +18,113 @@ Before starting, ensure you have installed the sgn-ligo package:
 pip install -e /path/to/sgn-ligo
 ```
 
-## Step 1: Understanding State Vectors
+## Quick Start: Using Simulated Real-Time Data
+
+The fastest way to get started with GWIStat is to use a simulated real-time data source. This example doesn't require any frame files and will generate simulated state vector data.
+
+### Step 1: Create a Bit Mapping File
+
+Create a file called `bitmask_mapping.json`:
+
+```json
+{
+  "0": "HOFT_OK",
+  "1": "OBS_INTENT",
+  "2": "SCIENCE_MODE",
+  "3": "INJECTION_MODE"
+}
+```
+
+### Step 2: Run GWIStat with Simulated Data
+
+Use the `gwdata-noise-realtime` data source to generate simulated state vector data:
+
+```bash
+sgn-ligo-gwistat \
+    --data-source gwdata-noise-realtime \
+    --channel-name H1:FAKE-STATE_VECTOR \
+    --mapping-file bitmask_mapping.json \
+    --gps-start-time 1400000000 \
+    --gps-end-time 1400000010 \
+    --verbose
+```
+
+This command:
+- Generates 10 seconds of simulated state vector data for LIGO Hanford (H1)
+- By default, uses state value 3 (bits 0 and 1 set: HOFT_OK + OBS_INTENT)
+- Interprets the bitmask values using your mapping file
+- Pretty-prints the JSON output to the console
+
+You'll see JSON output showing the interpreted state vector values:
+
+```json
+{
+  "topic": "gwistat.gwistat",
+  "tags": [],
+  "data_type": "time_series",
+  "timestamp": 1735056789.123,
+  "data": {
+    "time": [1400000000.0, 1400000000.0625, ...],
+    "data": [
+      {
+        "value": 3,
+        "active_bits": [0, 1],
+        "bit_meanings": ["HOFT_OK", "OBS_INTENT"]
+      },
+      ...
+    ]
+  }
+}
+```
+
+### Step 3 (Optional): Custom State Patterns
+
+To specify custom state vector patterns, create a state segments file `state_data.txt`:
+
+```bash
+# Format: start_gps end_gps bitmask_value
+1400000000 1400000003 1    # Only HOFT_OK
+1400000003 1400000006 3    # HOFT_OK + OBS_INTENT
+1400000006 1400000010 7    # HOFT_OK + OBS_INTENT + SCIENCE_MODE
+```
+
+Then run with `--state-segments-file`:
+
+```bash
+sgn-ligo-gwistat \
+    --data-source gwdata-noise-realtime \
+    --channel-name H1:FAKE-STATE_VECTOR \
+    --mapping-file bitmask_mapping.json \
+    --gps-start-time 1400000000 \
+    --gps-end-time 1400000010 \
+    --state-segments-file state_data.txt \
+    --verbose
+```
+
+### Step 4 (Optional): Send to Kafka
+
+To send the results to a Kafka server instead of printing to console:
+
+```bash
+sgn-ligo-gwistat \
+    --data-source gwdata-noise-realtime \
+    --channel-name H1:FAKE-STATE_VECTOR \
+    --mapping-file bitmask_mapping.json \
+    --gps-start-time 1400000000 \
+    --gps-end-time 1400000010 \
+    --output-kafka-server localhost:9092 \
+    --kafka-topic detector_status \
+    --kafka-tag H1 \
+    --verbose
+```
+
+!!! tip "Comparison with DevShm"
+    The `gwdata-noise-realtime` source works just like `devshm`, but generates simulated state vector data instead of reading from shared memory. This is perfect for testing and development without requiring access to actual detector data streams.
+
+!!! tip "Default State Value"
+    Without `--state-segments-file`, the source generates a constant state value of 3 (bits 0 and 1 set), simulating a detector in normal observing mode with valid h(t) data.
+
+## Understanding State Vectors
 
 State vectors in gravitational wave detectors are integer values where each bit position has a specific meaning. For example:
 
@@ -27,7 +134,11 @@ State vectors in gravitational wave detectors are integer values where each bit 
 
 When multiple bits are set, the state vector represents multiple simultaneous conditions.
 
-## Step 2: Creating Test Data with Fake Frames
+## Working with Frame Files (Offline Analysis)
+
+If you have existing frame files or want to test with offline data, you can use GWIStat to analyze state vectors stored in frame files. The following sections show how to create test frame files and analyze them.
+
+### Creating Test Data with Fake Frames
 
 First, let's generate some test frame files containing state vector data. The `sgn-ligo-fake-frames` tool creates frames with:
 
@@ -90,11 +201,11 @@ The state vector data follows the pattern defined in your state file:
 !!! info "Frame Generation"
     We generate 90 seconds of data to ensure all 5 frames are written due to FrameSink's internal stride buffering. The state file defines patterns up to 80 seconds.
 
-## Step 3: Creating a Bit Mapping File
+### Bit Mapping Formats
 
 GWIStat uses a JSON file to map bit positions to their meanings. The file supports two formats:
 
-### Simple Format (Backward Compatible)
+#### Simple Format (Backward Compatible)
 
 Create a file called `bitmask_mapping.json`:
 
@@ -111,7 +222,7 @@ Create a file called `bitmask_mapping.json`:
 }
 ```
 
-### Extended Format (With Value Meanings)
+#### Extended Format (With Value Meanings)
 
 For more advanced use cases, you can define both individual bit meanings and composite value meanings:
 
@@ -147,11 +258,11 @@ The extended format allows you to:
     - `gwistat_mapping_simple.json` - Simple format example with basic bit mappings
     - `gwistat_mapping_example.json` - Extended format example with both bit and value mappings for a realistic detector configuration
 
-## Step 4: Running GWIStat
+### Analyzing Frame Files with GWIStat
 
 Now let's analyze the state vector data using GWIStat:
 
-### Basic Usage (Pretty Print to Console)
+#### Basic Usage (Pretty Print to Console)
 
 ```bash
 sgn-ligo-gwistat \
@@ -166,7 +277,7 @@ sgn-ligo-gwistat \
 
 This will output JSON to the console showing the interpreted state vectors.
 
-### Understanding the Output
+#### Understanding the Output
 
 The output will be JSON formatted like this:
 
@@ -202,7 +313,7 @@ Each entry in the data array contains:
 - `bit_meanings`: Human-readable meanings for the active bits
 - `value_meaning` (optional): Composite meaning for the specific value (when using extended format)
 
-## Step 5: Sending to Kafka
+#### Sending to Kafka
 
 To send the results to a Kafka server instead of printing to console:
 
@@ -222,11 +333,11 @@ sgn-ligo-gwistat \
 
 This sends the interpreted state vector data to the Kafka topic `gwistat.state_vector_analysis` with the tag `L1`.
 
-## Step 6: Using Advanced Mapping Features
+### Using Advanced Mapping Features
 
 The extended mapping format is particularly useful when certain bit combinations have specific operational meanings. Here's a practical example:
 
-### Creating an Advanced Mapping File
+#### Creating an Advanced Mapping File
 
 ```json
 {
@@ -251,7 +362,7 @@ The extended mapping format is particularly useful when certain bit combinations
 }
 ```
 
-### Running with Advanced Mappings
+#### Running with Advanced Mappings
 
 When you run GWIStat with this mapping file:
 
@@ -286,7 +397,7 @@ This allows monitoring systems to:
 - Use `value_meaning` for high-level status displays
 - Alert on specific composite states
 
-## Step 7: Real-Time Analysis with DevShm
+## Real-Time Analysis with DevShm
 
 GWIStat can read from shared memory for real-time analysis. You can either connect to an existing data stream or generate test data using `sgn-ligo-fake-frames`.
 

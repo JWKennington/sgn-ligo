@@ -9,6 +9,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import numpy as np
 import igwn_segments as segments
 from igwn_ligolw import utils as ligolw_utils
 from igwn_ligolw.utils import segments as ligolw_segments
@@ -18,7 +19,7 @@ from sgn_arrakis.source import ArrakisSource
 from sgnts.sources import FakeSeriesSource, SegmentSource
 from sgnts.transforms import Adder, Gate
 
-from sgnligo.base import parse_list_to_dict
+from sgnligo.base import parse_list_to_dict, read_segments_and_values_from_file
 from sgnligo.sources.devshmsrc import DevShmSource
 from sgnligo.sources.framecachesrc import FrameReader
 from sgnligo.sources.gwdata_noise_source import GWDataNoiseSource
@@ -33,8 +34,16 @@ KNOWN_DATASOURCES = [
     "devshm",
     "arrakis",
     "gwdata-noise",
+    "gwdata-noise-realtime",
 ]
-FAKE_DATASOURCES = ["white", "sin", "impulse", "white-realtime", "gwdata-noise"]
+FAKE_DATASOURCES = [
+    "white",
+    "sin",
+    "impulse",
+    "white-realtime",
+    "gwdata-noise",
+    "gwdata-noise-realtime",
+]
 OFFLINE_DATASOURCES = ["white", "sin", "impulse", "frames", "gwdata-noise"]
 
 
@@ -45,7 +54,7 @@ class DataSourceInfo:
     Args:
         data_source:
             str, the data source, can be one of
-            [white|sin|impulse|white-realtime|frames|devshm|arrakis]
+            [white|sin|impulse|white-realtime|frames|devshm|arrakis|gwdata-noise|gwdata-noise-realtime]
         channel_name:
             list[str, ...], a list of channel names ["IFO=CHANNEL_NAME",...].
             For fake sources [white|sin|impulse|white-realtime], channel names are used
@@ -90,6 +99,12 @@ class DataSourceInfo:
         impulse_position:
             int, the sample point position to place the impulse data point. Default -1,
             which will generate the impulse position randomly
+        state_segments_file:
+            str, path to file with three columns (start end value) defining state vector
+            segments for gwdata-noise sources. Optional.
+        state_sample_rate:
+            int, sample rate for state vector channels when using gwdata-noise sources.
+            Default is 16 Hz (typical for state vectors).
     """
 
     data_source: str
@@ -109,6 +124,8 @@ class DataSourceInfo:
     input_sample_rate: Optional[int] = None
     impulse_position: int = -1
     real_time: bool = False
+    state_segments_file: Optional[str] = None
+    state_sample_rate: int = 16
 
     def __post_init__(self):
         self.channel_dict = parse_list_to_dict(self.channel_name)
@@ -207,6 +224,18 @@ class DataSourceInfo:
                     "Must specify input_sample_rate when data_source is one of"
                     f" {FAKE_DATASOURCES}"
                 )
+        elif self.data_source == "gwdata-noise-realtime":
+            # gwdata-noise-realtime doesn't require gps_end_time
+            if self.gps_start_time is not None and self.gps_end_time is not None:
+                if self.gps_start_time >= self.gps_end_time:
+                    raise ValueError("Must specify gps_start_time < gps_end_time")
+                else:
+                    self.seg = segments.segment(
+                        LIGOTimeGPS(self.gps_start_time),
+                        LIGOTimeGPS(self.gps_end_time),
+                    )
+            # If gps_end_time is None, seg remains None
+            # (for GWDataNoiseSource real-time mode)
         else:
             # Special case for gwdata-noise with real_time=True
             if self.data_source == "gwdata-noise" and self.real_time:
@@ -267,14 +296,17 @@ class DataSourceInfo:
                         raise ValueError("Inj frame cahce file does not exist")
 
             elif self.data_source in FAKE_DATASOURCES:
-                # gwdata-noise determines its own sample rate from PSD
+                # gwdata-noise and gwdata-noise-realtime determine their own
+                # sample rate from PSD
                 if (
-                    self.data_source != "gwdata-noise"
+                    self.data_source not in ["gwdata-noise", "gwdata-noise-realtime"]
                     and self.input_sample_rate is None
                 ):
+                    excluded = ["gwdata-noise", "gwdata-noise-realtime"]
+                    sources = [ds for ds in FAKE_DATASOURCES if ds not in excluded]
                     raise ValueError(
                         "Must specify input_sample_rate when data_source is one of"
-                        f" {[ds for ds in FAKE_DATASOURCES if ds != 'gwdata-noise']}"
+                        f" {sources}"
                     )
 
     @staticmethod
@@ -297,6 +329,8 @@ class DataSourceInfo:
             input_sample_rate=options.input_sample_rate,
             impulse_position=options.impulse_position,
             real_time=getattr(options, "real_time", False),
+            state_segments_file=getattr(options, "state_segments_file", None),
+            state_sample_rate=getattr(options, "state_sample_rate", 16),
         )
 
     @staticmethod
@@ -414,10 +448,26 @@ class DataSourceInfo:
             help="The sample point to put the impulse at.",
         )
         group.add_argument(
+            "--state-segments-file",
+            metavar="filename",
+            help="Path to file with three columns (start end value) defining state "
+            "vector segments for gwdata-noise sources. Each row defines a time segment "
+            "with a specific bitmask value.",
+        )
+        group.add_argument(
+            "--state-sample-rate",
+            metavar="Hz",
+            type=int,
+            default=16,
+            help="Sample rate for state vector channels when using gwdata-noise sources "
+            "(default: 16 Hz)",
+        )
+        group.add_argument(
             "--real-time",
             action="store_true",
             help="Generate data in real time (for white-realtime and "
-            "gwdata-noise sources).",
+            "gwdata-noise sources). Note: gwdata-noise-realtime data source "
+            "automatically enables real-time mode.",
         )
 
 
@@ -645,7 +695,10 @@ def datasource(
                     )
                     source_name = "_InjAdd"
                     pad_names[ifo] = ifo
-            elif info.data_source == "gwdata-noise":
+            elif (
+                info.data_source == "gwdata-noise"
+                or info.data_source == "gwdata-noise-realtime"
+            ):
                 # Handle GWDataNoiseSource differently as it creates all
                 # channels at once
                 break  # Exit the loop after setting up pad_names
@@ -704,7 +757,10 @@ def datasource(
                 source_out_links[ifo] = ifo + "_Gate:src:" + ifo
 
         # Handle GWDataNoiseSource after the loop since it creates all channels at once
-        if info.data_source == "gwdata-noise":
+        if (
+            info.data_source == "gwdata-noise"
+            or info.data_source == "gwdata-noise-realtime"
+        ):
             # Prepare channel dict with full channel names for GWDataNoiseSource
             gwdata_channel_dict = {}
             for ifo in info.ifos:
@@ -714,23 +770,124 @@ def datasource(
                     channel = f"{ifo}:{channel}"
                 gwdata_channel_dict[ifo] = channel
 
-            # GWDataNoiseSource handles all channels in a single source
+            # Determine if using real-time mode
+            is_realtime = (info.data_source == "gwdata-noise-realtime") or (
+                info.data_source == "gwdata-noise" and info.real_time
+            )
+
+            # GWDataNoiseSource handles all channels in a single source (strain data)
             gwdata_source = GWDataNoiseSource(
                 name="GWDataNoiseSource",
                 channel_dict=gwdata_channel_dict,
                 t0=info.gps_start_time,
                 end=info.gps_end_time,
-                real_time=info.real_time,
+                real_time=is_realtime,
                 verbose=verbose,
             )
             pipeline.insert(gwdata_source)
 
-            # Set up the output links for each channel
+            # Set up the output links for strain channels
             for ifo in info.ifos:
                 # Use the full channel name from gwdata_channel_dict
                 channel_name = gwdata_channel_dict[ifo]
                 pad_names[ifo] = channel_name
                 source_out_links[ifo] = f"GWDataNoiseSource:src:{channel_name}"
+
+            # Also create SegmentSource for state vector channels if requested
+            # This follows the same pattern as devshm: strain + state vector + optional gating
+            if info.state_channel_name is not None:
+                # Parse state channel dict
+                state_channel_dict = parse_list_to_dict(info.state_channel_name)
+
+                # Read state segments from file if provided, otherwise use default
+                if info.state_segments_file is not None:
+                    state_segments, state_values = read_segments_and_values_from_file(
+                        info.state_segments_file, verbose
+                    )
+                else:
+                    # Default: single segment covering entire time range with value 3
+                    # (simulating HOFT_OK + OBS_INTENT bits set)
+                    if info.gps_start_time is not None:
+                        start_ns = int(info.gps_start_time * 1e9)
+                        if info.gps_end_time is not None:
+                            end_ns = int(info.gps_end_time * 1e9)
+                        else:
+                            # For real-time mode without end time, use max int32
+                            end_ns = int(np.iinfo(np.int32).max * 1e9)
+                        state_segments = ((start_ns, end_ns),)
+                        state_values = (3,)  # Default: bits 0 and 1 set
+                        if verbose:
+                            print("Using default state segments: single segment with value 3")
+                    else:
+                        raise ValueError(
+                            "Must provide either state_segments_file or gps_start_time "
+                            "when using state_channel_name with gwdata-noise sources"
+                        )
+
+                # Create SegmentSource for each IFO's state vector channel
+                for ifo in state_channel_dict.keys():
+                    state_channel_name = state_channel_dict[ifo]
+                    if not state_channel_name.startswith(f"{ifo}:"):
+                        state_channel_name = f"{ifo}:{state_channel_name}"
+
+                    # SegmentSource doesn't support None for end time
+                    seg_end = (
+                        info.gps_end_time
+                        if info.gps_end_time is not None
+                        else float(np.iinfo(np.int32).max)
+                    )
+
+                    state_source = SegmentSource(
+                        name=f"{ifo}_StateSrc",
+                        source_pad_names=("state",),
+                        rate=info.state_sample_rate,
+                        t0=info.gps_start_time,
+                        end=seg_end,
+                        segments=state_segments,
+                        values=state_values,
+                    )
+                    pipeline.insert(state_source)
+
+                    if verbose:
+                        print(f"Created state vector source for {state_channel_name}")
+
+                    # If state_vector_on_bits is specified, apply BitMask + Gate
+                    # This follows the devshm pattern
+                    if info.state_vector_on_bits is not None:
+                        source_name = "_Gate"
+
+                        bit_mask = BitMask(
+                            name=ifo + "_Mask",
+                            sink_pad_names=(ifo,),
+                            source_pad_names=(ifo,),
+                            bit_mask=int(info.state_vector_on_dict[ifo]),
+                        )
+                        gate = Gate(
+                            name=ifo + source_name,
+                            sink_pad_names=("strain", "state_vector"),
+                            control="state_vector",
+                            source_pad_names=(ifo,),
+                        )
+
+                        # Get the strain channel name from gwdata_channel_dict
+                        strain_channel = gwdata_channel_dict[ifo]
+
+                        pipeline.insert(
+                            bit_mask,
+                            gate,
+                            link_map={
+                                ifo + "_Gate:snk:strain": f"GWDataNoiseSource:src:{strain_channel}",
+                                ifo + "_Mask:snk:" + ifo: f"{ifo}_StateSrc:src:state",
+                                ifo + "_Gate:snk:state_vector": ifo + "_Mask:src:" + ifo,
+                            },
+                        )
+
+                        # Update source_out_links to point to gated output
+                        pad_names[ifo] = ifo
+                        source_out_links[ifo] = ifo + source_name + ":src:" + ifo
+
+                        if verbose:
+                            print(f"Applied BitMask + Gate for {ifo} with mask {info.state_vector_on_dict[ifo]}")
 
             # Set the input sample rate from the source
             if info.input_sample_rate is None:

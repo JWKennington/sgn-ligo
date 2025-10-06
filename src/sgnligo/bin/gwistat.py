@@ -193,9 +193,9 @@ def parse_command_line():
     # Data source selection
     parser.add_argument(
         "--data-source",
-        choices=["devshm", "frames"],
+        choices=["devshm", "frames", "gwdata-noise-realtime"],
         default="devshm",
-        help="Data source type: devshm (real-time) or frames (offline)",
+        help="Data source type: devshm (real-time), frames (offline), or gwdata-noise-realtime (simulated real-time)",
     )
 
     # DevShmSource options
@@ -271,6 +271,12 @@ def parse_command_line():
         metavar="tag",
         help="Tag to include with Kafka messages (e.g., detector name)",
     )
+    parser.add_argument(
+        "--state-segments-file",
+        metavar="file",
+        help="Path to file with three columns (start end value) defining state vector "
+        "segments for gwdata-noise-realtime source (optional)",
+    )
 
     return parser.parse_args()
 
@@ -302,6 +308,67 @@ def bitmask_interpreter_pipeline(options):
             queue_timeout=options.queue_timeout,
             verbose=options.verbose,
         )
+    elif options.data_source == "gwdata-noise-realtime":
+        # Use SegmentSource to generate simulated state vector data
+        # State vectors are integer bitmask values sampled at 16 Hz
+        from sgnts.sources import SegmentSource
+        import numpy as np
+
+        # Read state segments from file if provided, otherwise use default
+        if options.state_segments_file is not None:
+            from sgnligo.base import read_segments_and_values_from_file
+            state_segments, state_values = read_segments_and_values_from_file(
+                options.state_segments_file, options.verbose
+            )
+        else:
+            # Default state segments: single segment with value 3 (bits 0 and 1 set)
+            # Simulates HOFT_OK + OBS_INTENT - typical observing state
+            if options.gps_start_time is not None:
+                start_ns = int(options.gps_start_time * 1e9)
+                if options.gps_end_time is not None:
+                    end_ns = int(options.gps_end_time * 1e9)
+                else:
+                    # For real-time mode without end time, use max int32
+                    end_ns = int(np.iinfo(np.int32).max * 1e9)
+                    options.gps_end_time = float(np.iinfo(np.int32).max)
+            else:
+                from sgnligo.base import now
+                start_time = float(int(now()))
+                start_ns = int(start_time * 1e9)
+                # Must provide end time when gps_start_time is None
+                if options.gps_end_time is None:
+                    raise ValueError(
+                        "--gps-end-time is required when --gps-start-time is not specified"
+                    )
+                end_ns = int(options.gps_end_time * 1e9)
+                options.gps_start_time = start_time
+
+            state_segments = ((start_ns, end_ns),)
+            state_values = (3,)  # Bits 0 and 1 set: HOFT_OK + OBS_INTENT
+
+        # SegmentSource doesn't support None for end time
+        seg_end = (
+            options.gps_end_time
+            if options.gps_end_time is not None
+            else float(np.iinfo(np.int32).max)
+        )
+
+        # Use channel name as the pad name for consistency with DevShmSource/FrameReader
+        source = SegmentSource(
+            name="DataSrc",
+            source_pad_names=(options.channel_name,),
+            rate=16,  # 16 Hz is typical for state vectors
+            t0=options.gps_start_time,
+            end=seg_end,
+            segments=state_segments,
+            values=state_values,
+        )
+
+        if options.verbose:
+            print(f"Created simulated state vector source for {options.channel_name}")
+            print(f"  Time range: {options.gps_start_time} - {options.gps_end_time}")
+            print(f"  State segments: {state_segments}")
+            print(f"  State values: {state_values}")
     else:  # frames
         if not options.frame_cache:
             raise ValueError("--frame-cache is required for frames source")
