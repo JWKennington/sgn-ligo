@@ -580,7 +580,7 @@ class TestDataSourceInfoStaticMethods:
         )
 
         # Check that all required arguments were added
-        assert group.add_argument.call_count == 17
+        assert group.add_argument.call_count == 19
 
         # Check a few specific calls
         calls = group.add_argument.call_args_list

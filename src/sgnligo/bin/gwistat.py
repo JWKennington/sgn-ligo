@@ -195,7 +195,10 @@ def parse_command_line():
         "--data-source",
         choices=["devshm", "frames", "gwdata-noise-realtime"],
         default="devshm",
-        help="Data source type: devshm (real-time), frames (offline), or gwdata-noise-realtime (simulated real-time)",
+        help=(
+            "Data source type: devshm (real-time), frames (offline), or "
+            "gwdata-noise-realtime (simulated real-time)"
+        ),
     )
 
     # DevShmSource options
@@ -311,12 +314,13 @@ def bitmask_interpreter_pipeline(options):
     elif options.data_source == "gwdata-noise-realtime":
         # Use SegmentSource to generate simulated state vector data
         # State vectors are integer bitmask values sampled at 16 Hz
-        from sgnts.sources import SegmentSource
         import numpy as np
+        from sgnts.sources import SegmentSource
 
         # Read state segments from file if provided, otherwise use default
         if options.state_segments_file is not None:
             from sgnligo.base import read_segments_and_values_from_file
+
             state_segments, state_values = read_segments_and_values_from_file(
                 options.state_segments_file, options.verbose
             )
@@ -333,12 +337,14 @@ def bitmask_interpreter_pipeline(options):
                     options.gps_end_time = float(np.iinfo(np.int32).max)
             else:
                 from sgnligo.base import now
+
                 start_time = float(int(now()))
                 start_ns = int(start_time * 1e9)
                 # Must provide end time when gps_start_time is None
                 if options.gps_end_time is None:
                     raise ValueError(
-                        "--gps-end-time is required when --gps-start-time is not specified"
+                        "--gps-end-time is required when --gps-start-time is not "
+                        "specified"
                     )
                 end_ns = int(options.gps_end_time * 1e9)
                 options.gps_start_time = start_time

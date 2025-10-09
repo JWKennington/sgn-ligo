@@ -9,8 +9,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
-import numpy as np
 import igwn_segments as segments
+import numpy as np
 from igwn_ligolw import utils as ligolw_utils
 from igwn_ligolw.utils import segments as ligolw_segments
 from lal import LIGOTimeGPS
@@ -459,8 +459,10 @@ class DataSourceInfo:
             metavar="Hz",
             type=int,
             default=16,
-            help="Sample rate for state vector channels when using gwdata-noise sources "
-            "(default: 16 Hz)",
+            help=(
+                "Sample rate for state vector channels when using gwdata-noise "
+                "sources (default: 16 Hz)"
+            ),
         )
         group.add_argument(
             "--real-time",
@@ -794,7 +796,8 @@ def datasource(
                 source_out_links[ifo] = f"GWDataNoiseSource:src:{channel_name}"
 
             # Also create SegmentSource for state vector channels if requested
-            # This follows the same pattern as devshm: strain + state vector + optional gating
+            # This follows the same pattern as devshm: strain + state vector +
+            # optional gating
             if info.state_channel_name is not None:
                 # Parse state channel dict
                 state_channel_dict = parse_list_to_dict(info.state_channel_name)
@@ -817,7 +820,10 @@ def datasource(
                         state_segments = ((start_ns, end_ns),)
                         state_values = (3,)  # Default: bits 0 and 1 set
                         if verbose:
-                            print("Using default state segments: single segment with value 3")
+                            print(
+                                "Using default state segments: single segment "
+                                "with value 3"
+                            )
                     else:
                         raise ValueError(
                             "Must provide either state_segments_file or gps_start_time "
@@ -876,9 +882,13 @@ def datasource(
                             bit_mask,
                             gate,
                             link_map={
-                                ifo + "_Gate:snk:strain": f"GWDataNoiseSource:src:{strain_channel}",
-                                ifo + "_Mask:snk:" + ifo: f"{ifo}_StateSrc:src:state",
-                                ifo + "_Gate:snk:state_vector": ifo + "_Mask:src:" + ifo,
+                                f"{ifo}_Gate:snk:strain": (
+                                    f"GWDataNoiseSource:src:{strain_channel}"
+                                ),
+                                f"{ifo}_Mask:snk:{ifo}": f"{ifo}_StateSrc:src:state",
+                                f"{ifo}_Gate:snk:state_vector": (
+                                    f"{ifo}_Mask:src:{ifo}"
+                                ),
                             },
                         )
 
@@ -887,7 +897,10 @@ def datasource(
                         source_out_links[ifo] = ifo + source_name + ":src:" + ifo
 
                         if verbose:
-                            print(f"Applied BitMask + Gate for {ifo} with mask {info.state_vector_on_dict[ifo]}")
+                            print(
+                                f"Applied BitMask + Gate for {ifo} with mask "
+                                f"{info.state_vector_on_dict[ifo]}"
+                            )
 
             # Set the input sample rate from the source
             if info.input_sample_rate is None:

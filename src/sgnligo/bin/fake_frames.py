@@ -296,7 +296,9 @@ def main():
     options = parse_command_line()
 
     # Read segments from file first
-    segments, values = read_segments_and_values_from_file(options.state_file, options.verbose)
+    segments, values = read_segments_and_values_from_file(
+        options.state_file, options.verbose
+    )
 
     if options.verbose:
         print(f"\nSegments loaded successfully: {len(segments)} segments")

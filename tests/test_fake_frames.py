@@ -8,11 +8,7 @@ import pytest
 
 # Import the module to test
 from sgnligo.base import read_segments_and_values_from_file
-from sgnligo.bin.fake_frames import (
-    generate_fake_frames,
-    main,
-    parse_command_line,
-)
+from sgnligo.bin.fake_frames import generate_fake_frames, main, parse_command_line
 
 
 class TestParseCommandLine:
@@ -132,7 +128,9 @@ class TestReadSegmentsAndValuesFromFile:
         state_file = tmp_path / "segments.txt"
         state_file.write_text("1000000000 1000000010 5\n")
 
-        segments, values = read_segments_and_values_from_file(str(state_file), verbose=True)
+        segments, values = read_segments_and_values_from_file(
+            str(state_file), verbose=True
+        )
         captured = capsys.readouterr()
         assert f"Reading segments and values from {state_file}" in captured.out
         assert "Segment 1: 1000000000.0s - 1000000010.0s, Value: 5" in captured.out
