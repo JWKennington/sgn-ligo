@@ -464,6 +464,66 @@ class TestDataSourceInfoGWDataNoise:
             )
 
 
+class TestDataSourceInfoGWDataNoiseRealtime:
+    """Test cases specific to gwdata-noise-realtime datasource."""
+
+    def test_gwdata_noise_realtime_none_end(self, capsys):
+        """Test gwdata-noise-realtime with None end time."""
+        info = DataSourceInfo(
+            data_source="gwdata-noise-realtime",
+            channel_name=["H1=FAKE-STRAIN"],
+            gps_start_time=1000,
+            gps_end_time=None,
+        )
+        assert info.seg is None
+
+    def test_gwdata_noise_realtime_with_times(self, capsys):
+        """Test gwdata-noise-realtime with both times."""
+        info = DataSourceInfo(
+            data_source="gwdata-noise-realtime",
+            channel_name=["H1=FAKE-STRAIN"],
+            gps_start_time=1000,
+            gps_end_time=2000,
+        )
+        assert info.seg is not None
+
+    def test_gwdata_noise_realtime_invalid_times(self):
+        """Test gwdata-noise-realtime with invalid time order."""
+        with pytest.raises(ValueError, match="gps_start_time < gps_end_time"):
+            DataSourceInfo(
+                data_source="gwdata-noise-realtime",
+                channel_name=["H1=FAKE-STRAIN"],
+                gps_start_time=2000,
+                gps_end_time=1000,
+            )
+
+    @skip_on_py310
+    @patch("sgnligo.sources.datasource.GWDataNoiseSource")
+    def test_datasource_gwdata_noise_realtime(self, mock_gwdata, capsys):
+        """Test datasource creation for gwdata-noise-realtime."""
+        pipeline = Mock()
+        info = DataSourceInfo(
+            data_source="gwdata-noise-realtime",
+            channel_name=["H1=FAKE-STRAIN", "L1=FAKE-STRAIN"],
+            gps_start_time=1000,
+        )
+
+        source_links, latency_links = datasource(pipeline, info, verbose=True)
+
+        # Verify GWDataNoiseSource was created with real_time=True
+        mock_gwdata.assert_called_once_with(
+            name="GWDataNoiseSource",
+            channel_dict={"H1": "H1:FAKE-STRAIN", "L1": "L1:FAKE-STRAIN"},
+            t0=1000,
+            end=None,
+            real_time=True,
+            verbose=True,
+        )
+
+        assert source_links["H1"] == "GWDataNoiseSource:src:H1:FAKE-STRAIN"
+        assert source_links["L1"] == "GWDataNoiseSource:src:L1:FAKE-STRAIN"
+
+
 class TestDataSourceInfoStaticMethods:
     """Test cases for static methods."""
 
@@ -520,7 +580,7 @@ class TestDataSourceInfoStaticMethods:
         )
 
         # Check that all required arguments were added
-        assert group.add_argument.call_count == 17
+        assert group.add_argument.call_count == 19
 
         # Check a few specific calls
         calls = group.add_argument.call_args_list
@@ -707,6 +767,8 @@ class TestDatasourceFunction:
             source_pad_names=("H1",),
             rate=16384,
             real_time=True,
+            t0=None,
+            end=None,
         )
 
     @skip_on_py310

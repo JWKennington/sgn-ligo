@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 import gwpy
+import numpy as np
 
 
 def now():
@@ -18,6 +19,65 @@ def now():
     A convenience function to return the current gps time
     """
     return gwpy.time.to_gps(datetime.utcnow())
+
+
+def read_segments_and_values_from_file(filename, verbose=False):
+    """Read time segments and associated values from a file.
+
+    This function reads a text file defining time segments with associated values,
+    typically used for state vectors or data quality flags. The file format is:
+
+        start_gps end_gps value
+
+    where times are in GPS seconds and value is an integer (e.g., bitmask value).
+
+    Note: This is different from LIGO segment files which define only time intervals.
+    This function reads segment-value pairs for things like state vector patterns.
+
+    Args:
+        filename: Path to the segments+values file
+        verbose: Whether to print verbose output
+
+    Returns:
+        tuple: (segments, values) where segments are tuples of (start_ns, end_ns)
+               in nanoseconds and values are the corresponding integer values
+
+    Examples:
+        >>> segments, values = read_segments_and_values_from_file("state_data.txt")
+        >>> # segments = ((1400000000000000000, 1400000016000000000), ...)
+        >>> # values = (1, 3, 7, ...)
+    """
+    if verbose:
+        print(f"Reading segments and values from {filename}")
+
+    # Read the file
+    data = np.loadtxt(filename)
+
+    # Ensure we have 3 columns
+    if data.ndim == 1:
+        # Single row
+        data = data.reshape(1, -1)
+
+    if data.shape[1] != 3:
+        raise ValueError(
+            f"Segments file must have 3 columns (start end value), got {data.shape[1]}"
+        )
+
+    segments = []
+    values = []
+
+    for i, (start, end, value) in enumerate(data):
+        # Convert times to nanoseconds
+        start_ns = int(start * 1e9)
+        end_ns = int(end * 1e9)
+
+        segments.append((start_ns, end_ns))
+        values.append(int(value))
+
+        if verbose:
+            print(f"  Segment {i+1}: {start}s - {end}s, Value: {int(value)}")
+
+    return tuple(segments), tuple(values)
 
 
 def from_T050017(url):

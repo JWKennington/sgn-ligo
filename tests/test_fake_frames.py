@@ -7,12 +7,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 # Import the module to test
-from sgnligo.bin.fake_frames import (
-    generate_fake_frames,
-    main,
-    parse_command_line,
-    read_segments_from_file,
-)
+from sgnligo.base import read_segments_and_values_from_file
+from sgnligo.bin.fake_frames import generate_fake_frames, main, parse_command_line
 
 
 class TestParseCommandLine:
@@ -96,15 +92,15 @@ class TestParseCommandLine:
                 parse_command_line()
 
 
-class TestReadSegmentsFromFile:
-    """Test segment file reading."""
+class TestReadSegmentsAndValuesFromFile:
+    """Test segment and value file reading."""
 
     def test_read_single_segment(self, tmp_path):
         """Test reading a file with a single segment."""
         state_file = tmp_path / "segments.txt"
         state_file.write_text("1000000000 1000000010 3\n")
 
-        segments, values = read_segments_from_file(str(state_file))
+        segments, values = read_segments_and_values_from_file(str(state_file))
         assert len(segments) == 1
         assert len(values) == 1
         assert segments[0] == (1000000000000000000, 1000000010000000000)  # nanoseconds
@@ -119,7 +115,7 @@ class TestReadSegmentsFromFile:
             "1000000020 1000000030 3\n"
         )
 
-        segments, values = read_segments_from_file(str(state_file))
+        segments, values = read_segments_and_values_from_file(str(state_file))
         assert len(segments) == 3
         assert len(values) == 3
         assert segments[0] == (1000000000000000000, 1000000010000000000)
@@ -132,9 +128,11 @@ class TestReadSegmentsFromFile:
         state_file = tmp_path / "segments.txt"
         state_file.write_text("1000000000 1000000010 5\n")
 
-        segments, values = read_segments_from_file(str(state_file), verbose=True)
+        segments, values = read_segments_and_values_from_file(
+            str(state_file), verbose=True
+        )
         captured = capsys.readouterr()
-        assert f"Reading segments from {state_file}" in captured.out
+        assert f"Reading segments and values from {state_file}" in captured.out
         assert "Segment 1: 1000000000.0s - 1000000010.0s, Value: 5" in captured.out
 
     def test_read_segments_single_row(self, tmp_path):
@@ -142,7 +140,7 @@ class TestReadSegmentsFromFile:
         state_file = tmp_path / "segments.txt"
         state_file.write_text("1000000000 1000000010 7")  # No newline
 
-        segments, values = read_segments_from_file(str(state_file))
+        segments, values = read_segments_and_values_from_file(str(state_file))
         assert len(segments) == 1
         assert values[0] == 7
 
@@ -152,7 +150,7 @@ class TestReadSegmentsFromFile:
         state_file.write_text("1000000000 1000000010\n")  # Only 2 columns
 
         with pytest.raises(ValueError, match="must have 3 columns"):
-            read_segments_from_file(str(state_file))
+            read_segments_and_values_from_file(str(state_file))
 
     def test_read_segments_with_comments(self, tmp_path):
         """Test reading a file with comments."""
@@ -164,7 +162,7 @@ class TestReadSegmentsFromFile:
             "1000000010 1000000020 2\n"
         )
 
-        segments, values = read_segments_from_file(str(state_file))
+        segments, values = read_segments_and_values_from_file(str(state_file))
         assert len(segments) == 2
         assert values == (1, 2)
 
@@ -556,7 +554,7 @@ class TestGenerateFakeFrames:
 class TestMain:
     """Test main entry point."""
 
-    @patch("sgnligo.bin.fake_frames.read_segments_from_file")
+    @patch("sgnligo.bin.fake_frames.read_segments_and_values_from_file")
     @patch("sgnligo.bin.fake_frames.generate_fake_frames")
     @patch("sgnligo.bin.fake_frames.parse_command_line")
     def test_main_basic(self, mock_parse, mock_generate, mock_read_segments):
@@ -593,7 +591,7 @@ class TestMain:
         mock_read_segments.assert_called_once_with("segments.txt", False)
         mock_generate.assert_called_once()
 
-    @patch("sgnligo.bin.fake_frames.read_segments_from_file")
+    @patch("sgnligo.bin.fake_frames.read_segments_and_values_from_file")
     @patch("sgnligo.bin.fake_frames.generate_fake_frames")
     @patch("sgnligo.bin.fake_frames.parse_command_line")
     @patch("sgnligo.bin.fake_frames.now")
@@ -642,7 +640,7 @@ class TestMain:
         assert "History retention: 600 seconds" in captured.out
         assert "Running in real-time mode" in captured.out
 
-    @patch("sgnligo.bin.fake_frames.read_segments_from_file")
+    @patch("sgnligo.bin.fake_frames.read_segments_and_values_from_file")
     @patch("sgnligo.bin.fake_frames.generate_fake_frames")
     @patch("sgnligo.bin.fake_frames.parse_command_line")
     @patch("sgnligo.bin.fake_frames.now")
@@ -691,7 +689,7 @@ class TestMain:
         assert "Calculated end time: 1234567990" in captured.out
         assert "(duration: 100s)" in captured.out
 
-    @patch("sgnligo.bin.fake_frames.read_segments_from_file")
+    @patch("sgnligo.bin.fake_frames.read_segments_and_values_from_file")
     @patch("sgnligo.bin.fake_frames.generate_fake_frames")
     @patch("sgnligo.bin.fake_frames.parse_command_line")
     def test_main_batch_mode_with_times(
@@ -730,7 +728,7 @@ class TestMain:
         assert mock_options.gps_start_time == 1000000000.0
         assert mock_options.gps_end_time == 1000000100.0
 
-    @patch("sgnligo.bin.fake_frames.read_segments_from_file")
+    @patch("sgnligo.bin.fake_frames.read_segments_and_values_from_file")
     @patch("sgnligo.bin.fake_frames.parse_command_line")
     def test_main_segment_loading_verbose(self, mock_parse, mock_read_segments, capsys):
         """Test verbose output during segment loading."""
