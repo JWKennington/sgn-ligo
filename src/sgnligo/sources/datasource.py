@@ -714,6 +714,8 @@ def datasource(
                         source_pad_names=source_pad_names,
                         rate=info.input_sample_rate,
                         real_time=True,
+                        t0=info.gps_start_time,
+                        end=info.gps_end_time,
                     ),
                 )
             else:

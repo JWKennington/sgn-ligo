@@ -4,6 +4,7 @@ nav:
   - Home: index.md
   - User Guide:
     - Key Concepts: user-guide/concepts.md
+    - DataSource Tutorial: user-guide/datasource-tutorial.md
     - GWDataNoiseSource Tutorial: user-guide/gwdata_noise_source.md
     - GWIStat Tutorial: user-guide/gwistat-tutorial.md
     - LL-DQ Tutorial: user-guide/ll-dq-tutorial.md
