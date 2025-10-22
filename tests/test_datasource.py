@@ -767,6 +767,8 @@ class TestDatasourceFunction:
             source_pad_names=("H1",),
             rate=16384,
             real_time=True,
+            t0=None,
+            end=None,
         )
 
     @skip_on_py310
