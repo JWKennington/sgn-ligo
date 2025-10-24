@@ -76,13 +76,14 @@ class FrameSink(TSSink):
         self.sink_pad_names = self.channels
 
         # setup the adapter config for the audioadapter
+        # ensure data is aligned to second boundaries
         if self.adapter_config is not None:
             raise RuntimeError(
                 "specifying AdapterConfig is not supported in this element "
                 "as they are handled internally."
             )
         stride = Offset.fromsec(self.duration)
-        self.adapter_config = AdapterConfig(stride=stride)
+        self.adapter_config = AdapterConfig(stride=stride, align_to=Offset.fromsec(1))
 
         # Call parent post init
         super().__post_init__()

@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from sgn.apps import Pipeline
 from sgnts.sources import FakeSeriesSource
+from sgnts.transforms import Resampler
 
 from sgnligo.sinks import FrameSink
 
@@ -596,3 +597,69 @@ class TestFrameSinkCoverage:
             mock_remove.assert_not_called()
             # Cache should remain unchanged
             assert len(sink._file_cache) == 3
+
+    def test_frame_sink_with_misaligned_resampler(self):
+        """Test FrameSink with misaligned input from Resampler.
+
+        Pipeline: FakeSeriesSource -> Resampler -> FrameSink
+
+        The Resampler introduces offset misalignment due to FIR filter latency.
+        Without automatic alignment in AdapterConfig, this should cause an
+        assertion error when FrameSink tries to verify integer second boundaries.
+        """
+        pipeline = Pipeline()
+        t0 = 0.0
+        inrate = 16384
+        outrate = 2048
+
+        # 2 frame files, extra 1 second padding to handle resampler offset
+        frame_duration = 3  # seconds
+        total_duration = (2 * frame_duration) + 1
+
+        with TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir)
+            path_format = (
+                path
+                / "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
+            )
+
+            pipeline.insert(
+                FakeSeriesSource(
+                    name="src_H1",
+                    source_pad_names=("H1",),
+                    rate=inrate,
+                    t0=t0,
+                    end=total_duration,
+                ),
+                Resampler(
+                    name="resample",
+                    sink_pad_names=("H1",),
+                    source_pad_names=("H1",),
+                    inrate=inrate,
+                    outrate=outrate,
+                ),
+                FrameSink(
+                    name="snk",
+                    channels=("H1:FOO-BAR",),
+                    duration=frame_duration,
+                    path=path_format.as_posix(),
+                    description="RESAMPLE_TEST",
+                ),
+                link_map={
+                    "resample:snk:H1": "src_H1:src:H1",
+                    "snk:snk:H1:FOO-BAR": "resample:src:H1",
+                },
+            )
+
+            pipeline.run()
+
+            # Verify both frames were written
+            files = list(path.glob("*.gwf"))
+            expected_files = [
+                path / "H1-RESAMPLE_TEST-0000000000-3.gwf",
+                path / "H1-RESAMPLE_TEST-0000000003-3.gwf",
+            ]
+            assert (
+                len(files) == 2
+            ), f"Expected 2 frames, got {len(files)}: {[f.name for f in files]}"
+            assert all(f.exists() for f in expected_files), "Missing expected frames"
