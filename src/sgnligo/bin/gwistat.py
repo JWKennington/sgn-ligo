@@ -175,14 +175,14 @@ class BitMaskInterpreter(TSTransform):
         frame_start_ns = frame.offset + Offset.offset_ref_t0
         frame_end_ns = frame.end_offset + Offset.offset_ref_t0
 
-        event_buffer = EventBuffer(
-            ts=frame_start_ns,
-            te=frame_end_ns,
-            data=kafka_data,
+        event_buffer = EventBuffer.from_span(
+            frame_start_ns,
+            frame_end_ns,
+            kafka_data,
         )
 
         return EventFrame(
-            events={"kafka": event_buffer},
+            data=[event_buffer],
             EOS=frame.EOS,
         )
 
