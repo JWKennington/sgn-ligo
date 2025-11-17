@@ -222,6 +222,7 @@ class FrameReader(TSSource):
         """Check if we need to read the next gw frame file in the cache. All channels
         are read at once.
         """
+        super().internal()
 
         # load next frame of data from disk when we have less than
         # one buffer length of data left
