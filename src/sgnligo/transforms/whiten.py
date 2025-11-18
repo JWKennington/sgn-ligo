@@ -437,24 +437,24 @@ class Whiten(TSTransform):
         frame = self.preparedframes[self.sink_pads[0]]
         EOS = frame.EOS
         metadata = frame.metadata
-        outoffsets = self.preparedoutoffsets[self.sink_pads[0]]
+        outoffset_info = self.preparedoutoffsets
 
         if self.first_output_offset is None:
             self.first_output_offset = frame.offset
 
-        padded_data_offset = outoffsets[0]["offset"] - Offset.fromsamples(
+        padded_data_offset = outoffset_info["offset"] - Offset.fromsamples(
             self.z_whiten, self.whiten_sample_rate
         )
 
         # FIXME: can we make this more general?
         if padded_data_offset < self.first_output_offset:
             # we are in the startup stage, don't output yet
-            outoffset = outoffsets[0]["offset"]
+            outoffset = outoffset_info["offset"]
             shape = (0,)
         else:
             outoffset = padded_data_offset
             shape = (
-                Offset.tosamples(outoffsets[0]["noffset"], self.whiten_sample_rate),
+                Offset.tosamples(outoffset_info["noffset"], self.whiten_sample_rate),
             )
 
         # the epoch of the psd is the mid point of the most recent fft
@@ -463,7 +463,7 @@ class Whiten(TSTransform):
         # FIXME: double check
 
         psd_epoch = int(
-            Offset.tons(outoffset + outoffsets[0]["noffset"])
+            Offset.tons(outoffset + outoffset_info["noffset"])
             + self.hann_length_whiten // 2 / self.whiten_sample_rate * 1e9
         )
 
@@ -471,7 +471,7 @@ class Whiten(TSTransform):
         # data before we can whiten. send a gap buffer
         if frame.is_gap:
             if (
-                outoffsets[0]["noffset"] != 0
+                outoffset_info["noffset"] != 0
                 and self.prev_data is not None
                 and self.prev_data.shape[-1] > 0
             ):

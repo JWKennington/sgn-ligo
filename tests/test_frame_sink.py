@@ -619,8 +619,7 @@ class TestFrameSinkCoverage:
         with TemporaryDirectory() as tmpdir:
             path = pathlib.Path(tmpdir)
             path_format = (
-                path
-                / "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
+                path / "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
             )
 
             pipeline.insert(
