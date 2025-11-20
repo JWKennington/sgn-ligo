@@ -82,6 +82,7 @@ class KafkaSink(SinkElement):
             self.trigger_data = None
 
         self.last_sent = now()
+        print('client', self.client)
 
     def _pretty_print(self, topic, data, data_type="time_series"):
         """Pretty print data to stdout in a formatted way."""
@@ -98,6 +99,7 @@ class KafkaSink(SinkElement):
     def write(self):
         if self.time_series_data is not None:
             for topic, data in self.time_series_data.items():
+                print('kafka sink', topic, data)
                 if len(data["time"]) > 0:
                     if self.client is not None:
                         self.client.write(self.prefix + topic, data, tags=self.tag)
@@ -107,6 +109,7 @@ class KafkaSink(SinkElement):
 
         if self.trigger_data is not None:
             for topic, data in self.trigger_data.items():
+                print('kafka sink trigger', topic, data)
                 if len(data) > 0:
                     if self.client is not None:
                         self.client.write(self.prefix + topic, data, tags=self.tag)
@@ -121,18 +124,19 @@ class KafkaSink(SinkElement):
         """
         for event_buffer in frame.data:
             events = event_buffer.data
-            if events is not None and isinstance(events, dict):
-                for topic, data in events.items():
-                    if (
-                        self.time_series_topics is not None
-                        and topic in self.time_series_topics
-                    ):
-                        self.time_series_data[topic]["time"].extend(data["time"])
-                        self.time_series_data[topic]["data"].extend(data["data"])
-                    elif (
-                        self.trigger_topics is not None and topic in self.trigger_topics
-                    ):
-                        self.trigger_data[topic].extend(data)
+            for event in events:
+                if event is not None and isinstance(event, dict):
+                    for topic, data in event.items():
+                        if (
+                            self.time_series_topics is not None
+                            and topic in self.time_series_topics
+                        ):
+                            self.time_series_data[topic]["time"].extend(data["time"])
+                            self.time_series_data[topic]["data"].extend(data["data"])
+                        elif (
+                            self.trigger_topics is not None and topic in self.trigger_topics
+                        ):
+                            self.trigger_data[topic].extend(data)
 
         if frame.EOS:
             self.mark_eos(pad)
