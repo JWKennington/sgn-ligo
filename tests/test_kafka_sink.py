@@ -238,7 +238,7 @@ class TestKafkaSinkPull:
                 "data": [10, 20, 30],
             }
         }
-        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
         frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
@@ -261,7 +261,7 @@ class TestKafkaSinkPull:
                 {"time": 2, "snr": 20},
             ]
         }
-        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
         frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
@@ -292,7 +292,7 @@ class TestKafkaSinkPull:
             "unknown_topic": {"time": [1], "data": [10]},
             "known_topic": {"time": [2], "data": [20]},
         }
-        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
         frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
@@ -372,7 +372,7 @@ class TestKafkaSinkInternal:
         sink.internal()
 
         captured = capsys.readouterr()
-        assert "shutdown: KafkaSink: close" in captured.out
+        assert "shutdown: KafkaSink: close" in captured.err
         mock_client.close.assert_called_once()
 
     def test_internal_at_eos_no_client(self, capsys):
@@ -386,7 +386,7 @@ class TestKafkaSinkInternal:
         sink.internal()
 
         captured = capsys.readouterr()
-        assert "shutdown: KafkaSink: close" in captured.out
+        assert "shutdown: KafkaSink: close" in captured.err
 
 
 class TestKafkaSinkIntegration:
@@ -417,7 +417,7 @@ class TestKafkaSinkIntegration:
                 "ts1": {"time": [1, 2], "data": [10, 20]},
                 "trig1": [{"snr": 15}],
             }
-            event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+            event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
             frame = EventFrame(data=[event_buffer], EOS=False)
 
             pad = Mock()
@@ -457,7 +457,7 @@ class TestKafkaSinkIntegration:
             "channel1": {"time": [1], "data": [10]},
             "trigger1": [{"snr": 20}],
         }
-        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
         frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
