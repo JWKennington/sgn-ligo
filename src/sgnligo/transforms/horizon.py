@@ -67,15 +67,18 @@ class HorizonDistanceTracker(TSTransform):
                 data["n_samples"] = metadata["n_samples"]
                 data["epoch"] = metadata["epoch"]
         else:
-            data = {}
-            data["horizon"] = None
-            data["time"] = ts
-            data["ifo"] = self.ifo
-            data["navg"] = None
-            data["n_samples"] = None
-            data["epoch"] = metadata["epoch"]
+            if self.range is True:
+                data = None
+            else:
+                data = {}
+                data["horizon"] = None
+                data["time"] = ts
+                data["ifo"] = self.ifo
+                data["navg"] = None
+                data["n_samples"] = None
+                data["epoch"] = metadata["epoch"]
 
         return EventFrame(
-            data=[EventBuffer.from_span(ts, te, data)],
+            data=[EventBuffer.from_span(ts, te, [data])],
             EOS=EOS,
         )

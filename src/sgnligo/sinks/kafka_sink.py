@@ -119,10 +119,9 @@ class KafkaSink(SinkElement):
         The data in the EventBuffer are expected to in the format of
         {topic: {"time": [t1, t2, ...], "data": [d1, d2, ...]}}
         """
-        for event_buffer in frame.data:
-            events = event_buffer.data
-            for event in events:
-                if event is not None and isinstance(event, dict):
+        for event in frame.events:
+            if event is not None:
+                if isinstance(event, dict):
                     for topic, data in event.items():
                         if (
                             self.time_series_topics is not None
@@ -135,6 +134,10 @@ class KafkaSink(SinkElement):
                             and topic in self.trigger_topics
                         ):
                             self.trigger_data[topic].extend(data)
+                        else:
+                            raise ValueError("Unknwon topic")
+                else:
+                    raise ValueError("Unknown data type ")
 
         if frame.EOS:
             self.mark_eos(pad)
