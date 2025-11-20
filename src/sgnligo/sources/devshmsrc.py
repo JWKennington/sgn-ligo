@@ -6,9 +6,9 @@
 from __future__ import annotations
 
 import os
-import traceback
-import sys
 import queue
+import sys
+import traceback
 from dataclasses import dataclass
 
 import numpy
@@ -101,7 +101,10 @@ class DevShmSource(TSSource):
             if self.source_pad_names != tuple(self.channel_names):
                 raise ValueError("Expected source pad names to match channel names")
         else:
-            print(f"Generating source pads from channel names {self.channel_names}...", file=sys.stderr)
+            print(
+                f"Generating source pads from channel names {self.channel_names}...",
+                file=sys.stderr,
+            )
 
             self.source_pad_names = tuple(
                 ci for c in self.channel_names.values() for ci in c
@@ -232,7 +235,11 @@ class DevShmSource(TSSource):
         for ifo in self.next_buffer_t0.keys():
             if old_data[ifo] is True:
                 # There is old data in the data_dict, don't read in new data
-                print(ifo, "There is old data in the data_dict, skip reading new file", file=sys.stderr)
+                print(
+                    ifo,
+                    "There is old data in the data_dict, skip reading new file",
+                    file=sys.stderr,
+                )
                 continue
 
             if send_gap_sync:
@@ -255,7 +262,10 @@ class DevShmSource(TSSource):
                     next_file, t0 = self.queues[ifo].get(timeout=self.queue_timeout)
                     if not os.path.exists(next_file):
                         # the file doesn't exist anymore, get the next file
-                        print(f"File does not exist anymore {next_file} {t0}", file=sys.stderr)
+                        print(
+                            f"File does not exist anymore {next_file} {t0}",
+                            file=sys.stderr,
+                        )
                         continue
                     if self.verbose:
                         print(next_file, t0, file=sys.stderr)
@@ -317,12 +327,15 @@ class DevShmSource(TSSource):
                         self.channel_names[ifo],
                     )
                 except RuntimeError:
-                    print(f"Could not read file {next_file}", traceback.format_exc(), file=sys.stderr)
+                    print(
+                        f"Could not read file {next_file}",
+                        traceback.format_exc(),
+                        file=sys.stderr,
+                    )
                     self.send_gap[ifo] = True
                     self.send_gap_duration[ifo] = self.buffer_duration
                 else:
                     self.file_t0[ifo] = t0
-
 
     def new(self, pad: SourcePad) -> TSFrame:
         """New frames are created on "pad" with an instance specific count and a name

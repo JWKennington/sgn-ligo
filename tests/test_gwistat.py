@@ -217,7 +217,7 @@ class TestBitMaskInterpreter:
         assert isinstance(event_buffer, EventBuffer)
 
         # Check data
-        data = event_buffer.data["test_topic"]
+        data = event_buffer.data[0]["test_topic"]
         assert len(data["time"]) == 1
         assert len(data["data"]) == 1
         assert data["data"][0]["value"] == 3
@@ -263,7 +263,7 @@ class TestBitMaskInterpreter:
         result = interpreter.new(source_pad)
 
         # Check data
-        data = result.data[0].data["test_topic"]
+        data = result.data[0].data[0]["test_topic"]
         assert len(data["data"]) == 6
 
         # Check each value
@@ -326,7 +326,7 @@ class TestBitMaskInterpreter:
         result = interpreter.new(source_pad)
 
         # Check data
-        data = result.data[0].data["test_topic"]
+        data = result.data[0].data[0]["test_topic"]
         assert data["data"][0]["value"] == 7
         assert data["data"][0]["active_bits"] == [0, 1, 2]
         # Only mapped bits should have meanings
@@ -368,7 +368,7 @@ class TestBitMaskInterpreter:
         result = interpreter.new(source_pad)
 
         # Check that no data was processed
-        data = result.data[0].data["test_topic"]
+        data = result.data[0].data[0]["test_topic"]
         assert len(data["data"]) == 0
 
     def test_new_with_eos(self, tmp_path):
@@ -443,7 +443,7 @@ class TestBitMaskInterpreter:
         result = interpreter.new(source_pad)
 
         # Check timestamps
-        data = result.data[0].data["test_topic"]
+        data = result.data[0].data[0]["test_topic"]
         times = data["time"]
         assert len(times) == 3
 
@@ -582,7 +582,7 @@ class TestBitMaskInterpreter:
         result = interpreter.new(source_pad)
 
         # Check data - should work as before
-        data = result.data[0].data["test_topic"]
+        data = result.data[0].data[0]["test_topic"]
         assert data["data"][0]["value"] == 7
         assert data["data"][0]["active_bits"] == [0, 1, 2]
         assert data["data"][0]["bit_meanings"] == ["BIT_0", "BIT_1", "BIT_2"]
@@ -631,7 +631,7 @@ class TestBitMaskInterpreter:
         result = interpreter.new(source_pad)
 
         # Check data
-        data = result.data[0].data["test_topic"]
+        data = result.data[0].data[0]["test_topic"]
         assert len(data["data"]) == 4
 
         # Check value 0 - NO_DATA
@@ -710,7 +710,7 @@ class TestBitMaskInterpreter:
         result = interpreter.new(source_pad)
 
         # Check data
-        data = result.data[0].data["test_topic"]
+        data = result.data[0].data[0]["test_topic"]
 
         # Value 0 - has value meaning
         assert data["data"][0]["value"] == 0

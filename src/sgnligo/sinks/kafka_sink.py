@@ -119,20 +119,25 @@ class KafkaSink(SinkElement):
         The data in the EventBuffer are expected to in the format of
         {topic: {"time": [t1, t2, ...], "data": [d1, d2, ...]}}
         """
-        for event_buffer in frame.data:
-            events = event_buffer.data
-            if events is not None and isinstance(events, dict):
-                for topic, data in events.items():
-                    if (
-                        self.time_series_topics is not None
-                        and topic in self.time_series_topics
-                    ):
-                        self.time_series_data[topic]["time"].extend(data["time"])
-                        self.time_series_data[topic]["data"].extend(data["data"])
-                    elif (
-                        self.trigger_topics is not None and topic in self.trigger_topics
-                    ):
-                        self.trigger_data[topic].extend(data)
+        for event in frame.events:
+            if event is not None:
+                if isinstance(event, dict):
+                    for topic, data in event.items():
+                        if (
+                            self.time_series_topics is not None
+                            and topic in self.time_series_topics
+                        ):
+                            self.time_series_data[topic]["time"].extend(data["time"])
+                            self.time_series_data[topic]["data"].extend(data["data"])
+                        elif (
+                            self.trigger_topics is not None
+                            and topic in self.trigger_topics
+                        ):
+                            self.trigger_data[topic].extend(data)
+                        else:
+                            raise ValueError("Unknwon topic")
+                else:
+                    raise ValueError("Unknown data type ")
 
         if frame.EOS:
             self.mark_eos(pad)
@@ -148,6 +153,6 @@ class KafkaSink(SinkElement):
                 self.last_sent = time_now
 
         if self.at_eos:
-            print("shutdown: KafkaSink: close")
+            print("shutdown: KafkaSink: close", file=sys.stderr)
             if self.client is not None:
                 self.client.close()

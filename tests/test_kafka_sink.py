@@ -238,7 +238,7 @@ class TestKafkaSinkPull:
                 "data": [10, 20, 30],
             }
         }
-        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
         frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
@@ -261,7 +261,7 @@ class TestKafkaSinkPull:
                 {"time": 2, "snr": 20},
             ]
         }
-        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
         frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
@@ -282,6 +282,23 @@ class TestKafkaSinkPull:
         pad = Mock()
         sink.pull(pad, frame)  # Should not raise
 
+    def test_pull_with_bad_data_type(self):
+        """Test pulling when data is None."""
+        sink = KafkaSink(
+            name="TestSink", sink_pad_names=["data"], time_series_topics=["channel1"]
+        )
+
+        frame_data = {
+            "known_topic": {"time": [2], "data": [20]},
+        }
+
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        frame = EventFrame(data=[event_buffer], EOS=False)
+
+        pad = Mock()
+        with pytest.raises(ValueError, match="Unknown data type"):
+            sink.pull(pad, frame)
+
     def test_pull_unknown_topic(self):
         """Test pulling data for unknown topic."""
         sink = KafkaSink(
@@ -292,15 +309,12 @@ class TestKafkaSinkPull:
             "unknown_topic": {"time": [1], "data": [10]},
             "known_topic": {"time": [2], "data": [20]},
         }
-        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
         frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()
-        sink.pull(pad, frame)
-
-        # Only known topic should be processed
-        assert sink.time_series_data["known_topic"]["time"] == [2]
-        assert "unknown_topic" not in sink.time_series_data
+        with pytest.raises(ValueError, match="Unknwon topic"):
+            sink.pull(pad, frame)
 
     def test_pull_with_eos(self):
         """Test pulling with EOS frame."""
@@ -372,7 +386,7 @@ class TestKafkaSinkInternal:
         sink.internal()
 
         captured = capsys.readouterr()
-        assert "shutdown: KafkaSink: close" in captured.out
+        assert "shutdown: KafkaSink: close" in captured.err
         mock_client.close.assert_called_once()
 
     def test_internal_at_eos_no_client(self, capsys):
@@ -386,7 +400,7 @@ class TestKafkaSinkInternal:
         sink.internal()
 
         captured = capsys.readouterr()
-        assert "shutdown: KafkaSink: close" in captured.out
+        assert "shutdown: KafkaSink: close" in captured.err
 
 
 class TestKafkaSinkIntegration:
@@ -417,7 +431,7 @@ class TestKafkaSinkIntegration:
                 "ts1": {"time": [1, 2], "data": [10, 20]},
                 "trig1": [{"snr": 15}],
             }
-            event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+            event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
             frame = EventFrame(data=[event_buffer], EOS=False)
 
             pad = Mock()
@@ -457,7 +471,7 @@ class TestKafkaSinkIntegration:
             "channel1": {"time": [1], "data": [10]},
             "trigger1": [{"snr": 20}],
         }
-        event_buffer = EventBuffer.from_span(1000000000, 2000000000, frame_data)
+        event_buffer = EventBuffer.from_span(1000000000, 2000000000, [frame_data])
         frame = EventFrame(data=[event_buffer], EOS=False)
 
         pad = Mock()

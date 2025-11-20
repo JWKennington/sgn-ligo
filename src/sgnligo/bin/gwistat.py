@@ -178,7 +178,7 @@ class BitMaskInterpreter(TSTransform):
         event_buffer = EventBuffer.from_span(
             frame_start_ns,
             frame_end_ns,
-            kafka_data,
+            [kafka_data],
         )
 
         return EventFrame(
