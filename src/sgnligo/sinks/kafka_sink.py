@@ -82,7 +82,6 @@ class KafkaSink(SinkElement):
             self.trigger_data = None
 
         self.last_sent = now()
-        print('client', self.client)
 
     def _pretty_print(self, topic, data, data_type="time_series"):
         """Pretty print data to stdout in a formatted way."""
@@ -99,7 +98,6 @@ class KafkaSink(SinkElement):
     def write(self):
         if self.time_series_data is not None:
             for topic, data in self.time_series_data.items():
-                print('kafka sink', topic, data)
                 if len(data["time"]) > 0:
                     if self.client is not None:
                         self.client.write(self.prefix + topic, data, tags=self.tag)
@@ -109,7 +107,6 @@ class KafkaSink(SinkElement):
 
         if self.trigger_data is not None:
             for topic, data in self.trigger_data.items():
-                print('kafka sink trigger', topic, data)
                 if len(data) > 0:
                     if self.client is not None:
                         self.client.write(self.prefix + topic, data, tags=self.tag)
@@ -134,7 +131,8 @@ class KafkaSink(SinkElement):
                             self.time_series_data[topic]["time"].extend(data["time"])
                             self.time_series_data[topic]["data"].extend(data["data"])
                         elif (
-                            self.trigger_topics is not None and topic in self.trigger_topics
+                            self.trigger_topics is not None
+                            and topic in self.trigger_topics
                         ):
                             self.trigger_data[topic].extend(data)
 
@@ -152,6 +150,6 @@ class KafkaSink(SinkElement):
                 self.last_sent = time_now
 
         if self.at_eos:
-            print("shutdown: KafkaSink: close")
+            print("shutdown: KafkaSink: close", file=sys.stderr)
             if self.client is not None:
                 self.client.close()
