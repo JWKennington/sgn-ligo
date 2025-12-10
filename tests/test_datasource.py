@@ -1092,7 +1092,7 @@ class TestEdgeCases:
             )
             # Ensure the attribute doesn't exist
             if hasattr(info, "state_channel_dict"):
-                delattr(info, "state_channel_dict")
+                delattr(info, "state_channel_dict")  # noqa: B043
 
             source_links, latency_links = datasource(pipeline, info)
 

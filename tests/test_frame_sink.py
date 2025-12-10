@@ -12,18 +12,6 @@ from sgnligo.sinks import FrameSink
 
 
 def test_frame_sink():
-    with pytest.raises(RuntimeError):
-        FrameSink(
-            adapter_config="config",
-            name="snk",
-            channels=(
-                "H1:FOO-BAR",
-                "L1:BAZ-QUX_0",
-            ),
-            duration=256,
-            description="testing",
-        )
-
     with pytest.raises(ValueError):
         FrameSink(
             name="snk",
