@@ -650,3 +650,174 @@ class TestFrameSinkCoverage:
                 len(files) == 2
             ), f"Expected 2 frames, got {len(files)}: {[f.name for f in files]}"
             assert all(f.exists() for f in expected_files), "Missing expected frames"
+
+    @pytest.mark.freeze_time("1980-01-06 00:00:00", auto_tick_seconds=0.5)
+    def test_frame_sink_with_max_files_integration(self):
+        """Test FrameSink with max_files enabled - covers lines 135-136.
+
+        This test ensures that when max_files is set and files are written,
+        the circular buffer cleanup is triggered through _write_tsd.
+        """
+        pipeline = Pipeline()
+        t0 = 0.0
+        duration = 1  # 1 second frames
+
+        with TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir)
+            path_format = (
+                path / "{instruments}-{description}-{gps_start_time}-{duration}.gwf"
+            )
+
+            # Run pipeline with max_files=2 - will write 3 frames, keeping only 2
+            pipeline.insert(
+                FakeSeriesSource(
+                    name="src_H1",
+                    source_pad_names=("H1",),
+                    rate=256,
+                    t0=t0,
+                    end=3,  # 3 seconds = 3 frames
+                    real_time=True,
+                ),
+                FrameSink(
+                    name="snk",
+                    channels=("H1:TEST",),
+                    duration=duration,
+                    path=path_format.as_posix(),
+                    description="MAXFILES",
+                    max_files=2,  # Keep only 2 most recent files
+                ),
+                link_map={
+                    "snk:snk:H1:TEST": "src_H1:src:H1",
+                },
+            )
+            pipeline.run()
+
+            # After writing 3 files with max_files=2, only 2 should remain
+            files = list(path.glob("*.gwf"))
+            assert len(files) == 2, f"Expected 2 files, got {len(files)}"
+
+    def test_frame_sink_internal_frame_none(self):
+        """Test internal() when preparedframes returns None - covers line 157."""
+        from unittest.mock import Mock, patch
+
+        sink = FrameSink(
+            name="test_sink",
+            channels=("H1:TEST",),
+            duration=1,
+        )
+
+        # Mock the parent class's internal method
+        with patch.object(sink.__class__.__bases__[0], "internal"):
+            # Set up sink_pad_names and sink_pads
+            mock_pad = Mock()
+            sink.sink_pad_names = ("H1:TEST",)
+            sink.sink_pads = [mock_pad]
+
+            # Set preparedframes to return None for the pad
+            sink.preparedframes = {mock_pad: None}
+
+            # Call internal - should return early when frame is None
+            result = sink.internal()
+
+            # The method should return None (early return)
+            assert result is None
+
+    def test_frame_sink_internal_insufficient_samples(self):
+        """Test internal() when data has insufficient samples - covers lines 173-177."""
+        from unittest.mock import Mock, patch
+
+        sink = FrameSink(
+            name="test_sink",
+            channels=("H1:TEST",),
+            duration=10,  # Request 10 seconds of data
+        )
+
+        # Mock the parent class's internal method
+        with patch.object(sink.__class__.__bases__[0], "internal"):
+            # Set up sink_pad_names and sink_pads
+            mock_pad = Mock()
+            sink.sink_pad_names = ("H1:TEST",)
+            sink.sink_pads = [mock_pad]
+
+            # Create a mock frame with insufficient samples
+            mock_buffer = Mock()
+            mock_buffer.sample_rate = 256
+            mock_buffer.samples = 256  # Only 1 second of data (256 samples at 256 Hz)
+            # Expected samples = duration * sample_rate = 10 * 256 = 2560
+
+            mock_frame = Mock()
+            mock_frame.EOS = False
+            mock_frame.is_gap = False
+            mock_frame.buffers = [mock_buffer]
+
+            # Set preparedframes to return the mock frame
+            sink.preparedframes = {mock_pad: mock_frame}
+
+            # Call internal - should return early due to insufficient samples
+            result = sink.internal()
+
+            # The method should return None (early return)
+            assert result is None
+
+    def test_frame_sink_internal_gap_frame(self):
+        """Test internal() when frame is a gap - covers line 162."""
+        from unittest.mock import Mock, patch
+
+        sink = FrameSink(
+            name="test_sink",
+            channels=("H1:TEST",),
+            duration=1,
+        )
+
+        # Mock the parent class's internal method
+        with patch.object(sink.__class__.__bases__[0], "internal"):
+            # Set up sink_pad_names and sink_pads
+            mock_pad = Mock()
+            sink.sink_pad_names = ("H1:TEST",)
+            sink.sink_pads = [mock_pad]
+
+            # Create a mock frame that is a gap
+            mock_frame = Mock()
+            mock_frame.EOS = False
+            mock_frame.is_gap = True
+
+            # Set preparedframes to return the mock frame
+            sink.preparedframes = {mock_pad: mock_frame}
+
+            # Call internal - should return early when frame is a gap
+            result = sink.internal()
+
+            # The method should return None (early return)
+            assert result is None
+
+    def test_frame_sink_internal_eos(self):
+        """Test internal() when frame has EOS - covers line 160."""
+        from unittest.mock import Mock, patch
+
+        sink = FrameSink(
+            name="test_sink",
+            channels=("H1:TEST",),
+            duration=1,
+        )
+
+        # Mock the parent class's internal method and mark_eos
+        with patch.object(sink.__class__.__bases__[0], "internal"):
+            with patch.object(sink, "mark_eos") as mock_mark_eos:
+                # Set up sink_pad_names and sink_pads
+                mock_pad = Mock()
+                sink.sink_pad_names = ("H1:TEST",)
+                sink.sink_pads = [mock_pad]
+
+                # Create a mock frame with EOS and is_gap=True (to return early)
+                mock_frame = Mock()
+                mock_frame.EOS = True
+                mock_frame.is_gap = True  # This causes early return after mark_eos
+
+                # Set preparedframes to return the mock frame
+                sink.preparedframes = {mock_pad: mock_frame}
+
+                # Call internal
+                sink.internal()
+
+                # Verify mark_eos was called
+                mock_mark_eos.assert_called_once_with(mock_pad)
