@@ -1106,3 +1106,233 @@ class TestEdgeCases:
             )
 
             assert source_links["H1"] == "ArrakisSource:src:H1:FAKE-STRAIN"
+
+
+class TestGWDataNoiseStateChannels:
+    """Test cases for gwdata-noise with state channel configuration (lines 803-905)."""
+
+    @skip_on_py310
+    @patch("sgnligo.sources.datasource.SegmentSource")
+    @patch("sgnligo.sources.datasource.GWDataNoiseSource")
+    def test_gwdata_noise_with_state_channel_default_segments(
+        self, mock_gwdata, mock_segment_source, capsys
+    ):
+        """Test gwdata-noise with state_channel_name using default segments."""
+        pipeline = Mock()
+        info = DataSourceInfo(
+            data_source="gwdata-noise",
+            channel_name=["H1=STRAIN"],
+            gps_start_time=1000,
+            gps_end_time=2000,
+            state_channel_name=["H1=GDS-CALIB_STATE_VECTOR"],
+        )
+
+        source_links, latency_links = datasource(pipeline, info, verbose=True)
+
+        # Verify GWDataNoiseSource was created
+        mock_gwdata.assert_called_once()
+
+        # Verify SegmentSource was created for state vector
+        mock_segment_source.assert_called_once()
+        seg_call = mock_segment_source.call_args
+        assert seg_call[1]["name"] == "H1_StateSrc"
+        assert seg_call[1]["rate"] == 16  # Default state sample rate
+        assert seg_call[1]["t0"] == 1000
+        assert seg_call[1]["end"] == 2000
+        # Default state value is 3 (bits 0 and 1 set)
+        assert seg_call[1]["values"] == (3,)
+
+        # Verify verbose output
+        captured = capsys.readouterr()
+        assert "Using default state segments" in captured.out
+        assert "Created state vector source" in captured.out
+
+    @skip_on_py310
+    @patch("sgnligo.sources.datasource.SegmentSource")
+    @patch("sgnligo.sources.datasource.GWDataNoiseSource")
+    @patch("sgnligo.sources.datasource.read_segments_and_values_from_file")
+    def test_gwdata_noise_with_state_segments_file(
+        self, mock_read_segments, mock_gwdata, mock_segment_source, capsys
+    ):
+        """Test gwdata-noise with state_channel_name and state_segments_file."""
+        # Mock reading segments from file
+        mock_read_segments.return_value = (
+            ((1000_000_000_000, 2000_000_000_000),),  # segments in nanoseconds
+            (7,),  # values
+        )
+
+        pipeline = Mock()
+        info = DataSourceInfo(
+            data_source="gwdata-noise",
+            channel_name=["H1=STRAIN"],
+            gps_start_time=1000,
+            gps_end_time=2000,
+            state_channel_name=["H1=GDS-CALIB_STATE_VECTOR"],
+            state_segments_file="/path/to/segments.txt",
+        )
+
+        source_links, latency_links = datasource(pipeline, info, verbose=True)
+
+        # Verify read_segments_and_values_from_file was called
+        mock_read_segments.assert_called_once_with("/path/to/segments.txt", True)
+
+        # Verify SegmentSource was created with file segments
+        mock_segment_source.assert_called_once()
+        seg_call = mock_segment_source.call_args
+        assert seg_call[1]["segments"] == ((1000_000_000_000, 2000_000_000_000),)
+        assert seg_call[1]["values"] == (7,)
+
+    @skip_on_py310
+    @patch("sgnligo.sources.datasource.Gate")
+    @patch("sgnligo.sources.datasource.BitMask")
+    @patch("sgnligo.sources.datasource.SegmentSource")
+    @patch("sgnligo.sources.datasource.GWDataNoiseSource")
+    def test_gwdata_noise_with_state_vector_on_bits(
+        self, mock_gwdata, mock_segment_source, mock_bitmask, mock_gate, capsys
+    ):
+        """Test gwdata-noise with state_channel_name and state_vector_on_bits."""
+        from sgnligo.base import parse_list_to_dict
+
+        pipeline = Mock()
+        info = DataSourceInfo(
+            data_source="gwdata-noise",
+            channel_name=["H1=STRAIN", "L1=STRAIN"],
+            gps_start_time=1000,
+            gps_end_time=2000,
+            state_channel_name=[
+                "H1=GDS-CALIB_STATE_VECTOR",
+                "L1=GDS-CALIB_STATE_VECTOR",
+            ],
+            state_vector_on_bits=["H1=7", "L1=7"],
+        )
+        # Manually create state_vector_on_dict since it's only created for
+        # devshm/arrakis in validate()
+        info.state_vector_on_dict = parse_list_to_dict(info.state_vector_on_bits)
+
+        source_links, latency_links = datasource(pipeline, info, verbose=True)
+
+        # Verify GWDataNoiseSource was created
+        mock_gwdata.assert_called_once()
+
+        # Verify SegmentSource was created for each IFO
+        assert mock_segment_source.call_count == 2
+
+        # Verify BitMask was created for each IFO
+        assert mock_bitmask.call_count == 2
+        bitmask_calls = mock_bitmask.call_args_list
+        assert any(
+            call[1]["name"] == "H1_Mask" and call[1]["bit_mask"] == 7
+            for call in bitmask_calls
+        )
+        assert any(
+            call[1]["name"] == "L1_Mask" and call[1]["bit_mask"] == 7
+            for call in bitmask_calls
+        )
+
+        # Verify Gate was created for each IFO
+        assert mock_gate.call_count == 2
+        gate_calls = mock_gate.call_args_list
+        assert any(call[1]["name"] == "H1_Gate" for call in gate_calls)
+        assert any(call[1]["name"] == "L1_Gate" for call in gate_calls)
+
+        # Verify output links point to gated output
+        assert source_links["H1"] == "H1_Gate:src:H1"
+        assert source_links["L1"] == "L1_Gate:src:L1"
+
+        # Verify verbose output
+        captured = capsys.readouterr()
+        assert "Applied BitMask + Gate for H1" in captured.out
+        assert "Applied BitMask + Gate for L1" in captured.out
+
+    @skip_on_py310
+    @patch("sgnligo.sources.datasource.GWDataNoiseSource")
+    def test_gwdata_noise_state_channel_missing_times_error(self, mock_gwdata, capsys):
+        """Test error when state_channel_name used without gps_start_time."""
+        pipeline = Mock()
+        # Create info without gps_start_time
+        info = DataSourceInfo(
+            data_source="gwdata-noise-realtime",
+            channel_name=["H1=STRAIN"],
+            gps_start_time=None,  # No start time
+            state_channel_name=["H1=GDS-CALIB_STATE_VECTOR"],
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Must provide either state_segments_file or gps_start_time",
+        ):
+            datasource(pipeline, info)
+
+    @skip_on_py310
+    @patch("sgnligo.sources.datasource.SegmentSource")
+    @patch("sgnligo.sources.datasource.GWDataNoiseSource")
+    def test_gwdata_noise_realtime_with_state_channel_none_end(
+        self, mock_gwdata, mock_segment_source, capsys
+    ):
+        """Test gwdata-noise-realtime with state channel and None end time."""
+        pipeline = Mock()
+        info = DataSourceInfo(
+            data_source="gwdata-noise-realtime",
+            channel_name=["H1=STRAIN"],
+            gps_start_time=1000,
+            gps_end_time=None,  # Real-time mode
+            state_channel_name=["H1=GDS-CALIB_STATE_VECTOR"],
+        )
+
+        source_links, latency_links = datasource(pipeline, info, verbose=True)
+
+        # Verify SegmentSource was created with max int32 end time
+        mock_segment_source.assert_called_once()
+        seg_call = mock_segment_source.call_args
+        assert seg_call[1]["t0"] == 1000
+        # Should use max int32 for real-time mode
+        import numpy as np
+
+        assert seg_call[1]["end"] == float(np.iinfo(np.int32).max)
+
+    @skip_on_py310
+    @patch("sgnligo.sources.datasource.SegmentSource")
+    @patch("sgnligo.sources.datasource.GWDataNoiseSource")
+    def test_gwdata_noise_state_channel_name_formatting(
+        self, mock_gwdata, mock_segment_source, capsys
+    ):
+        """Test state channel name formatting (with and without IFO prefix)."""
+        pipeline = Mock()
+        info = DataSourceInfo(
+            data_source="gwdata-noise",
+            channel_name=["H1=STRAIN"],
+            gps_start_time=1000,
+            gps_end_time=2000,
+            # Channel name without IFO prefix - should be added
+            state_channel_name=["H1=GDS-CALIB_STATE_VECTOR"],
+        )
+
+        source_links, latency_links = datasource(pipeline, info, verbose=True)
+
+        # Verify verbose output shows full channel name with IFO prefix
+        captured = capsys.readouterr()
+        assert "H1:GDS-CALIB_STATE_VECTOR" in captured.out
+
+    @skip_on_py310
+    @patch("sgnligo.sources.datasource.SegmentSource")
+    @patch("sgnligo.sources.datasource.GWDataNoiseSource")
+    def test_gwdata_noise_custom_state_sample_rate(
+        self, mock_gwdata, mock_segment_source, capsys
+    ):
+        """Test gwdata-noise with custom state sample rate."""
+        pipeline = Mock()
+        info = DataSourceInfo(
+            data_source="gwdata-noise",
+            channel_name=["H1=STRAIN"],
+            gps_start_time=1000,
+            gps_end_time=2000,
+            state_channel_name=["H1=GDS-CALIB_STATE_VECTOR"],
+            state_sample_rate=32,  # Custom rate
+        )
+
+        source_links, latency_links = datasource(pipeline, info)
+
+        # Verify SegmentSource was created with custom rate
+        mock_segment_source.assert_called_once()
+        seg_call = mock_segment_source.call_args
+        assert seg_call[1]["rate"] == 32

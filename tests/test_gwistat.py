@@ -1032,6 +1032,286 @@ class TestBitmaskInterpreterPipeline:
         }
 
 
+class TestGWDataNoiseRealtimeSource:
+    """Test gwdata-noise-realtime data source in pipeline."""
+
+    @patch("sgnligo.bin.gwistat.Pipeline")
+    @patch("sgnts.sources.SegmentSource")
+    @patch("sgnligo.bin.gwistat.BitMaskInterpreter")
+    @patch("sgnligo.bin.gwistat.KafkaSink")
+    def test_pipeline_gwdata_noise_realtime_with_times(
+        self, mock_kafka_sink, mock_interpreter, mock_segment_source, mock_pipeline
+    ):
+        """Test gwdata-noise-realtime source with start and end times."""
+        options = Namespace(
+            data_source="gwdata-noise-realtime",
+            channel_name="L1:GDS-CALIB_STATE_VECTOR",
+            mapping_file="mapping.json",
+            gps_start_time=1234567890.0,
+            gps_end_time=1234567900.0,
+            state_segments_file=None,
+            verbose=False,
+            output_kafka_server=None,
+            kafka_topic="test_topic",
+            kafka_tag=None,
+            shared_memory_dir=None,
+            frame_cache=None,
+        )
+
+        # Mock instances
+        mock_pipe_instance = Mock()
+        mock_pipeline.return_value = mock_pipe_instance
+        mock_segment_instance = Mock()
+        mock_segment_source.return_value = mock_segment_instance
+        mock_interpreter_instance = Mock()
+        mock_interpreter.return_value = mock_interpreter_instance
+        mock_kafka_instance = Mock()
+        mock_kafka_sink.return_value = mock_kafka_instance
+
+        # Run pipeline
+        bitmask_interpreter_pipeline(options)
+
+        # Check SegmentSource was created correctly
+        mock_segment_source.assert_called_once()
+        call_kwargs = mock_segment_source.call_args[1]
+        assert call_kwargs["name"] == "DataSrc"
+        assert call_kwargs["source_pad_names"] == ("L1:GDS-CALIB_STATE_VECTOR",)
+        assert call_kwargs["rate"] == 16
+        assert call_kwargs["t0"] == 1234567890.0
+        assert call_kwargs["end"] == 1234567900.0
+
+        # Check pipeline was built
+        mock_pipeline.assert_called_once()
+        assert mock_pipe_instance.insert.call_count == 2
+        mock_pipe_instance.run.assert_called_once()
+
+    @patch("sgnligo.bin.gwistat.Pipeline")
+    @patch("sgnts.sources.SegmentSource")
+    @patch("sgnligo.bin.gwistat.BitMaskInterpreter")
+    @patch("sgnligo.bin.gwistat.KafkaSink")
+    def test_pipeline_gwdata_noise_realtime_no_end_time(
+        self, mock_kafka_sink, mock_interpreter, mock_segment_source, mock_pipeline
+    ):
+        """Test gwdata-noise-realtime source with start time but no end time."""
+        import numpy as np
+
+        options = Namespace(
+            data_source="gwdata-noise-realtime",
+            channel_name="L1:GDS-CALIB_STATE_VECTOR",
+            mapping_file="mapping.json",
+            gps_start_time=1234567890.0,
+            gps_end_time=None,
+            state_segments_file=None,
+            verbose=False,
+            output_kafka_server=None,
+            kafka_topic="test_topic",
+            kafka_tag=None,
+            shared_memory_dir=None,
+            frame_cache=None,
+        )
+
+        # Mock instances
+        mock_pipe_instance = Mock()
+        mock_pipeline.return_value = mock_pipe_instance
+        mock_segment_instance = Mock()
+        mock_segment_source.return_value = mock_segment_instance
+        mock_interpreter_instance = Mock()
+        mock_interpreter.return_value = mock_interpreter_instance
+        mock_kafka_instance = Mock()
+        mock_kafka_sink.return_value = mock_kafka_instance
+
+        # Run pipeline
+        bitmask_interpreter_pipeline(options)
+
+        # Check SegmentSource was created with max int32 as end time
+        mock_segment_source.assert_called_once()
+        call_kwargs = mock_segment_source.call_args[1]
+        assert call_kwargs["t0"] == 1234567890.0
+        assert call_kwargs["end"] == float(np.iinfo(np.int32).max)
+
+    @patch("sgnligo.bin.gwistat.Pipeline")
+    @patch("sgnts.sources.SegmentSource")
+    @patch("sgnligo.bin.gwistat.BitMaskInterpreter")
+    @patch("sgnligo.bin.gwistat.KafkaSink")
+    @patch("sgnligo.base.now")
+    def test_pipeline_gwdata_noise_realtime_no_start_time(
+        self,
+        mock_now,
+        mock_kafka_sink,
+        mock_interpreter,
+        mock_segment_source,
+        mock_pipeline,
+    ):
+        """Test gwdata-noise-realtime source without start time (uses current time)."""
+        mock_now.return_value = 1234567890.5  # Current GPS time
+
+        options = Namespace(
+            data_source="gwdata-noise-realtime",
+            channel_name="L1:GDS-CALIB_STATE_VECTOR",
+            mapping_file="mapping.json",
+            gps_start_time=None,
+            gps_end_time=1234567900.0,
+            state_segments_file=None,
+            verbose=False,
+            output_kafka_server=None,
+            kafka_topic="test_topic",
+            kafka_tag=None,
+            shared_memory_dir=None,
+            frame_cache=None,
+        )
+
+        # Mock instances
+        mock_pipe_instance = Mock()
+        mock_pipeline.return_value = mock_pipe_instance
+        mock_segment_instance = Mock()
+        mock_segment_source.return_value = mock_segment_instance
+        mock_interpreter_instance = Mock()
+        mock_interpreter.return_value = mock_interpreter_instance
+        mock_kafka_instance = Mock()
+        mock_kafka_sink.return_value = mock_kafka_instance
+
+        # Run pipeline
+        bitmask_interpreter_pipeline(options)
+
+        # Check SegmentSource was created with now() as start time
+        mock_segment_source.assert_called_once()
+        call_kwargs = mock_segment_source.call_args[1]
+        # Start time should be int(now()) = 1234567890
+        assert call_kwargs["t0"] == 1234567890.0
+        assert call_kwargs["end"] == 1234567900.0
+
+    def test_pipeline_gwdata_noise_realtime_no_times_error(self):
+        """Test error when neither start nor end time provided."""
+        options = Namespace(
+            data_source="gwdata-noise-realtime",
+            channel_name="L1:GDS-CALIB_STATE_VECTOR",
+            mapping_file="mapping.json",
+            gps_start_time=None,
+            gps_end_time=None,
+            state_segments_file=None,
+            verbose=False,
+            output_kafka_server=None,
+            kafka_topic="test_topic",
+            kafka_tag=None,
+            shared_memory_dir=None,
+            frame_cache=None,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="--gps-end-time is required when --gps-start-time is not specified",
+        ):
+            bitmask_interpreter_pipeline(options)
+
+    @patch("sgnligo.bin.gwistat.Pipeline")
+    @patch("sgnts.sources.SegmentSource")
+    @patch("sgnligo.bin.gwistat.BitMaskInterpreter")
+    @patch("sgnligo.bin.gwistat.KafkaSink")
+    @patch("sgnligo.base.read_segments_and_values_from_file")
+    def test_pipeline_gwdata_noise_realtime_with_segments_file(
+        self,
+        mock_read_segments,
+        mock_kafka_sink,
+        mock_interpreter,
+        mock_segment_source,
+        mock_pipeline,
+    ):
+        """Test gwdata-noise-realtime source with state segments file."""
+        # Mock the segments file reading
+        mock_read_segments.return_value = (
+            ((1234567890000000000, 1234567900000000000),),  # segments in nanoseconds
+            (7,),  # values
+        )
+
+        options = Namespace(
+            data_source="gwdata-noise-realtime",
+            channel_name="L1:GDS-CALIB_STATE_VECTOR",
+            mapping_file="mapping.json",
+            gps_start_time=1234567890.0,
+            gps_end_time=1234567900.0,
+            state_segments_file="/path/to/segments.txt",
+            verbose=True,
+            output_kafka_server=None,
+            kafka_topic="test_topic",
+            kafka_tag=None,
+            shared_memory_dir=None,
+            frame_cache=None,
+        )
+
+        # Mock instances
+        mock_pipe_instance = Mock()
+        mock_pipeline.return_value = mock_pipe_instance
+        mock_segment_instance = Mock()
+        mock_segment_source.return_value = mock_segment_instance
+        mock_interpreter_instance = Mock()
+        mock_interpreter.return_value = mock_interpreter_instance
+        mock_kafka_instance = Mock()
+        mock_kafka_sink.return_value = mock_kafka_instance
+
+        # Run pipeline
+        bitmask_interpreter_pipeline(options)
+
+        # Check that read_segments_and_values_from_file was called
+        mock_read_segments.assert_called_once_with("/path/to/segments.txt", True)
+
+        # Check SegmentSource was created with the segments from file
+        mock_segment_source.assert_called_once()
+        call_kwargs = mock_segment_source.call_args[1]
+        assert call_kwargs["segments"] == ((1234567890000000000, 1234567900000000000),)
+        assert call_kwargs["values"] == (7,)
+
+    @patch("sgnligo.bin.gwistat.Pipeline")
+    @patch("sgnts.sources.SegmentSource")
+    @patch("sgnligo.bin.gwistat.BitMaskInterpreter")
+    @patch("sgnligo.bin.gwistat.KafkaSink")
+    def test_pipeline_gwdata_noise_realtime_verbose(
+        self,
+        mock_kafka_sink,
+        mock_interpreter,
+        mock_segment_source,
+        mock_pipeline,
+        capsys,
+    ):
+        """Test gwdata-noise-realtime source with verbose output."""
+        options = Namespace(
+            data_source="gwdata-noise-realtime",
+            channel_name="L1:GDS-CALIB_STATE_VECTOR",
+            mapping_file="mapping.json",
+            gps_start_time=1234567890.0,
+            gps_end_time=1234567900.0,
+            state_segments_file=None,
+            verbose=True,
+            output_kafka_server=None,
+            kafka_topic="test_topic",
+            kafka_tag=None,
+            shared_memory_dir=None,
+            frame_cache=None,
+        )
+
+        # Mock instances
+        mock_pipe_instance = Mock()
+        mock_pipeline.return_value = mock_pipe_instance
+        mock_segment_instance = Mock()
+        mock_segment_source.return_value = mock_segment_instance
+        mock_interpreter_instance = Mock()
+        mock_interpreter.return_value = mock_interpreter_instance
+        mock_kafka_instance = Mock()
+        mock_kafka_sink.return_value = mock_kafka_instance
+
+        # Run pipeline
+        bitmask_interpreter_pipeline(options)
+
+        # Check verbose output
+        captured = capsys.readouterr()
+        assert (
+            "Created simulated state vector source for L1:GDS-CALIB_STATE_VECTOR"
+            in captured.out
+        )
+        assert "Time range: 1234567890.0 - 1234567900.0" in captured.out
+        assert "State segments:" in captured.out
+        assert "State values:" in captured.out
+
+
 class TestMain:
     """Test main entry point."""
 
