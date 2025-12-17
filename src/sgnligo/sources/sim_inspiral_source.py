@@ -13,10 +13,10 @@ from typing import Dict, List, Optional
 import lal
 import lalsimulation as lalsim
 import numpy as np
-from igwn_ligolw import lsctables, utils as ligolw_utils
+from igwn_ligolw import lsctables
+from igwn_ligolw import utils as ligolw_utils
 from sgn.base import SourcePad
 from sgnts.base import Offset, TSFrame, TSSource
-from sgnts.base.time import Time
 
 
 @dataclass
@@ -77,9 +77,9 @@ def _load_xml_injections(filepath: str) -> List[InjectionParams]:
     injections = []
     for row in sim_table:
         # Get geocentric end time
-        geocent_end_time = float(row.geocent_end_time) + float(
-            row.geocent_end_time_ns
-        ) * 1e-9
+        geocent_end_time = (
+            float(row.geocent_end_time) + float(row.geocent_end_time_ns) * 1e-9
+        )
 
         inj = InjectionParams(
             mass1=row.mass1,
@@ -117,10 +117,7 @@ def _load_hdf5_injections(filepath: str) -> List[InjectionParams]:
     Returns:
         List of InjectionParams objects
     """
-    try:
-        import h5py
-    except ImportError:
-        raise ImportError("h5py is required to read HDF5 injection files")
+    import h5py
 
     injections = []
     with h5py.File(filepath, "r") as f:
@@ -136,15 +133,15 @@ def _load_hdf5_injections(filepath: str) -> List[InjectionParams]:
 
         for i in range(n_inj):
             # Handle optional fields with defaults
-            def get_val(key, default=0.0):
+            def get_val(key, default=0.0, idx=i):
                 if key in grp:
-                    val = grp[key][i]
+                    val = grp[key][idx]
                     return float(val) if val is not None else default
                 return default
 
-            def get_str(key, default="IMRPhenomD"):
+            def get_str(key, default="IMRPhenomD", idx=i):
                 if key in grp:
-                    val = grp[key][i]
+                    val = grp[key][idx]
                     if isinstance(val, bytes):
                         return val.decode("utf-8")
                     return str(val) if val else default
@@ -475,9 +472,7 @@ class WaveformCache:
             end = inj.geocent_end_time + post_dur
             self._injection_windows.append((start, end))
 
-    def get_overlapping_injections(
-        self, buf_start: float, buf_end: float
-    ) -> List[int]:
+    def get_overlapping_injections(self, buf_start: float, buf_end: float) -> List[int]:
         """Find injections that overlap the buffer time window.
 
         Args:
@@ -510,7 +505,9 @@ class WaveformCache:
         # LAL waveforms have epoch indicating time of first sample relative to
         # the reference point (which is usually the coalescence/merger time)
         # So absolute GPS time = geocent_end_time + epoch
-        epoch_seconds = float(hp.epoch.gpsSeconds) + float(hp.epoch.gpsNanoSeconds) * 1e-9
+        epoch_seconds = (
+            float(hp.epoch.gpsSeconds) + float(hp.epoch.gpsNanoSeconds) * 1e-9
+        )
         wf_start_gps = inj.geocent_end_time + epoch_seconds
 
         # Waveform duration
@@ -568,9 +565,7 @@ class WaveformCache:
             return np.array([]), 0
 
         # Sample indices in waveform array
-        wf_start_idx = int(
-            (overlap_start - cached.start_gps) * self.sample_rate
-        )
+        wf_start_idx = int((overlap_start - cached.start_gps) * self.sample_rate)
         wf_end_idx = int((overlap_end - cached.start_gps) * self.sample_rate)
 
         # Clamp to valid range
@@ -634,9 +629,7 @@ class SimInspiralSource(TSSource):
     _injections: List[InjectionParams] = field(
         init=False, repr=False, default_factory=list
     )
-    _channel_dict: Dict[str, str] = field(
-        init=False, repr=False, default_factory=dict
-    )
+    _channel_dict: Dict[str, str] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self):
         """Initialize the source."""
@@ -666,7 +659,7 @@ class SimInspiralSource(TSSource):
         super().__post_init__()
 
         # Set buffer params for each pad
-        for ifo, channel in self._channel_dict.items():
+        for _ifo, channel in self._channel_dict.items():
             pad = self.srcs[channel]
             self.set_pad_buffer_params(
                 pad=pad,

@@ -13,6 +13,7 @@ dynamic = ["version"]
 dependencies = [
     "confluent-kafka",
     "gwpy",
+    "h5py",
     "igwn-ligolw",
     "igwn-segments",
     "lalsuite>=7.26",
@@ -46,15 +47,11 @@ Documentation = "https://docs.ligo.org/greg/sgn-ligo"
 Issues = "https://git.ligo.org/greg/sgn-ligo/issues"
 
 [project.optional-dependencies]
-hdf5 = [
-    "h5py",
-]
 test = [
     "pytest",
     "pytest-cov",
     "pytest-freezer",
     "pytest-markdown-docs",
-    "h5py",
 ]
 docs = [
     "mkdocs",
