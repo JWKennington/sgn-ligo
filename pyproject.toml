@@ -13,6 +13,7 @@ dynamic = ["version"]
 dependencies = [
     "confluent-kafka",
     "gwpy",
+    "h5py",
     "igwn-ligolw",
     "igwn-segments",
     "lalsuite>=7.26",
@@ -83,6 +84,7 @@ dev = [
 DevShmSource = "sgnligo.sources:DevShmSource"
 FrameReader = "sgnligo.sources:FrameReader"
 GWDataNoiseSource = "sgnligo.sources:GWDataNoiseSource"
+SimInspiralSource = "sgnligo.sources:SimInspiralSource"
 BitMask = "sgnligo.transforms:BitMask"
 HorizonDistanceTracker = "sgnligo.transforms.horizon:HorizonDistanceTracker"
 Latency = "sgnligo.transforms:Latency"
