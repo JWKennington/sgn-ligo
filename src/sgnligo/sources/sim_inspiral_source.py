@@ -3,6 +3,10 @@
 This module provides the SimInspiralSource class which reads injection parameters
 from XML (LIGOLW) or HDF5 files and generates time-domain waveforms projected
 onto each detector with proper time delays, antenna patterns, and phase corrections.
+
+All injection parameters are stored internally as LAL dictionaries (lal.Dict) in
+SI units, which allows pass-through of all LAL-supported parameters including
+tidal deformability, higher-order modes, and approximant-specific settings.
 """
 
 from __future__ import annotations
@@ -18,204 +22,258 @@ from igwn_ligolw import utils as ligolw_utils
 from sgn.base import SourcePad
 from sgnts.base import Offset, TSFrame, TSSource
 
+# =============================================================================
+# Required and Optional Injection Parameters
+# =============================================================================
+#
+# These define what SimInspiralSource expects in injection dictionaries.
+# All values are in SI units (masses in kg, distances in meters, angles in radians).
 
-@dataclass
-class InjectionParams:
-    """Normalized parameters for a single injection event.
+REQUIRED_FIELDS: Dict[str, type] = {
+    "mass1": float,  # Primary mass [kg]
+    "mass2": float,  # Secondary mass [kg]
+    "distance": float,  # Luminosity distance [m]
+    "ra": float,  # Right ascension [rad]
+    "dec": float,  # Declination [rad]
+    "psi": float,  # Polarization angle [rad]
+    "t_co_gps": float,  # Coalescence GPS time [s]
+    "approximant": str,  # Waveform approximant (e.g., "IMRPhenomD")
+}
 
-    All angular quantities are in radians, masses in solar masses,
-    distance in Mpc, and times in GPS seconds.
+OPTIONAL_FIELDS: Dict[str, float] = {
+    "spin1x": 0.0,  # Primary spin x-component (dimensionless)
+    "spin1y": 0.0,  # Primary spin y-component (dimensionless)
+    "spin1z": 0.0,  # Primary spin z-component (dimensionless)
+    "spin2x": 0.0,  # Secondary spin x-component (dimensionless)
+    "spin2y": 0.0,  # Secondary spin y-component (dimensionless)
+    "spin2z": 0.0,  # Secondary spin z-component (dimensionless)
+    "inclination": 0.0,  # Inclination angle [rad] (0 = face-on)
+    "phi_ref": 0.0,  # Reference phase [rad]
+    "eccentricity": 0.0,  # Orbital eccentricity (0 = circular)
+    "long_asc_nodes": 0.0,  # Longitude of ascending nodes [rad]
+    "mean_per_ano": 0.0,  # Mean periastron anomaly [rad]
+    "f_ref": 20.0,  # Reference frequency [Hz]
+}
+
+
+def _validate_injection(params: lal.Dict, index: int = 0) -> None:
+    """Validate that an injection dict has all required fields.
+
+    This should be called immediately after loading an injection to fail fast
+    with a clear error message rather than failing later during waveform generation.
+
+    Args:
+        params: LAL dictionary with injection parameters
+        index: Injection index for error messages
+
+    Raises:
+        ValueError: If a required field is missing
     """
+    missing = []
+    for field_name, field_type in REQUIRED_FIELDS.items():
+        try:
+            if field_type == str:
+                lal.DictLookupStringValue(params, field_name)
+            else:
+                lal.DictLookupREAL8Value(params, field_name)
+        except (KeyError, RuntimeError):
+            missing.append(field_name)
 
-    # Masses
-    mass1: float
-    mass2: float
-
-    # Spins (dimensionless)
-    spin1x: float = 0.0
-    spin1y: float = 0.0
-    spin1z: float = 0.0
-    spin2x: float = 0.0
-    spin2y: float = 0.0
-    spin2z: float = 0.0
-
-    # Orbital parameters
-    distance: float = 100.0  # Mpc
-    inclination: float = 0.0  # radians
-    coa_phase: float = 0.0  # radians
-    polarization: float = 0.0  # radians (psi)
-    long_asc_nodes: float = 0.0  # radians
-    eccentricity: float = 0.0
-    mean_per_ano: float = 0.0  # radians
-
-    # Sky position
-    ra: float = 0.0  # radians (right ascension)
-    dec: float = 0.0  # radians (declination)
-
-    # Timing
-    geocent_end_time: float = 0.0  # GPS seconds (coalescence time at geocenter)
-
-    # Waveform model
-    approximant: str = "IMRPhenomD"
-
-    # Optional: reference frequency (Hz)
-    f_ref: float = 20.0
+    if missing:
+        raise ValueError(
+            f"Injection {index}: Missing required fields: {', '.join(missing)}"
+        )
 
 
-def _load_xml_injections(filepath: str) -> List[InjectionParams]:
-    """Load injections from LIGOLW XML file.
+def _get_dict_real8(d: lal.Dict, key: str, default: Optional[float] = None) -> float:
+    """Get REAL8 value from LAL dict.
+
+    For optional fields, pass a default value (typically from OPTIONAL_FIELDS).
+    For required fields that have already been validated via _validate_injection(),
+    pass default=None - if the key is somehow missing, the LAL lookup value of
+    0.0 will be returned (though this shouldn't happen for validated dicts).
+
+    Args:
+        d: LAL dictionary
+        key: Key to look up
+        default: Value to return if key not found (None uses LAL's default of 0.0)
+
+    Returns:
+        The value from the dict, or default if not found
+    """
+    try:
+        return lal.DictLookupREAL8Value(d, key)
+    except (KeyError, RuntimeError):
+        return default if default is not None else 0.0
+
+
+def _get_dict_string(d: lal.Dict, key: str, default: str = "") -> str:
+    """Get string value from LAL dict with optional default.
+
+    Args:
+        d: LAL dictionary
+        key: Key to look up
+        default: Value to return if key not found
+
+    Returns:
+        The value from the dict, or default if not found
+    """
+    try:
+        return lal.DictLookupStringValue(d, key)
+    except (KeyError, RuntimeError):
+        return default
+
+
+def _load_xml_injections(filepath: str) -> List[lal.Dict]:
+    """Load injections from LIGOLW XML file as LAL dicts.
+
+    Converts XML SimInspiralTable rows to LAL dictionaries with parameters
+    in SI units (masses in kg, distance in meters).
 
     Args:
         filepath: Path to XML file (can be .xml or .xml.gz)
 
     Returns:
-        List of InjectionParams objects
+        List of LAL dictionaries containing injection parameters
     """
     xmldoc = ligolw_utils.load_filename(filepath, verbose=False)
     sim_table = lsctables.SimInspiralTable.get_table(xmldoc)
 
     injections = []
     for row in sim_table:
-        # Get geocentric end time
+        params = lal.CreateDict()
+
+        # Masses - convert from solar masses to SI (kg)
+        lal.DictInsertREAL8Value(params, "mass1", row.mass1 * lal.MSUN_SI)
+        lal.DictInsertREAL8Value(params, "mass2", row.mass2 * lal.MSUN_SI)
+
+        # Spins (dimensionless)
+        lal.DictInsertREAL8Value(params, "spin1x", row.spin1x)
+        lal.DictInsertREAL8Value(params, "spin1y", row.spin1y)
+        lal.DictInsertREAL8Value(params, "spin1z", row.spin1z)
+        lal.DictInsertREAL8Value(params, "spin2x", row.spin2x)
+        lal.DictInsertREAL8Value(params, "spin2y", row.spin2y)
+        lal.DictInsertREAL8Value(params, "spin2z", row.spin2z)
+
+        # Distance - convert from Mpc to SI (meters)
+        lal.DictInsertREAL8Value(params, "distance", row.distance * 1e6 * lal.PC_SI)
+
+        # Angular quantities (already in radians)
+        lal.DictInsertREAL8Value(params, "inclination", row.inclination)
+        lal.DictInsertREAL8Value(params, "phi_ref", row.coa_phase)
+        lal.DictInsertREAL8Value(params, "psi", row.polarization)
+
+        # Orbital parameters
+        lal.DictInsertREAL8Value(
+            params, "long_asc_nodes", getattr(row, "long_asc_nodes", 0.0) or 0.0
+        )
+        lal.DictInsertREAL8Value(
+            params, "eccentricity", getattr(row, "eccentricity", 0.0) or 0.0
+        )
+        lal.DictInsertREAL8Value(
+            params, "mean_per_ano", getattr(row, "mean_per_ano", 0.0) or 0.0
+        )
+
+        # Sky position - LIGOLW uses longitude/latitude naming
+        lal.DictInsertREAL8Value(params, "ra", row.longitude)
+        lal.DictInsertREAL8Value(params, "dec", row.latitude)
+
+        # Timing - coalescence time at geocenter
         geocent_end_time = (
             float(row.geocent_end_time) + float(row.geocent_end_time_ns) * 1e-9
         )
+        lal.DictInsertREAL8Value(params, "t_co_gps", geocent_end_time)
 
-        inj = InjectionParams(
-            mass1=row.mass1,
-            mass2=row.mass2,
-            spin1x=row.spin1x,
-            spin1y=row.spin1y,
-            spin1z=row.spin1z,
-            spin2x=row.spin2x,
-            spin2y=row.spin2y,
-            spin2z=row.spin2z,
-            distance=row.distance,
-            inclination=row.inclination,
-            coa_phase=row.coa_phase,
-            polarization=row.polarization,
-            long_asc_nodes=getattr(row, "long_asc_nodes", 0.0),
-            eccentricity=getattr(row, "eccentricity", 0.0) or 0.0,
-            mean_per_ano=getattr(row, "mean_per_ano", 0.0) or 0.0,
-            ra=row.longitude,  # LIGOLW uses longitude for RA
-            dec=row.latitude,  # LIGOLW uses latitude for Dec
-            geocent_end_time=geocent_end_time,
-            approximant=row.waveform or "IMRPhenomD",
-            f_ref=getattr(row, "f_lower", 20.0) or 20.0,
+        # Waveform model (required - validation will catch if missing)
+        if row.waveform:
+            lal.DictInsertStringValue(params, "approximant", row.waveform)
+        lal.DictInsertREAL8Value(
+            params,
+            "f_ref",
+            getattr(row, "f_lower", OPTIONAL_FIELDS["f_ref"])
+            or OPTIONAL_FIELDS["f_ref"],
         )
-        injections.append(inj)
+
+        injections.append(params)
+
+    # Validate all injections have required fields
+    for i, params in enumerate(injections):
+        _validate_injection(params, index=i)
 
     return injections
 
 
-def _load_hdf5_injections(filepath: str) -> List[InjectionParams]:
-    """Load injections from HDF5 file.
+def _load_lal_h5_injections(filepath: str) -> List[lal.Dict]:
+    """Load injections from LAL-format HDF5 file.
+
+    Uses LALSimulation's SimInspiralInjectionSequenceFromH5File to load
+    injections. The returned dicts are already in the correct format
+    with SI units.
 
     Args:
-        filepath: Path to HDF5 file
+        filepath: Path to LAL-format HDF5 file
 
     Returns:
-        List of InjectionParams objects
+        List of LAL dictionaries containing injection parameters
+
+    Raises:
+        ValueError: If any injection is missing required fields
     """
-    import h5py
+    seq = lalsim.SimInspiralInjectionSequenceFromH5File(filepath)
+    injections = [lal.DictSequenceGet(seq, i) for i in range(seq.length)]
 
-    injections = []
-    with h5py.File(filepath, "r") as f:
-        # Common HDF5 injection file structure
-        # Try to find the injections group/dataset
-        if "injections" in f:
-            grp = f["injections"]
-        else:
-            grp = f
-
-        # Get number of injections
-        n_inj = len(grp["mass1"])
-
-        for i in range(n_inj):
-            # Handle optional fields with defaults
-            def get_val(key, default=0.0, idx=i):
-                if key in grp:
-                    val = grp[key][idx]
-                    return float(val) if val is not None else default
-                return default
-
-            def get_str(key, default="IMRPhenomD", idx=i):
-                if key in grp:
-                    val = grp[key][idx]
-                    if isinstance(val, bytes):
-                        return val.decode("utf-8")
-                    return str(val) if val else default
-                return default
-
-            inj = InjectionParams(
-                mass1=float(grp["mass1"][i]),
-                mass2=float(grp["mass2"][i]),
-                spin1x=get_val("spin1x"),
-                spin1y=get_val("spin1y"),
-                spin1z=get_val("spin1z"),
-                spin2x=get_val("spin2x"),
-                spin2y=get_val("spin2y"),
-                spin2z=get_val("spin2z"),
-                distance=get_val("distance", 100.0),
-                inclination=get_val("inclination"),
-                coa_phase=get_val("coa_phase"),
-                polarization=get_val("polarization"),
-                long_asc_nodes=get_val("long_asc_nodes"),
-                eccentricity=get_val("eccentricity"),
-                mean_per_ano=get_val("mean_per_ano"),
-                ra=get_val("ra", get_val("longitude")),
-                dec=get_val("dec", get_val("latitude")),
-                geocent_end_time=get_val("geocent_end_time", get_val("tc")),
-                approximant=get_str("approximant", get_str("waveform")),
-                f_ref=get_val("f_ref", 20.0),
-            )
-            injections.append(inj)
+    # Validate all injections have required fields
+    for i, params in enumerate(injections):
+        _validate_injection(params, index=i)
 
     return injections
 
 
-def load_injections(filepath: str) -> List[InjectionParams]:
-    """Load injections from XML or HDF5 file with auto-detection.
+def load_injections(filepath: str) -> List[lal.Dict]:
+    """Load injections from XML or LAL H5 file with auto-detection.
+
+    Supports LIGOLW XML (.xml, .xml.gz) and LAL HDF5 (.h5, .hdf5, .hdf) formats.
+    The HDF5 format must be the official LAL format with 'cbc_waveform_params' group.
 
     Args:
         filepath: Path to injection file
 
     Returns:
-        List of InjectionParams objects
+        List of LAL dictionaries containing injection parameters in SI units
     """
     if filepath.endswith((".xml", ".xml.gz")):
         return _load_xml_injections(filepath)
     elif filepath.endswith((".hdf5", ".h5", ".hdf")):
-        return _load_hdf5_injections(filepath)
+        return _load_lal_h5_injections(filepath)
     else:
-        # Try XML first, then HDF5
+        # Try XML first, then LAL H5
         try:
             return _load_xml_injections(filepath)
         except Exception:
-            return _load_hdf5_injections(filepath)
+            return _load_lal_h5_injections(filepath)
 
 
-def estimate_waveform_duration(
-    inj: InjectionParams, f_min: float
-) -> tuple[float, float]:
+def estimate_waveform_duration(params: lal.Dict, f_min: float) -> tuple[float, float]:
     """Estimate the duration of a waveform before and after merger.
 
     Args:
-        inj: Injection parameters
+        params: LAL dict with injection parameters (masses in SI units)
         f_min: Minimum frequency for waveform generation (Hz)
 
     Returns:
         Tuple of (pre_merger_duration, post_merger_duration) in seconds
     """
-    m1_si = inj.mass1 * lal.MSUN_SI
-    m2_si = inj.mass2 * lal.MSUN_SI
+    # Masses are already in SI units from the dict
+    m1_si = _get_dict_real8(params, "mass1")
+    m2_si = _get_dict_real8(params, "mass2")
+    spin1z = _get_dict_real8(params, "spin1z")
+    spin2z = _get_dict_real8(params, "spin2z")
+
     mtotal_si = m1_si + m2_si
 
     # Chirp time (inspiral duration)
     try:
-        tchirp = lalsim.SimInspiralChirpTimeBound(
-            f_min, m1_si, m2_si, inj.spin1z, inj.spin2z
-        )
+        tchirp = lalsim.SimInspiralChirpTimeBound(f_min, m1_si, m2_si, spin1z, spin2z)
     except Exception:
         # Fallback estimate using leading-order chirp time
         mchirp = (m1_si * m2_si) ** (3.0 / 5.0) / mtotal_si ** (1.0 / 5.0)
@@ -235,7 +293,7 @@ def estimate_waveform_duration(
     # Ringdown time bound
     try:
         # Final spin estimate (simple approximation)
-        final_spin = min(abs(inj.spin1z) + abs(inj.spin2z), 0.998)
+        final_spin = min(abs(spin1z) + abs(spin2z), 0.998)
         tring = lalsim.SimInspiralRingdownTimeBound(mtotal_si, final_spin)
     except Exception:
         tring = 0.5  # Conservative estimate
@@ -248,146 +306,52 @@ def estimate_waveform_duration(
 
 
 def generate_waveform_td(
-    inj: InjectionParams,
+    params: lal.Dict,
     sample_rate: int,
     f_min: float,
     approximant_override: Optional[str] = None,
 ) -> tuple[lal.REAL8TimeSeries, lal.REAL8TimeSeries]:
-    """Generate time-domain h+, hx waveforms.
+    """Generate time-domain h+, hx waveforms from LAL parameter dict.
 
-    Automatically selects time-domain or frequency-domain generation
-    based on the approximant, converting FD waveforms to TD via IFFT.
+    Uses LALSimulation's unified generator interface which automatically
+    handles both time-domain and frequency-domain approximants. All
+    parameters from the input dict are passed through to the generator.
 
     Args:
-        inj: Injection parameters
+        params: LAL dict with injection parameters (masses/distance in SI units)
         sample_rate: Sample rate in Hz
         f_min: Minimum frequency in Hz
-        approximant_override: Override the approximant from injection params
+        approximant_override: Override the approximant from the dict
 
     Returns:
         Tuple of (hp, hc) as LAL REAL8TimeSeries objects
     """
-    approximant_str = approximant_override or inj.approximant
+    # Get or override approximant (validated at load time)
+    approximant_str = approximant_override or _get_dict_string(params, "approximant")
     approximant = lalsim.GetApproximantFromString(approximant_str)
 
-    # Convert units
-    m1_si = inj.mass1 * lal.MSUN_SI
-    m2_si = inj.mass2 * lal.MSUN_SI
-    distance_si = inj.distance * 1e6 * lal.PC_SI  # Mpc to meters
+    # Add runtime parameters to dict (these are not stored in injection files)
+    lalsim.SimInspiralWaveformParamsInsertDeltaT(params, 1.0 / sample_rate)
+    lalsim.SimInspiralWaveformParamsInsertF22Start(params, f_min)
 
-    delta_t = 1.0 / sample_rate
-    f_ref = inj.f_ref
+    # Use f_ref from dict if present, otherwise use f_min
+    f_ref = _get_dict_real8(params, "f_ref", f_min)
+    lalsim.SimInspiralWaveformParamsInsertF22Ref(params, f_ref)
 
-    # Check if approximant is natively time-domain
-    is_td = lalsim.SimInspiralImplementedTDApproximants(approximant)
+    # Create generator and add conditioning for FD->TD conversion
+    gen = lalsim.SimInspiralChooseGenerator(approximant, None)
+    lalsim.SimInspiralGeneratorAddStandardConditioning(gen)
 
-    if is_td:
-        # Generate time-domain waveform directly
-        hp, hc = lalsim.SimInspiralTD(
-            m1_si,
-            m2_si,
-            inj.spin1x,
-            inj.spin1y,
-            inj.spin1z,
-            inj.spin2x,
-            inj.spin2y,
-            inj.spin2z,
-            distance_si,
-            inj.inclination,
-            inj.coa_phase,
-            inj.long_asc_nodes,
-            inj.eccentricity,
-            inj.mean_per_ano,
-            delta_t,
-            f_min,
-            f_ref,
-            lal.CreateDict(),
-            approximant,
-        )
-    else:
-        # Generate frequency-domain and convert to time-domain
-        # Estimate duration to set appropriate frequency resolution
-        pre_dur, post_dur = estimate_waveform_duration(inj, f_min)
-        total_duration = pre_dur + post_dur
-
-        # Pad to power of 2 for efficient FFT
-        n_samples = int(np.ceil(total_duration * sample_rate))
-        n_samples = int(2 ** np.ceil(np.log2(n_samples)))
-        delta_f = sample_rate / n_samples
-        f_max = sample_rate / 2.0
-
-        hp_fd, hc_fd = lalsim.SimInspiralFD(
-            m1_si,
-            m2_si,
-            inj.spin1x,
-            inj.spin1y,
-            inj.spin1z,
-            inj.spin2x,
-            inj.spin2y,
-            inj.spin2z,
-            distance_si,
-            inj.inclination,
-            inj.coa_phase,
-            inj.long_asc_nodes,
-            inj.eccentricity,
-            inj.mean_per_ano,
-            delta_f,
-            f_min,
-            f_max,
-            f_ref,
-            lal.CreateDict(),
-            approximant,
-        )
-
-        # Convert to time-domain using IFFT
-        hp = _fd_to_td(hp_fd, delta_t)
-        hc = _fd_to_td(hc_fd, delta_t)
+    # Generate TD waveform - all parameters from dict are used
+    hp, hc = lalsim.SimInspiralGenerateTDWaveform(params, gen)
 
     return hp, hc
-
-
-def _fd_to_td(
-    h_fd: lal.COMPLEX16FrequencySeries, delta_t: float
-) -> lal.REAL8TimeSeries:
-    """Convert frequency-domain waveform to time-domain.
-
-    Args:
-        h_fd: Frequency-domain waveform
-        delta_t: Time step (1/sample_rate)
-
-    Returns:
-        Time-domain waveform as REAL8TimeSeries
-    """
-    # Get the data
-    data_fd = h_fd.data.data
-
-    # Number of time samples (real FFT)
-    n_freq = len(data_fd)
-    n_time = 2 * (n_freq - 1)
-
-    # Perform IFFT
-    # For real output, we need to handle the Hermitian symmetry
-    data_td = np.fft.irfft(data_fd, n=n_time)
-
-    # Create time series
-    sample_rate = 1.0 / delta_t
-    h_td = lal.CreateREAL8TimeSeries(
-        h_fd.name,
-        h_fd.epoch,
-        h_fd.f0,
-        delta_t,
-        lal.DimensionlessUnit,
-        len(data_td),
-    )
-    h_td.data.data[:] = data_td * sample_rate  # Normalization for IFFT
-
-    return h_td
 
 
 def project_to_detector(
     hp: lal.REAL8TimeSeries,
     hc: lal.REAL8TimeSeries,
-    inj: InjectionParams,
+    params: lal.Dict,
     ifo: str,
 ) -> lal.REAL8TimeSeries:
     """Project h+, hx waveforms onto a detector.
@@ -400,7 +364,7 @@ def project_to_detector(
     Args:
         hp: Plus polarization time series
         hc: Cross polarization time series
-        inj: Injection parameters (for sky position, polarization)
+        params: LAL dict with sky position and polarization
         ifo: Interferometer prefix (H1, L1, V1, etc.)
 
     Returns:
@@ -409,13 +373,18 @@ def project_to_detector(
     # Get detector
     detector = lal.cached_detector_by_prefix[ifo]
 
+    # Extract sky position and polarization (validated at load time)
+    ra = _get_dict_real8(params, "ra")
+    dec = _get_dict_real8(params, "dec")
+    psi = _get_dict_real8(params, "psi")
+
     # Use LALSimulation's accurate detector strain function
     strain = lalsim.SimDetectorStrainREAL8TimeSeries(
         hp,
         hc,
-        inj.ra,
-        inj.dec,
-        inj.polarization,
+        ra,
+        dec,
+        psi,
         detector,
     )
 
@@ -424,13 +393,30 @@ def project_to_detector(
 
 @dataclass
 class CachedWaveform:
-    """Cached waveform data for an injection."""
+    """Cached waveform data for an injection.
+
+    Each detector has its own LAL REAL8TimeSeries which includes:
+    - epoch: GPS time of first sample (accounts for light travel time)
+    - deltaT: Sample spacing (1/sample_rate)
+    - data: The strain values
+
+    Using LAL TimeSeries preserves sub-sample timing information needed
+    for proper interpolation when injecting into buffers.
+    """
 
     injection_id: int
-    start_gps: float  # GPS time when waveform starts
-    end_gps: float  # GPS time when waveform ends
-    strain: Dict[str, np.ndarray]  # Per-IFO strain data {ifo: array}
-    sample_rate: int
+    strain: Dict[str, lal.REAL8TimeSeries]  # Per-IFO strain TimeSeries {ifo: series}
+
+    def get_end_gps(self, ifo: str) -> float:
+        """Get the GPS end time for a specific IFO."""
+        ts = self.strain[ifo]
+        epoch = float(ts.epoch)
+        duration = ts.data.length * ts.deltaT
+        return epoch + duration
+
+    def get_max_end_gps(self) -> float:
+        """Get the latest end GPS time across all IFOs."""
+        return max(self.get_end_gps(ifo) for ifo in self.strain)
 
 
 class WaveformCache:
@@ -442,7 +428,7 @@ class WaveformCache:
 
     def __init__(
         self,
-        injections: List[InjectionParams],
+        injections: List[lal.Dict],
         ifos: List[str],
         sample_rate: int,
         f_min: float,
@@ -451,7 +437,7 @@ class WaveformCache:
         """Initialize the waveform cache.
 
         Args:
-            injections: List of injection parameters
+            injections: List of LAL dicts with injection parameters
             ifos: List of interferometer prefixes
             sample_rate: Output sample rate in Hz
             f_min: Minimum frequency for waveform generation
@@ -466,10 +452,11 @@ class WaveformCache:
 
         # Pre-compute injection time windows for fast overlap queries
         self._injection_windows: List[tuple[float, float]] = []
-        for inj in injections:
-            pre_dur, post_dur = estimate_waveform_duration(inj, f_min)
-            start = inj.geocent_end_time - pre_dur
-            end = inj.geocent_end_time + post_dur
+        for params in injections:
+            pre_dur, post_dur = estimate_waveform_duration(params, f_min)
+            t_co_gps = _get_dict_real8(params, "t_co_gps")
+            start = t_co_gps - pre_dur
+            end = t_co_gps + post_dur
             self._injection_windows.append((start, end))
 
     def get_overlapping_injections(self, buf_start: float, buf_end: float) -> List[int]:
@@ -494,97 +481,77 @@ class WaveformCache:
         Args:
             inj_id: Index of injection in self.injections
         """
-        inj = self.injections[inj_id]
+        params = self.injections[inj_id]
 
         # Generate h+, hx waveforms
         hp, hc = generate_waveform_td(
-            inj, self.sample_rate, self.f_min, self.approximant_override
+            params, self.sample_rate, self.f_min, self.approximant_override
         )
 
-        # The waveform epoch is relative to the merger time (typically negative)
-        # LAL waveforms have epoch indicating time of first sample relative to
-        # the reference point (which is usually the coalescence/merger time)
-        # So absolute GPS time = geocent_end_time + epoch
-        epoch_seconds = (
-            float(hp.epoch.gpsSeconds) + float(hp.epoch.gpsNanoSeconds) * 1e-9
-        )
-        wf_start_gps = inj.geocent_end_time + epoch_seconds
-
-        # Waveform duration
-        n_samples = hp.data.length
-        wf_duration = n_samples / self.sample_rate
-        wf_end_gps = wf_start_gps + wf_duration
+        # Get coalescence time from dict (validated at load time) and shift
+        # waveform epochs to absolute GPS time before projection. The generated
+        # waveforms have epochs relative to coalescence (typically negative).
+        t_co_gps = _get_dict_real8(params, "t_co_gps")
+        hp.epoch += t_co_gps
+        hc.epoch += t_co_gps
 
         # Project onto each detector
-        strain_dict = {}
+        # Each detector has different timing due to light travel time delays
+        # applied by SimDetectorStrainREAL8TimeSeries
+        strain_dict: Dict[str, lal.REAL8TimeSeries] = {}
+
         for ifo in self.ifos:
-            detector_strain = project_to_detector(hp, hc, inj, ifo)
-            strain_dict[ifo] = detector_strain.data.data.copy()
+            strain_dict[ifo] = project_to_detector(hp, hc, params, ifo)
 
         # Cache the waveform
         self.cache[inj_id] = CachedWaveform(
             injection_id=inj_id,
-            start_gps=wf_start_gps,
-            end_gps=wf_end_gps,
             strain=strain_dict,
-            sample_rate=self.sample_rate,
         )
 
-    def get_waveform_slice(
+    def add_injection_to_target(
         self,
         inj_id: int,
         ifo: str,
-        buf_start: float,
-        buf_end: float,
-    ) -> tuple[np.ndarray, int]:
-        """Get the waveform slice for a specific buffer window.
+        target: lal.REAL8TimeSeries,
+    ) -> None:
+        """Add an injection waveform to a target buffer using proper interpolation.
+
+        Uses SimAddInjectionREAL8TimeSeries which performs sub-sample
+        re-interpolation in the frequency domain to properly align the
+        injection epoch to integer sample boundaries in the target.
 
         Args:
             inj_id: Injection index
             ifo: Interferometer prefix
-            buf_start: Buffer start GPS time
-            buf_end: Buffer end GPS time
-
-        Returns:
-            Tuple of (waveform_slice, start_sample_in_buffer)
-            where start_sample_in_buffer is the index in the output buffer
-            where this slice should begin
+            target: Target LAL REAL8TimeSeries to add injection into (modified in place)
         """
         if inj_id not in self.cache:
             self._generate_and_cache(inj_id)
 
         cached = self.cache[inj_id]
-        strain = cached.strain[ifo]
+        source_strain = cached.strain[ifo]
 
-        # Calculate overlap region
-        overlap_start = max(buf_start, cached.start_gps)
-        overlap_end = min(buf_end, cached.end_gps)
-
-        if overlap_start >= overlap_end:
-            # No overlap
-            return np.array([]), 0
-
-        # Sample indices in waveform array
-        wf_start_idx = int((overlap_start - cached.start_gps) * self.sample_rate)
-        wf_end_idx = int((overlap_end - cached.start_gps) * self.sample_rate)
-
-        # Clamp to valid range
-        wf_start_idx = max(0, wf_start_idx)
-        wf_end_idx = min(len(strain), wf_end_idx)
-
-        # Sample index in output buffer where slice begins
-        buf_start_idx = int((overlap_start - buf_start) * self.sample_rate)
-        buf_start_idx = max(0, buf_start_idx)
-
-        return strain[wf_start_idx:wf_end_idx], buf_start_idx
+        # SimAddInjectionREAL8TimeSeries handles:
+        # - Finding overlapping region based on epochs
+        # - Sub-sample interpolation for proper alignment
+        # - Adding only the overlapping portion to target
+        # The source may be modified (padded for alignment) but remains reusable
+        lalsim.SimAddInjectionREAL8TimeSeries(target, source_strain, None)
 
     def cleanup_expired(self, current_gps: float) -> None:
         """Remove waveforms that are fully consumed.
 
+        A waveform is expired when all IFOs have moved past it.
+
         Args:
             current_gps: Current GPS time of the pipeline
         """
-        expired = [k for k, v in self.cache.items() if v.end_gps < current_gps]
+        expired = []
+        for k, v in self.cache.items():
+            # Use the latest end time across all IFOs
+            if v.get_max_end_gps() < current_gps:
+                expired.append(k)
         for k in expired:
             del self.cache[k]
 
@@ -596,6 +563,10 @@ class SimInspiralSource(TSSource):
     Reads injection parameters from XML (LIGOLW SimInspiralTable) or HDF5 files
     and generates time-domain waveforms projected onto each detector with proper
     time delays, antenna patterns, and phase corrections using LALSimulation.
+
+    All injection parameters are stored as LAL dictionaries, which allows
+    pass-through of any LAL-supported parameters including tidal deformability,
+    higher-order modes, and approximant-specific settings.
 
     The source outputs zeros + summed injection signals on separate pads for
     each interferometer. Combine with a noise source using an Adder transform
@@ -626,9 +597,7 @@ class SimInspiralSource(TSSource):
 
     # Internal state (not user-configurable)
     _waveform_cache: WaveformCache = field(init=False, repr=False)
-    _injections: List[InjectionParams] = field(
-        init=False, repr=False, default_factory=list
-    )
+    _injections: List[lal.Dict] = field(init=False, repr=False, default_factory=list)
     _channel_dict: Dict[str, str] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self):
@@ -643,7 +612,7 @@ class SimInspiralSource(TSSource):
         self._channel_dict = {ifo: f"{ifo}:INJ-STRAIN" for ifo in self.ifos}
         self.source_pad_names = list(self._channel_dict.values())
 
-        # Load injections
+        # Load injections as LAL dicts
         self._injections = load_injections(self.injection_file)
 
         # Initialize waveform cache
@@ -692,36 +661,37 @@ class SimInspiralSource(TSSource):
 
         # Get buffer time window
         # Convert from Offset to GPS seconds
-        # Offset is stored as seconds * sample_stride(16384), so divide by that
-        # to get GPS time
-        stride_16k = Offset.sample_stride(16384)
-        buf_start = buffer.offset / stride_16k
-        buf_end = buffer.end_offset / stride_16k
+        # SGNTS Offset is normalized to Offset.MAX_RATE internally, regardless of
+        # the source's sample rate. This is a core SGNTS design choice.
+        stride_max = Offset.sample_stride(Offset.MAX_RATE)
+        buf_start = buffer.offset / stride_max
+        buf_end = buffer.end_offset / stride_max
 
         # Get number of samples from the buffer's expected shape
-        # The buffer shape is set by set_pad_buffer_params and prepare_frame
         num_samples = buffer.shape[0]
 
-        # Start with zeros
-        output = np.zeros(num_samples, dtype=np.float64)
+        # Create a LAL REAL8TimeSeries as target for injections
+        # This preserves exact GPS epoch for proper sub-sample interpolation
+        target = lal.CreateREAL8TimeSeries(
+            f"{ifo}:STRAIN",
+            lal.LIGOTimeGPS(buf_start),
+            0.0,  # f0
+            1.0 / self.sample_rate,  # deltaT
+            lal.StrainUnit,
+            num_samples,
+        )
+        target.data.data[:] = 0.0
 
-        # Find and sum all overlapping injections
+        # Find and add all overlapping injections
+        # SimAddInjectionREAL8TimeSeries handles sub-sample interpolation
         overlapping = self._waveform_cache.get_overlapping_injections(
             buf_start, buf_end
         )
         for inj_id in overlapping:
-            wf_slice, start_idx = self._waveform_cache.get_waveform_slice(
-                inj_id, ifo, buf_start, buf_end
-            )
-            if len(wf_slice) > 0:
-                # Add waveform slice to output
-                end_idx = start_idx + len(wf_slice)
-                # Handle edge cases where slice might extend beyond buffer
-                actual_end = min(end_idx, num_samples)
-                slice_len = actual_end - start_idx
-                output[start_idx:actual_end] += wf_slice[:slice_len]
+            self._waveform_cache.add_injection_to_target(inj_id, ifo, target)
 
-        buffer.set_data(output)
+        # Copy result to output buffer
+        buffer.set_data(target.data.data)
         return frame
 
     def internal(self) -> None:
@@ -730,6 +700,7 @@ class SimInspiralSource(TSSource):
 
         # Cleanup expired waveforms from cache
         # Convert from Offset to GPS seconds
-        stride_16k = Offset.sample_stride(16384)
-        current_gps = self.current_end / stride_16k
+        # SGNTS Offset is normalized to Offset.MAX_RATE internally
+        stride_max = Offset.sample_stride(Offset.MAX_RATE)
+        current_gps = self.current_end / stride_max
         self._waveform_cache.cleanup_expired(current_gps)

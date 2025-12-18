@@ -11,12 +11,15 @@ from sgn.apps import Pipeline
 from sgnts.sinks import NullSeriesSink
 
 from sgnligo.sources.sim_inspiral_source import (
-    InjectionParams,
+    OPTIONAL_FIELDS,
+    REQUIRED_FIELDS,
     SimInspiralSource,
     WaveformCache,
-    _fd_to_td,
-    _load_hdf5_injections,
+    _get_dict_real8,
+    _get_dict_string,
+    _load_lal_h5_injections,
     _load_xml_injections,
+    _validate_injection,
     estimate_waveform_duration,
     generate_waveform_td,
     load_injections,
@@ -24,24 +27,63 @@ from sgnligo.sources.sim_inspiral_source import (
 )
 
 
+def create_simple_injection_dict(
+    mass1: float = 1.4,
+    mass2: float = 1.4,
+    distance: float = 100.0,
+    geocent_end_time: float = 1000000000.0,
+    approximant: str = "IMRPhenomD",
+) -> lal.Dict:
+    """Create a simple injection dict for testing.
+
+    Args:
+        mass1: Primary mass in solar masses
+        mass2: Secondary mass in solar masses
+        distance: Distance in Mpc
+        geocent_end_time: Coalescence time in GPS seconds
+        approximant: Waveform approximant
+
+    Returns:
+        LAL dict with injection parameters in SI units
+    """
+    params = lal.CreateDict()
+
+    # Masses in SI units (kg)
+    lal.DictInsertREAL8Value(params, "mass1", mass1 * lal.MSUN_SI)
+    lal.DictInsertREAL8Value(params, "mass2", mass2 * lal.MSUN_SI)
+
+    # Spins (dimensionless)
+    lal.DictInsertREAL8Value(params, "spin1x", 0.0)
+    lal.DictInsertREAL8Value(params, "spin1y", 0.0)
+    lal.DictInsertREAL8Value(params, "spin1z", 0.0)
+    lal.DictInsertREAL8Value(params, "spin2x", 0.0)
+    lal.DictInsertREAL8Value(params, "spin2y", 0.0)
+    lal.DictInsertREAL8Value(params, "spin2z", 0.0)
+
+    # Distance in SI units (meters)
+    lal.DictInsertREAL8Value(params, "distance", distance * 1e6 * lal.PC_SI)
+
+    # Angular quantities (radians)
+    lal.DictInsertREAL8Value(params, "inclination", 0.0)
+    lal.DictInsertREAL8Value(params, "phi_ref", 0.0)
+    lal.DictInsertREAL8Value(params, "psi", 0.0)
+    lal.DictInsertREAL8Value(params, "ra", 0.0)
+    lal.DictInsertREAL8Value(params, "dec", 0.0)
+
+    # Timing
+    lal.DictInsertREAL8Value(params, "t_co_gps", geocent_end_time)
+
+    # Waveform model
+    lal.DictInsertStringValue(params, "approximant", approximant)
+    lal.DictInsertREAL8Value(params, "f_ref", 20.0)
+
+    return params
+
+
 @pytest.fixture
 def simple_injection():
     """Create a simple injection for testing."""
-    return InjectionParams(
-        mass1=1.4,
-        mass2=1.4,
-        spin1z=0.0,
-        spin2z=0.0,
-        distance=100.0,
-        inclination=0.0,
-        coa_phase=0.0,
-        polarization=0.0,
-        ra=0.0,
-        dec=0.0,
-        geocent_end_time=1000000000.0,
-        approximant="IMRPhenomD",
-        f_ref=20.0,
-    )
+    return create_simple_injection_dict()
 
 
 @pytest.fixture
@@ -83,70 +125,95 @@ def sample_xml_file():
         return f.name
 
 
-@pytest.fixture
-def sample_hdf5_file():
-    """Create a sample HDF5 injection file for testing."""
-    import h5py
+class TestDictHelpers:
+    """Test cases for LAL dict helper functions."""
 
-    with tempfile.NamedTemporaryFile(suffix=".hdf5", delete=False) as f:
-        filepath = f.name
+    def test_get_dict_real8_found(self):
+        """Test _get_dict_real8 when key exists."""
+        d = lal.CreateDict()
+        lal.DictInsertREAL8Value(d, "test_key", 42.5)
+        assert _get_dict_real8(d, "test_key") == 42.5
 
-    with h5py.File(filepath, "w") as hf:
-        grp = hf.create_group("injections")
-        grp.create_dataset("mass1", data=[1.4, 30.0])
-        grp.create_dataset("mass2", data=[1.4, 30.0])
-        grp.create_dataset("spin1x", data=[0.0, 0.0])
-        grp.create_dataset("spin1y", data=[0.0, 0.0])
-        grp.create_dataset("spin1z", data=[0.0, 0.1])
-        grp.create_dataset("spin2x", data=[0.0, 0.0])
-        grp.create_dataset("spin2y", data=[0.0, 0.0])
-        grp.create_dataset("spin2z", data=[0.0, 0.1])
-        grp.create_dataset("distance", data=[100.0, 200.0])
-        grp.create_dataset("inclination", data=[0.0, 0.5])
-        grp.create_dataset("coa_phase", data=[0.0, 0.0])
-        grp.create_dataset("polarization", data=[0.0, 0.1])
-        grp.create_dataset("ra", data=[1.0, 2.0])
-        grp.create_dataset("dec", data=[0.5, 0.3])
-        grp.create_dataset("geocent_end_time", data=[1000000010.0, 1000000020.5])
-        grp.create_dataset(
-            "approximant",
-            data=[b"IMRPhenomD", b"IMRPhenomD"],
-        )
-        grp.create_dataset("f_ref", data=[20.0, 10.0])
+    def test_get_dict_real8_not_found(self):
+        """Test _get_dict_real8 with default when key missing."""
+        d = lal.CreateDict()
+        assert _get_dict_real8(d, "missing", 99.0) == 99.0
 
-    return filepath
+    def test_get_dict_string_found(self):
+        """Test _get_dict_string when key exists."""
+        d = lal.CreateDict()
+        lal.DictInsertStringValue(d, "approx", "IMRPhenomD")
+        assert _get_dict_string(d, "approx") == "IMRPhenomD"
+
+    def test_get_dict_string_not_found(self):
+        """Test _get_dict_string with default when key missing."""
+        d = lal.CreateDict()
+        assert _get_dict_string(d, "missing", "default") == "default"
 
 
-class TestInjectionParams:
-    """Test cases for InjectionParams dataclass."""
+class TestValidation:
+    """Test cases for injection validation."""
 
-    def test_defaults(self):
-        """Test default values."""
-        inj = InjectionParams(mass1=1.4, mass2=1.4)
-        assert inj.mass1 == 1.4
-        assert inj.mass2 == 1.4
-        assert inj.spin1z == 0.0
-        assert inj.distance == 100.0
-        assert inj.approximant == "IMRPhenomD"
+    def test_required_fields_defined(self):
+        """Test that required fields dict is properly defined."""
+        assert "mass1" in REQUIRED_FIELDS
+        assert "mass2" in REQUIRED_FIELDS
+        assert "distance" in REQUIRED_FIELDS
+        assert "ra" in REQUIRED_FIELDS
+        assert "dec" in REQUIRED_FIELDS
+        assert "psi" in REQUIRED_FIELDS
+        assert "t_co_gps" in REQUIRED_FIELDS
+        assert "approximant" in REQUIRED_FIELDS
+        assert len(REQUIRED_FIELDS) == 8
 
-    def test_custom_values(self):
-        """Test custom values."""
-        inj = InjectionParams(
-            mass1=30.0,
-            mass2=30.0,
-            spin1z=0.5,
-            spin2z=-0.3,
-            distance=500.0,
-            inclination=0.7,
-            ra=1.5,
-            dec=0.3,
-            geocent_end_time=1234567890.0,
-            approximant="SEOBNRv4",
-        )
-        assert inj.mass1 == 30.0
-        assert inj.spin1z == 0.5
-        assert inj.distance == 500.0
-        assert inj.approximant == "SEOBNRv4"
+    def test_optional_fields_defined(self):
+        """Test that optional fields dict has reasonable defaults."""
+        assert OPTIONAL_FIELDS["spin1z"] == 0.0
+        assert OPTIONAL_FIELDS["inclination"] == 0.0
+        assert OPTIONAL_FIELDS["f_ref"] == 20.0
+
+    def test_validate_injection_success(self):
+        """Test validation passes with all required fields."""
+        params = lal.CreateDict()
+        lal.DictInsertREAL8Value(params, "mass1", 1.4 * lal.MSUN_SI)
+        lal.DictInsertREAL8Value(params, "mass2", 1.4 * lal.MSUN_SI)
+        lal.DictInsertREAL8Value(params, "distance", 100.0 * 1e6 * lal.PC_SI)
+        lal.DictInsertREAL8Value(params, "ra", 0.5)
+        lal.DictInsertREAL8Value(params, "dec", 0.3)
+        lal.DictInsertREAL8Value(params, "psi", 0.1)
+        lal.DictInsertREAL8Value(params, "t_co_gps", 1000000000.0)
+        lal.DictInsertStringValue(params, "approximant", "IMRPhenomD")
+        # Should not raise
+        _validate_injection(params)
+
+    def test_validate_injection_missing_single_field(self):
+        """Test validation fails with missing required field."""
+        params = lal.CreateDict()
+        lal.DictInsertREAL8Value(params, "mass1", 1.4 * lal.MSUN_SI)
+        lal.DictInsertREAL8Value(params, "mass2", 1.4 * lal.MSUN_SI)
+        lal.DictInsertREAL8Value(params, "distance", 100.0 * 1e6 * lal.PC_SI)
+        lal.DictInsertREAL8Value(params, "ra", 0.5)
+        lal.DictInsertREAL8Value(params, "dec", 0.3)
+        lal.DictInsertREAL8Value(params, "psi", 0.1)
+        lal.DictInsertStringValue(params, "approximant", "IMRPhenomD")
+        # Missing t_co_gps
+        with pytest.raises(ValueError, match="Missing required fields: t_co_gps"):
+            _validate_injection(params)
+
+    def test_validate_injection_missing_multiple_fields(self):
+        """Test validation reports all missing fields."""
+        params = lal.CreateDict()
+        lal.DictInsertREAL8Value(params, "mass1", 1.4 * lal.MSUN_SI)
+        # Missing everything except mass1
+        with pytest.raises(ValueError, match="Missing required fields:"):
+            _validate_injection(params)
+
+    def test_validate_injection_index_in_error(self):
+        """Test validation error includes injection index."""
+        params = lal.CreateDict()
+        lal.DictInsertREAL8Value(params, "mass1", 1.4 * lal.MSUN_SI)
+        with pytest.raises(ValueError, match="Injection 5:"):
+            _validate_injection(params, index=5)
 
 
 class TestLoadInjections:
@@ -158,38 +225,26 @@ class TestLoadInjections:
             injections = _load_xml_injections(sample_xml_file)
             assert len(injections) == 2
 
-            # Check first injection
+            # Check first injection (stored in SI units)
             inj0 = injections[0]
-            assert inj0.mass1 == 1.4
-            assert inj0.mass2 == 1.4
-            assert inj0.distance == 100.0
-            assert inj0.geocent_end_time == 1000000010.0
+            mass1 = _get_dict_real8(inj0, "mass1") / lal.MSUN_SI
+            assert mass1 == pytest.approx(1.4, rel=1e-6)
+            distance = _get_dict_real8(inj0, "distance") / (1e6 * lal.PC_SI)
+            assert distance == pytest.approx(100.0, rel=1e-6)
+            geocent_end_time = _get_dict_real8(inj0, "t_co_gps")
+            assert geocent_end_time == 1000000010.0
 
             # Check second injection
             inj1 = injections[1]
-            assert inj1.mass1 == 30.0
-            assert inj1.distance == 200.0
-            assert inj1.spin1z == 0.1
+            mass1 = _get_dict_real8(inj1, "mass1") / lal.MSUN_SI
+            assert mass1 == pytest.approx(30.0, rel=1e-6)
+            spin1z = _get_dict_real8(inj1, "spin1z")
+            assert spin1z == pytest.approx(0.1, rel=1e-6)
             # Check nanoseconds handling
-            assert inj1.geocent_end_time == pytest.approx(1000000020.5, rel=1e-6)
+            geocent_end_time = _get_dict_real8(inj1, "t_co_gps")
+            assert geocent_end_time == pytest.approx(1000000020.5, rel=1e-6)
         finally:
             os.unlink(sample_xml_file)
-
-    def test_load_hdf5_injections(self, sample_hdf5_file):
-        """Test loading injections from HDF5 file."""
-        try:
-            injections = load_injections(sample_hdf5_file)
-            assert len(injections) == 2
-
-            inj0 = injections[0]
-            assert inj0.mass1 == 1.4
-            assert inj0.distance == 100.0
-
-            inj1 = injections[1]
-            assert inj1.mass1 == 30.0
-            assert inj1.spin1z == 0.1
-        finally:
-            os.unlink(sample_hdf5_file)
 
     def test_load_injections_auto_detect_xml(self, sample_xml_file):
         """Test auto-detection for XML files."""
@@ -198,14 +253,6 @@ class TestLoadInjections:
             assert len(injections) == 2
         finally:
             os.unlink(sample_xml_file)
-
-    def test_load_injections_auto_detect_hdf5(self, sample_hdf5_file):
-        """Test auto-detection for HDF5 files."""
-        try:
-            injections = load_injections(sample_hdf5_file)
-            assert len(injections) == 2
-        finally:
-            os.unlink(sample_hdf5_file)
 
 
 class TestWaveformDurationEstimation:
@@ -221,11 +268,7 @@ class TestWaveformDurationEstimation:
 
     def test_estimate_bbh_duration(self):
         """Test duration estimation for BBH."""
-        bbh = InjectionParams(
-            mass1=30.0,
-            mass2=30.0,
-            geocent_end_time=1000000000.0,
-        )
+        bbh = create_simple_injection_dict(mass1=30.0, mass2=30.0)
         pre_dur, post_dur = estimate_waveform_duration(bbh, f_min=10.0)
         # BBH has shorter inspiral than BNS
         assert pre_dur > 0.5
@@ -234,14 +277,10 @@ class TestWaveformDurationEstimation:
 
     def test_estimate_with_spin(self):
         """Test duration estimation with spin."""
-        spinning = InjectionParams(
-            mass1=10.0,
-            mass2=10.0,
-            spin1z=0.9,
-            spin2z=0.9,
-            geocent_end_time=1000000000.0,
-        )
-        pre_dur, post_dur = estimate_waveform_duration(spinning, f_min=10.0)
+        params = create_simple_injection_dict(mass1=10.0, mass2=10.0)
+        lal.DictInsertREAL8Value(params, "spin1z", 0.9)
+        lal.DictInsertREAL8Value(params, "spin2z", 0.9)
+        pre_dur, post_dur = estimate_waveform_duration(params, f_min=10.0)
         # Should return reasonable values
         assert pre_dur > 0.0
         assert post_dur > 0.0
@@ -273,13 +312,7 @@ class TestWaveformGeneration:
 
     def test_generate_waveform_bbh(self):
         """Test waveform generation for BBH."""
-        bbh = InjectionParams(
-            mass1=30.0,
-            mass2=30.0,
-            distance=500.0,
-            geocent_end_time=1000000000.0,
-            approximant="IMRPhenomD",
-        )
+        bbh = create_simple_injection_dict(mass1=30.0, mass2=30.0, distance=500.0)
         hp, hc = generate_waveform_td(bbh, sample_rate=4096, f_min=20.0)
         assert hp.data.length > 0
         # BBH should have shorter waveform than BNS
@@ -312,22 +345,18 @@ class TestDetectorProjection:
         assert strain is not None
         assert strain.data.length > 0
 
-    def test_different_detectors_give_different_strains(self, simple_injection):
+    def test_different_detectors_give_different_strains(self):
         """Test that different detectors produce different strains."""
         # Use non-zero sky position for difference to be visible
-        inj = InjectionParams(
-            mass1=1.4,
-            mass2=1.4,
-            distance=100.0,
-            ra=1.5,  # Non-zero RA
-            dec=0.5,  # Non-zero Dec
-            polarization=0.3,
-            geocent_end_time=1000000000.0,
-        )
-        hp, hc = generate_waveform_td(inj, sample_rate=4096, f_min=20.0)
+        params = create_simple_injection_dict()
+        lal.DictInsertREAL8Value(params, "ra", 1.5)
+        lal.DictInsertREAL8Value(params, "dec", 0.5)
+        lal.DictInsertREAL8Value(params, "psi", 0.3)
 
-        strain_h1 = project_to_detector(hp, hc, inj, "H1")
-        strain_l1 = project_to_detector(hp, hc, inj, "L1")
+        hp, hc = generate_waveform_td(params, sample_rate=4096, f_min=20.0)
+
+        strain_h1 = project_to_detector(hp, hc, params, "H1")
+        strain_l1 = project_to_detector(hp, hc, params, "L1")
 
         # Strains should be different due to different detector orientations
         # and time delays. Compare near the end where signal is strongest.
@@ -385,28 +414,37 @@ class TestWaveformCache:
         )
         assert len(overlapping) == 0
 
-    def test_get_waveform_slice(self, simple_injection):
-        """Test getting waveform slice for buffer."""
+    def test_add_injection_to_target(self, simple_injection):
+        """Test adding injection to target buffer with sub-sample interpolation."""
         cache = WaveformCache(
             injections=[simple_injection],
             ifos=["H1"],
             sample_rate=4096,
             f_min=20.0,
         )
-        # Get slice around merger (geocent_end_time = 1000000000.0)
-        # Buffer needs to overlap the waveform which starts ~200s before merger
-        # The waveform ends shortly after merger (ringdown is short for BNS)
-        wf_slice, start_idx = cache.get_waveform_slice(
-            inj_id=0,
-            ifo="H1",
-            buf_start=999999998.0,  # 2 seconds before merger
-            buf_end=1000000002.0,  # 2 seconds after merger
+        # Create target buffer around merger (geocent_end_time = 1000000000.0)
+        # Buffer needs to overlap the waveform which starts before merger
+        buf_start = 999999998.0  # 2 seconds before merger
+        buf_end = 1000000002.0  # 2 seconds after merger
+        num_samples = int((buf_end - buf_start) * 4096)
+
+        target = lal.CreateREAL8TimeSeries(
+            "H1:STRAIN",
+            lal.LIGOTimeGPS(buf_start),
+            0.0,
+            1.0 / 4096,
+            lal.StrainUnit,
+            num_samples,
         )
-        # Should have some samples (waveform might end before buffer ends)
-        assert len(wf_slice) > 0
-        assert start_idx >= 0
-        # Should have at least 1 second of samples before merger
-        assert len(wf_slice) > 4096
+        target.data.data[:] = 0.0
+
+        # Add injection using new method
+        cache.add_injection_to_target(inj_id=0, ifo="H1", target=target)
+
+        # Should have non-zero samples (injection was added)
+        assert np.count_nonzero(target.data.data) > 0
+        # Should have significant signal (at least 1 second worth of samples)
+        assert np.count_nonzero(target.data.data) > 4096
 
     def test_cache_cleanup(self, simple_injection):
         """Test cache cleanup of expired waveforms."""
@@ -416,13 +454,20 @@ class TestWaveformCache:
             sample_rate=4096,
             f_min=20.0,
         )
-        # Generate and cache waveform
-        cache.get_waveform_slice(
-            inj_id=0,
-            ifo="H1",
-            buf_start=999999999.0,
-            buf_end=1000000001.0,
+        # Generate and cache waveform by adding to a target
+        buf_start = 999999999.0
+        buf_end = 1000000001.0
+        num_samples = int((buf_end - buf_start) * 4096)
+        target = lal.CreateREAL8TimeSeries(
+            "H1:STRAIN",
+            lal.LIGOTimeGPS(buf_start),
+            0.0,
+            1.0 / 4096,
+            lal.StrainUnit,
+            num_samples,
         )
+        target.data.data[:] = 0.0
+        cache.add_injection_to_target(inj_id=0, ifo="H1", target=target)
         assert 0 in cache.cache
 
         # Cleanup with time past waveform end
@@ -623,156 +668,8 @@ class TestSimInspiralSource:
             os.unlink(sample_xml_file)
 
 
-class TestFdToTd:
-    """Test cases for frequency to time domain conversion."""
-
-    def test_fd_to_td_roundtrip(self):
-        """Test that FD to TD conversion preserves signal structure."""
-        # Create a simple frequency domain signal
-        n_freq = 1025
-        delta_f = 1.0
-        sample_rate = 2 * (n_freq - 1) * delta_f
-
-        fd_series = lal.CreateCOMPLEX16FrequencySeries(
-            "test",
-            lal.LIGOTimeGPS(0),
-            0.0,
-            delta_f,
-            lal.DimensionlessUnit,
-            n_freq,
-        )
-        # Put a sinusoid at 100 Hz
-        fd_series.data.data[:] = 0.0
-        fd_series.data.data[100] = 1.0 + 0.0j
-
-        td_series = _fd_to_td(fd_series, 1.0 / sample_rate)
-
-        # Should have the right length
-        expected_length = 2 * (n_freq - 1)
-        assert td_series.data.length == expected_length
-
-        # Should have non-zero amplitude
-        assert np.max(np.abs(td_series.data.data)) > 0
-
-
 class TestCoverageEdgeCases:
     """Test cases for edge cases and error handling to improve coverage."""
-
-    def test_load_hdf5_without_injections_group(self):
-        """Test HDF5 file without 'injections' group (data at root)."""
-        import h5py
-
-        # Create HDF5 file with data at root (no "injections" group)
-        with tempfile.NamedTemporaryFile(suffix=".hdf5", delete=False) as f:
-            filepath = f.name
-
-        try:
-            with h5py.File(filepath, "w") as hf:
-                # Put data at root level, not in an "injections" group
-                hf.create_dataset("mass1", data=[10.0])
-                hf.create_dataset("mass2", data=[10.0])
-                hf.create_dataset("spin1x", data=[0.0])
-                hf.create_dataset("spin1y", data=[0.0])
-                hf.create_dataset("spin1z", data=[0.0])
-                hf.create_dataset("spin2x", data=[0.0])
-                hf.create_dataset("spin2y", data=[0.0])
-                hf.create_dataset("spin2z", data=[0.0])
-                hf.create_dataset("distance", data=[100.0])
-                hf.create_dataset("inclination", data=[0.0])
-                hf.create_dataset("coa_phase", data=[0.0])
-                hf.create_dataset("polarization", data=[0.0])
-                hf.create_dataset("ra", data=[0.0])
-                hf.create_dataset("dec", data=[0.0])
-                hf.create_dataset("geocent_end_time", data=[1000000000.0])
-                hf.create_dataset("approximant", data=[b"IMRPhenomD"])
-                hf.create_dataset("f_ref", data=[20.0])
-
-            injections = _load_hdf5_injections(filepath)
-            assert len(injections) == 1
-            assert injections[0].mass1 == 10.0
-        finally:
-            os.unlink(filepath)
-
-    def test_load_hdf5_with_string_approximant_non_bytes(self):
-        """Test HDF5 string handling when value is not bytes (defensive code)."""
-        from unittest.mock import patch
-
-        import h5py
-
-        with tempfile.NamedTemporaryFile(suffix=".hdf5", delete=False) as f:
-            filepath = f.name
-
-        try:
-            # Create a valid HDF5 file first
-            with h5py.File(filepath, "w") as hf:
-                grp = hf.create_group("injections")
-                grp.create_dataset("mass1", data=[15.0])
-                grp.create_dataset("mass2", data=[15.0])
-                grp.create_dataset("spin1x", data=[0.0])
-                grp.create_dataset("spin1y", data=[0.0])
-                grp.create_dataset("spin1z", data=[0.0])
-                grp.create_dataset("spin2x", data=[0.0])
-                grp.create_dataset("spin2y", data=[0.0])
-                grp.create_dataset("spin2z", data=[0.0])
-                grp.create_dataset("distance", data=[200.0])
-                grp.create_dataset("inclination", data=[0.0])
-                grp.create_dataset("coa_phase", data=[0.0])
-                grp.create_dataset("polarization", data=[0.0])
-                grp.create_dataset("ra", data=[0.0])
-                grp.create_dataset("dec", data=[0.0])
-                grp.create_dataset("geocent_end_time", data=[1000000000.0])
-                # Store as bytes normally
-                grp.create_dataset("approximant", data=[b"TaylorF2"])
-                grp.create_dataset("f_ref", data=[20.0])
-
-            # Now mock the h5py read to return str instead of bytes
-            # to test the non-bytes branch
-            original_h5_file = h5py.File
-
-            class MockFile:
-                def __init__(self, path, mode):
-                    self._file = original_h5_file(path, mode)
-
-                def __enter__(self):
-                    self._file.__enter__()
-                    return MockGroup(self._file)
-
-                def __exit__(self, *args):
-                    return self._file.__exit__(*args)
-
-            class MockGroup:
-                def __init__(self, grp):
-                    self._grp = grp
-
-                def __contains__(self, key):
-                    return key in self._grp
-
-                def __getitem__(self, key):
-                    if key == "injections":
-                        return MockGroup(self._grp[key])
-                    return MockDataset(self._grp[key])
-
-            class MockDataset:
-                def __init__(self, ds):
-                    self._ds = ds
-
-                def __len__(self):
-                    return len(self._ds)
-
-                def __getitem__(self, idx):
-                    val = self._ds[idx]
-                    # Return str instead of bytes for approximant
-                    if isinstance(val, bytes):
-                        return val.decode("utf-8")  # Return str, not bytes
-                    return val
-
-            with patch.object(h5py, "File", MockFile):
-                injections = _load_hdf5_injections(filepath)
-                assert len(injections) == 1
-                # The non-bytes branch should handle this via str()
-                assert injections[0].approximant == "TaylorF2"
-        finally:
-            os.unlink(filepath)
 
     def test_load_injections_unknown_extension_xml_fallback(self):
         """Test loading file with unknown extension falls back to XML."""
@@ -813,12 +710,13 @@ class TestCoverageEdgeCases:
         try:
             injections = load_injections(filepath)
             assert len(injections) == 1
-            assert injections[0].mass1 == 5.0
+            mass1 = _get_dict_real8(injections[0], "mass1") / lal.MSUN_SI
+            assert mass1 == pytest.approx(5.0, rel=1e-6)
         finally:
             os.unlink(filepath)
 
-    def test_waveform_slice_no_overlap(self, simple_injection):
-        """Test get_waveform_slice when buffer doesn't overlap waveform."""
+    def test_add_injection_no_overlap(self, simple_injection):
+        """Test add_injection_to_target when buffer doesn't overlap waveform."""
         cache = WaveformCache(
             injections=[simple_injection],
             ifos=["H1"],
@@ -826,15 +724,25 @@ class TestCoverageEdgeCases:
             f_min=20.0,
         )
         # Buffer far after waveform ends (waveform ends shortly after merger)
-        wf_slice, start_idx = cache.get_waveform_slice(
-            inj_id=0,
-            ifo="H1",
-            buf_start=1100000000.0,  # Far after merger
-            buf_end=1100000001.0,
+        buf_start = 1100000000.0  # Far after merger
+        buf_end = 1100000001.0
+        num_samples = int((buf_end - buf_start) * 4096)
+
+        target = lal.CreateREAL8TimeSeries(
+            "H1:STRAIN",
+            lal.LIGOTimeGPS(buf_start),
+            0.0,
+            1.0 / 4096,
+            lal.StrainUnit,
+            num_samples,
         )
-        # Should return empty array since no overlap
-        assert len(wf_slice) == 0
-        assert start_idx == 0
+        target.data.data[:] = 0.0
+
+        # Add injection (should not modify target since no overlap)
+        cache.add_injection_to_target(inj_id=0, ifo="H1", target=target)
+
+        # Should remain all zeros since no overlap
+        assert np.count_nonzero(target.data.data) == 0
 
     def test_estimate_duration_fallback_chirp(self):
         """Test duration estimation fallback for chirp time."""
@@ -842,16 +750,12 @@ class TestCoverageEdgeCases:
 
         import lalsimulation as lalsim
 
-        inj = InjectionParams(
-            mass1=10.0,
-            mass2=10.0,
-            geocent_end_time=1000000000.0,
-        )
+        params = create_simple_injection_dict(mass1=10.0, mass2=10.0)
         # Mock SimInspiralChirpTimeBound to raise an exception
         with patch.object(
             lalsim, "SimInspiralChirpTimeBound", side_effect=RuntimeError("test")
         ):
-            pre_dur, post_dur = estimate_waveform_duration(inj, f_min=20.0)
+            pre_dur, post_dur = estimate_waveform_duration(params, f_min=20.0)
             # Should still return valid duration using fallback formula
             assert pre_dur > 0
             assert post_dur > 0
@@ -862,16 +766,12 @@ class TestCoverageEdgeCases:
 
         import lalsimulation as lalsim
 
-        inj = InjectionParams(
-            mass1=10.0,
-            mass2=10.0,
-            geocent_end_time=1000000000.0,
-        )
+        params = create_simple_injection_dict(mass1=10.0, mass2=10.0)
         # Mock SimInspiralMergeTimeBound to raise an exception
         with patch.object(
             lalsim, "SimInspiralMergeTimeBound", side_effect=RuntimeError("test")
         ):
-            pre_dur, post_dur = estimate_waveform_duration(inj, f_min=20.0)
+            pre_dur, post_dur = estimate_waveform_duration(params, f_min=20.0)
             # Should still return valid duration using fallback
             assert pre_dur > 0
             assert post_dur > 0
@@ -882,16 +782,12 @@ class TestCoverageEdgeCases:
 
         import lalsimulation as lalsim
 
-        inj = InjectionParams(
-            mass1=10.0,
-            mass2=10.0,
-            geocent_end_time=1000000000.0,
-        )
+        params = create_simple_injection_dict(mass1=10.0, mass2=10.0)
         # Mock SimInspiralRingdownTimeBound to raise an exception
         with patch.object(
             lalsim, "SimInspiralRingdownTimeBound", side_effect=RuntimeError("test")
         ):
-            pre_dur, post_dur = estimate_waveform_duration(inj, f_min=20.0)
+            pre_dur, post_dur = estimate_waveform_duration(params, f_min=20.0)
             # Should still return valid duration using fallback
             assert pre_dur > 0
             assert post_dur > 0
@@ -920,38 +816,182 @@ class TestCoverageEdgeCases:
         finally:
             os.unlink(sample_xml_file)
 
-    def test_load_injections_unknown_extension_hdf5_fallback(self):
-        """Test loading file with unknown extension falls back to HDF5."""
-        import h5py
+    def test_load_injections_unknown_extension_lal_h5_fallback(self):
+        """Test loading LAL H5 file with unknown extension falls back to LAL H5."""
+        import lalsimulation as lalsim
 
-        # Create HDF5 file with unknown extension
+        # Create LAL H5 file with unknown extension
         with tempfile.NamedTemporaryFile(suffix=".inj", delete=False) as f:
             filepath = f.name
 
         try:
-            with h5py.File(filepath, "w") as hf:
-                grp = hf.create_group("injections")
-                grp.create_dataset("mass1", data=[20.0])
-                grp.create_dataset("mass2", data=[20.0])
-                grp.create_dataset("spin1x", data=[0.0])
-                grp.create_dataset("spin1y", data=[0.0])
-                grp.create_dataset("spin1z", data=[0.0])
-                grp.create_dataset("spin2x", data=[0.0])
-                grp.create_dataset("spin2y", data=[0.0])
-                grp.create_dataset("spin2z", data=[0.0])
-                grp.create_dataset("distance", data=[300.0])
-                grp.create_dataset("inclination", data=[0.0])
-                grp.create_dataset("coa_phase", data=[0.0])
-                grp.create_dataset("polarization", data=[0.0])
-                grp.create_dataset("ra", data=[0.0])
-                grp.create_dataset("dec", data=[0.0])
-                grp.create_dataset("geocent_end_time", data=[1000000000.0])
-                grp.create_dataset("approximant", data=[b"IMRPhenomD"])
-                grp.create_dataset("f_ref", data=[20.0])
+            # Create a minimal LAL H5 injection file
+            seq = lal.CreateDictSequence(1)
+            params = lal.CreateDict()
+            lal.DictInsertREAL8Value(params, "mass1", 25.0 * lal.MSUN_SI)
+            lal.DictInsertREAL8Value(params, "mass2", 25.0 * lal.MSUN_SI)
+            lal.DictInsertREAL8Value(params, "spin1x", 0.0)
+            lal.DictInsertREAL8Value(params, "spin1y", 0.0)
+            lal.DictInsertREAL8Value(params, "spin1z", 0.0)
+            lal.DictInsertREAL8Value(params, "spin2x", 0.0)
+            lal.DictInsertREAL8Value(params, "spin2y", 0.0)
+            lal.DictInsertREAL8Value(params, "spin2z", 0.0)
+            lal.DictInsertREAL8Value(params, "distance", 200.0 * 1e6 * lal.PC_SI)
+            lal.DictInsertREAL8Value(params, "inclination", 0.0)
+            lal.DictInsertREAL8Value(params, "phi_ref", 0.0)
+            lal.DictInsertREAL8Value(params, "psi", 0.0)
+            lal.DictInsertREAL8Value(params, "ra", 0.0)
+            lal.DictInsertREAL8Value(params, "dec", 0.0)
+            lal.DictInsertREAL8Value(params, "t_co_gps", 1000000000.0)
+            lal.DictInsertStringValue(params, "approximant", "IMRPhenomD")
+            lal.DictInsertREAL8Value(params, "f_ref", 20.0)
+            lal.DictSequenceSet(seq, params, 0)
+            lalsim.SimInspiralInjectionSequenceToH5File(seq, filepath)
 
-            # This should fail XML parsing then fall back to HDF5
+            # This should fail XML parsing then fall back to LAL H5
             injections = load_injections(filepath)
             assert len(injections) == 1
-            assert injections[0].mass1 == 20.0
+            mass1 = _get_dict_real8(injections[0], "mass1") / lal.MSUN_SI
+            assert mass1 == pytest.approx(25.0, rel=1e-6)
         finally:
             os.unlink(filepath)
+
+
+class TestLalH5Format:
+    """Test cases for LAL H5 format injection loading."""
+
+    @pytest.fixture
+    def sample_lal_h5_file(self):
+        """Create a sample LAL-format HDF5 file for testing.
+
+        LAL format has a 'cbc_waveform_params' group with injection dicts.
+        """
+        import lalsimulation as lalsim
+
+        with tempfile.NamedTemporaryFile(suffix=".h5", delete=False) as f:
+            filepath = f.name
+
+        # Create a dict sequence with injection parameters
+        seq = lal.CreateDictSequence(2)
+
+        # First injection - simple BNS
+        params1 = lal.CreateDict()
+        lal.DictInsertREAL8Value(params1, "mass1", 1.4 * lal.MSUN_SI)
+        lal.DictInsertREAL8Value(params1, "mass2", 1.4 * lal.MSUN_SI)
+        lal.DictInsertREAL8Value(params1, "spin1x", 0.0)
+        lal.DictInsertREAL8Value(params1, "spin1y", 0.0)
+        lal.DictInsertREAL8Value(params1, "spin1z", 0.0)
+        lal.DictInsertREAL8Value(params1, "spin2x", 0.0)
+        lal.DictInsertREAL8Value(params1, "spin2y", 0.0)
+        lal.DictInsertREAL8Value(params1, "spin2z", 0.0)
+        lal.DictInsertREAL8Value(params1, "distance", 100.0 * 1e6 * lal.PC_SI)
+        lal.DictInsertREAL8Value(params1, "inclination", 0.0)
+        lal.DictInsertREAL8Value(params1, "phi_ref", 0.5)
+        lal.DictInsertREAL8Value(params1, "psi", 0.3)
+        lal.DictInsertREAL8Value(params1, "ra", 1.0)
+        lal.DictInsertREAL8Value(params1, "dec", 0.5)
+        lal.DictInsertREAL8Value(params1, "t_co_gps", 1000000010.0)
+        lal.DictInsertStringValue(params1, "approximant", "IMRPhenomD")
+        lal.DictInsertREAL8Value(params1, "f_ref", 20.0)
+        lal.DictSequenceSet(seq, params1, 0)
+
+        # Second injection - BBH with spins
+        params2 = lal.CreateDict()
+        lal.DictInsertREAL8Value(params2, "mass1", 30.0 * lal.MSUN_SI)
+        lal.DictInsertREAL8Value(params2, "mass2", 30.0 * lal.MSUN_SI)
+        lal.DictInsertREAL8Value(params2, "spin1x", 0.0)
+        lal.DictInsertREAL8Value(params2, "spin1y", 0.0)
+        lal.DictInsertREAL8Value(params2, "spin1z", 0.5)
+        lal.DictInsertREAL8Value(params2, "spin2x", 0.0)
+        lal.DictInsertREAL8Value(params2, "spin2y", 0.0)
+        lal.DictInsertREAL8Value(params2, "spin2z", -0.3)
+        lal.DictInsertREAL8Value(params2, "distance", 500.0 * 1e6 * lal.PC_SI)
+        lal.DictInsertREAL8Value(params2, "inclination", 0.7)
+        lal.DictInsertREAL8Value(params2, "phi_ref", 1.0)
+        lal.DictInsertREAL8Value(params2, "psi", 0.1)
+        lal.DictInsertREAL8Value(params2, "ra", 2.5)
+        lal.DictInsertREAL8Value(params2, "dec", -0.3)
+        lal.DictInsertREAL8Value(params2, "t_co_gps", 1000000020.0)
+        lal.DictInsertStringValue(params2, "approximant", "SEOBNRv4")
+        lal.DictInsertREAL8Value(params2, "f_ref", 10.0)
+        lal.DictSequenceSet(seq, params2, 1)
+
+        # Write using LAL's H5 writer
+        lalsim.SimInspiralInjectionSequenceToH5File(seq, filepath)
+
+        return filepath
+
+    def test_load_lal_h5_injections(self, sample_lal_h5_file):
+        """Test loading injections from LAL H5 format."""
+        try:
+            injections = _load_lal_h5_injections(sample_lal_h5_file)
+            assert len(injections) == 2
+
+            # Check first injection (BNS) - values in SI units
+            inj0 = injections[0]
+            mass1 = _get_dict_real8(inj0, "mass1") / lal.MSUN_SI
+            assert mass1 == pytest.approx(1.4, rel=1e-6)
+            distance = _get_dict_real8(inj0, "distance") / (1e6 * lal.PC_SI)
+            assert distance == pytest.approx(100.0, rel=1e-6)
+            phi_ref = _get_dict_real8(inj0, "phi_ref")
+            assert phi_ref == pytest.approx(0.5, rel=1e-6)
+            psi = _get_dict_real8(inj0, "psi")
+            assert psi == pytest.approx(0.3, rel=1e-6)
+            ra = _get_dict_real8(inj0, "ra")
+            assert ra == pytest.approx(1.0, rel=1e-6)
+            dec = _get_dict_real8(inj0, "dec")
+            assert dec == pytest.approx(0.5, rel=1e-6)
+            geocent_end_time = _get_dict_real8(inj0, "t_co_gps")
+            assert geocent_end_time == pytest.approx(1000000010.0, rel=1e-9)
+            approximant = _get_dict_string(inj0, "approximant")
+            assert approximant == "IMRPhenomD"
+            f_ref = _get_dict_real8(inj0, "f_ref")
+            assert f_ref == pytest.approx(20.0, rel=1e-6)
+
+            # Check second injection (BBH)
+            inj1 = injections[1]
+            mass1 = _get_dict_real8(inj1, "mass1") / lal.MSUN_SI
+            assert mass1 == pytest.approx(30.0, rel=1e-6)
+            spin1z = _get_dict_real8(inj1, "spin1z")
+            assert spin1z == pytest.approx(0.5, rel=1e-6)
+            spin2z = _get_dict_real8(inj1, "spin2z")
+            assert spin2z == pytest.approx(-0.3, rel=1e-6)
+            distance = _get_dict_real8(inj1, "distance") / (1e6 * lal.PC_SI)
+            assert distance == pytest.approx(500.0, rel=1e-6)
+            inclination = _get_dict_real8(inj1, "inclination")
+            assert inclination == pytest.approx(0.7, rel=1e-6)
+            approximant = _get_dict_string(inj1, "approximant")
+            assert approximant == "SEOBNRv4"
+        finally:
+            os.unlink(sample_lal_h5_file)
+
+    def test_load_injections_auto_detects_lal_h5(self, sample_lal_h5_file):
+        """Test load_injections auto-detects LAL H5 format."""
+        try:
+            injections = load_injections(sample_lal_h5_file)
+            assert len(injections) == 2
+            geocent_end_time = _get_dict_real8(injections[0], "t_co_gps")
+            assert geocent_end_time == pytest.approx(1000000010.0, rel=1e-9)
+        finally:
+            os.unlink(sample_lal_h5_file)
+
+    def test_sim_inspiral_source_with_lal_h5(self, sample_lal_h5_file):
+        """Test SimInspiralSource works with LAL H5 format files."""
+        try:
+            source = SimInspiralSource(
+                name="TestSource",
+                injection_file=sample_lal_h5_file,
+                ifos=["H1", "L1"],
+                t0=1000000000.0,
+                duration=30.0,
+                sample_rate=4096,
+                f_min=20.0,
+            )
+            assert len(source._injections) == 2
+            # Check masses were loaded correctly (in SI units)
+            mass1_0 = _get_dict_real8(source._injections[0], "mass1") / lal.MSUN_SI
+            assert mass1_0 == pytest.approx(1.4, rel=1e-6)
+            mass1_1 = _get_dict_real8(source._injections[1], "mass1") / lal.MSUN_SI
+            assert mass1_1 == pytest.approx(30.0, rel=1e-6)
+        finally:
+            os.unlink(sample_lal_h5_file)
