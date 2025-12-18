@@ -34,10 +34,9 @@ authors = [
 ]
 description = "LIGO Extensions for the SGN Framework"
 readme = "README.md"
-license = { text = "MPL-2.0" }
+license = "MPL-2.0"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
     "Operating System :: OS Independent",
 ]
 
