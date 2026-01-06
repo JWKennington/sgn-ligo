@@ -1,9 +1,10 @@
 # SimInspiralSource Tutorial
 
 The `SimInspiralSource` is a data source element that generates gravitational wave
-injection signals from compact binary coalescences (CBCs). It reads injection
-parameters from standard LIGO/Virgo injection files (XML or HDF5) and generates
-accurate waveforms projected onto multiple detectors using LALSimulation.
+injection signals from compact binary coalescences (CBCs). It can either read injection
+parameters from standard LIGO/Virgo injection files (XML or HDF5), or generate
+periodic test injections automatically using **test mode**. All waveforms are
+generated and projected onto multiple detectors using LALSimulation.
 
 ## Overview
 
@@ -73,6 +74,145 @@ with h5py.File("injections.hdf5", "w") as f:
     grp.create_dataset("approximant", data=[b"IMRPhenomD", b"IMRPhenomD"])
     # ... other parameters
 ```
+
+## Test Mode
+
+Test mode provides a quick way to generate periodic gravitational wave injections
+without creating an injection file. This is useful for:
+
+- Quick testing and development
+- Demonstrations and tutorials
+- Verifying pipeline operation
+- Educational purposes
+
+### Test Mode Types
+
+Three injection types are available:
+
+| Mode | Masses | Distance | Description |
+|------|--------|----------|-------------|
+| `bns` | 1.4 + 1.4 M☉ | 100 Mpc | Binary Neutron Star |
+| `nsbh` | 10 + 1.4 M☉ | 200 Mpc | Neutron Star - Black Hole |
+| `bbh` | 30 + 30 M☉ | 500 Mpc | Binary Black Hole |
+
+All test injections use:
+
+- **Approximant**: IMRPhenomD
+- **Spins**: Non-spinning (all zero)
+- **Inclination**: Face-on (0 radians)
+- **Injection interval**: Every 30 seconds
+- **Sky position**: Directly overhead State College, PA (40.79°N, 77.86°W)
+
+### Basic Test Mode Example
+
+Using test mode is as simple as specifying `test_mode` instead of `injection_file`:
+
+```python
+from sgn.apps import Pipeline
+from sgnts.sinks import TSPlotSink
+from sgnligo.sources import SimInspiralSource
+
+# Create source with test mode - no injection file needed!
+source = SimInspiralSource(
+    name="TestInjections",
+    test_mode="bbh",  # Options: "bns", "nsbh", "bbh"
+    ifos=["H1", "L1"],
+    t0=1400000020.0,
+    duration=120.0,  # 2 minutes = 4 injections
+    sample_rate=4096,
+    f_min=20.0,
+)
+
+# Create plot sink
+sink = TSPlotSink(
+    name="Strain",
+    sink_pad_names=["H1:INJ-STRAIN", "L1:INJ-STRAIN"],
+)
+
+# Build and run pipeline
+pipeline = Pipeline()
+pipeline.insert(source, sink)
+pipeline.insert(
+    link_map={
+        "Strain:snk:H1:INJ-STRAIN": "TestInjections:src:H1:INJ-STRAIN",
+        "Strain:snk:L1:INJ-STRAIN": "TestInjections:src:L1:INJ-STRAIN",
+    }
+)
+pipeline.run()
+
+# Plot results
+fig, ax = sink.plot(
+    layout="overlay",
+    labels={"H1:INJ-STRAIN": "H1", "L1:INJ-STRAIN": "L1"},
+    title="BBH Test Mode: 30+30 Msun at 500 Mpc",
+    time_unit="gps",
+)
+```
+
+### Comparing Injection Types
+
+Each test mode produces signals with different characteristics:
+
+```python
+from sgnligo.sources import SimInspiralSource
+from sgnligo.sources.sim_inspiral_source import TEST_MODE_PARAMS
+
+# Print available test modes and their parameters
+for mode, params in TEST_MODE_PARAMS.items():
+    print(f"{mode.upper()}: {params['mass1']:.1f}+{params['mass2']:.1f} Msun "
+          f"at {params['distance']:.0f} Mpc")
+# Output:
+# BNS: 1.4+1.4 Msun at 100 Mpc
+# NSBH: 10.0+1.4 Msun at 200 Mpc
+# BBH: 30.0+30.0 Msun at 500 Mpc
+```
+
+**Signal characteristics by type:**
+
+- **BNS**: Long inspiral (100+ seconds from 20 Hz), highest amplitude due to
+  closest distance. Multiple injections will overlap in time.
+- **NSBH**: Medium inspiral duration, moderate amplitude.
+- **BBH**: Short inspiral (seconds), lower amplitude due to greater distance.
+
+### Sky Position: Overhead State College, PA
+
+Test injections are positioned directly overhead (at zenith) of State College,
+Pennsylvania at the moment of coalescence. This means:
+
+- **Declination** = Latitude of State College = 40.79° = 0.712 radians
+- **Right Ascension** = Changes with time to stay overhead
+
+The right ascension is calculated using the Greenwich Mean Sidereal Time (GMST):
+
+```python
+from sgnligo.sources.sim_inspiral_source import (
+    calculate_overhead_ra,
+    STATE_COLLEGE_LAT_RAD,
+    STATE_COLLEGE_LON_RAD,
+)
+import numpy as np
+
+# Calculate RA for a source overhead at GPS time 1400000000
+gps_time = 1400000000.0
+ra = calculate_overhead_ra(gps_time, STATE_COLLEGE_LON_RAD)
+print(f"RA at t={gps_time}: {np.degrees(ra):.2f} degrees")
+
+# RA changes by ~0.125 degrees per 30 seconds (Earth rotation)
+ra_later = calculate_overhead_ra(gps_time + 30, STATE_COLLEGE_LON_RAD)
+print(f"RA at t={gps_time + 30}: {np.degrees(ra_later):.2f} degrees")
+```
+
+### Test Mode vs Injection File
+
+| Feature | Test Mode | Injection File |
+|---------|-----------|----------------|
+| Setup complexity | Minimal | Requires file creation |
+| Parameter control | Fixed presets | Full control |
+| Sky position | Fixed (State College) | Configurable |
+| Injection timing | Every 30 seconds | Arbitrary |
+| Use case | Testing, demos | Production, analysis |
+
+**Note**: You must specify either `test_mode` OR `injection_file`, but not both.
 
 ## Basic Usage
 
@@ -344,19 +484,21 @@ python bbh_injection_example.py
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `name` | str | Element name for the pipeline |
-| `injection_file` | str | Path to injection file (XML or HDF5) |
+| `injection_file` | str | Path to injection file (XML or HDF5). **Mutually exclusive with `test_mode`** |
+| `test_mode` | str | Test mode type: `"bns"`, `"nsbh"`, or `"bbh"`. **Mutually exclusive with `injection_file`** |
 | `t0` | float | GPS start time |
 | `duration` | float | Duration in seconds |
+
+**Note**: You must specify exactly one of `injection_file` or `test_mode`.
 
 ### Optional Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `ifos` | list | `["H1"]` | List of detector prefixes (e.g., `["H1", "L1", "V1"]`) |
+| `ifos` | list | `["H1", "L1"]` | List of detector prefixes (e.g., `["H1", "L1", "V1"]`) |
 | `sample_rate` | int | `16384` | Sample rate in Hz |
-| `f_min` | float | `20.0` | Minimum frequency for waveform generation (Hz) |
+| `f_min` | float | `10.0` | Minimum frequency for waveform generation (Hz) |
 | `approximant_override` | str | `None` | Override waveform approximant for all injections |
-| `verbose` | bool | `False` | Enable verbose output |
 
 ### Supported Detectors
 

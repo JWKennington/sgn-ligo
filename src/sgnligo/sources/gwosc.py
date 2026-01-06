@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 from gwpy.timeseries import TimeSeries
-
 from sgn.base import SourcePad
 from sgnts.base import Audioadapter, Offset, SeriesBuffer, TSFrame, TSSource
 
