@@ -199,12 +199,13 @@ class Whiten(TSTransform):
         )
 
         # we apply a tukey window on whitened data if we have zero-padding
-        if self.z_whiten:
-            self.tukey = self.tukey_window(
-                self.n_whiten, 2 * self.z_whiten / self.n_whiten
-            )
-        else:
-            self.tukey = None
+        # z_whiten must be > 0 due to stride/sample rate constraints
+        assert self.z_whiten > 0, (
+            f"z_whiten must be positive, got {self.z_whiten}. "
+            f"Check fft_length ({self.fft_length}) and "
+            f"whiten_sample_rate ({self.whiten_sample_rate})."
+        )
+        self.tukey = self.tukey_window(self.n_whiten, 2 * self.z_whiten / self.n_whiten)
 
         # load reference PSD if provided
         if self.reference_psd:

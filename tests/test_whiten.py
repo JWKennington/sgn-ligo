@@ -180,17 +180,13 @@ class TestWhitenInit:
         assert whiten.tukey is not None
         assert whiten.z_whiten > 0
 
-    def test_init_z_whiten_zero_branch(self, tmp_path):
-        """Test the tukey=None branch when z_whiten is 0 (line 207).
+    def test_init_z_whiten_always_positive(self):
+        """Verify z_whiten > 0 with valid parameters.
 
         Due to constraints in the Whiten class (stride must map to integer
-        samples at both input and whiten rates), it's not possible to create
-        a valid Whiten instance with z_whiten=0 using normal parameters.
-
-        We test this branch by directly calling the conditional code pattern
-        that exists in __post_init__ with z_whiten=0 to verify the branch works.
+        samples at both input and whiten rates), z_whiten is always > 0
+        with valid parameters. An assertion in __post_init__ enforces this.
         """
-        # Create a normal Whiten instance first
         whiten = Whiten(
             name="test_whiten",
             sink_pad_names=("in",),
@@ -202,28 +198,9 @@ class TestWhitenInit:
             fft_length=8,
         )
 
-        # Normal initialization has z_whiten > 0 and tukey is not None
+        # With valid parameters, z_whiten is always > 0 and tukey is set
         assert whiten.z_whiten > 0
         assert whiten.tukey is not None
-
-        # Now test the else branch by simulating z_whiten = 0
-        # This mirrors the code in __post_init__ lines 202-207
-        original_z_whiten = whiten.z_whiten
-        whiten.z_whiten = 0
-
-        # Execute the same conditional that's in the source
-        if whiten.z_whiten:
-            whiten.tukey = whiten.tukey_window(
-                whiten.n_whiten, 2 * whiten.z_whiten / whiten.n_whiten
-            )
-        else:
-            whiten.tukey = None
-
-        # Verify the else branch sets tukey to None
-        assert whiten.tukey is None
-
-        # Restore original state
-        whiten.z_whiten = original_z_whiten
 
 
 class TestTukeyWindow:

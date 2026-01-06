@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 from astropy import units as u
 from gwpy.timeseries import TimeSeries
-
 from sgn.apps import Pipeline
 from sgn.sinks import CollectSink
+
 from sgnligo.sources.gwosc import GWOSCSource
 
 
@@ -158,6 +158,121 @@ class TestGwoscPipeline:
         data = [dq[0] for dq in frames]
         total_samples = sum(len(buf.data) for buf in data)
         assert total_samples == duration * 4096
+
+
+class TestGwoscValidation:
+    """Test input validation."""
+
+    def test_end_before_start_raises(self):
+        """Line 67: ValueError when end < start."""
+        with pytest.raises(ValueError) as excinfo:
+            GWOSCSource(start=1000, end=500)
+        assert "must be after start time" in str(excinfo.value)
+
+    def test_end_equals_start_raises(self):
+        """Line 67: ValueError when end == start."""
+        with pytest.raises(ValueError) as excinfo:
+            GWOSCSource(start=1000, end=1000)
+        assert "must be after start time" in str(excinfo.value)
+
+
+class TestGwoscVerbose:
+    """Test verbose output paths."""
+
+    def test_verbose_rate_limiting(self, mock_fetch_real_object):
+        """Line 102: verbose print during rate limiting."""
+        from sgnligo.sources.gwosc import _GWOSC_RAM_CACHE
+
+        _GWOSC_RAM_CACHE.clear()
+
+        src = GWOSCSource(
+            start=0, end=100, batch_duration=1.0, min_request_interval=0.1, verbose=True
+        )
+        with (
+            patch("builtins.print") as mock_print,
+            patch("sgnligo.sources.gwosc.time.sleep"),
+        ):
+            src.internal()
+            src._adapters["H1"].flush_samples(src._adapters["H1"].size)
+            src.internal()
+            rate_limit_calls = [
+                c for c in mock_print.call_args_list if "Rate limiting" in str(c)
+            ]
+            assert len(rate_limit_calls) > 0
+
+        _GWOSC_RAM_CACHE.clear()
+
+    def test_verbose_cache_hit(self, mock_fetch_real_object):
+        """Line 119: verbose print on cache hit."""
+        from sgnligo.sources.gwosc import _GWOSC_RAM_CACHE
+
+        _GWOSC_RAM_CACHE.clear()
+
+        # First source populates cache
+        src1 = GWOSCSource(
+            start=0,
+            end=10,
+            batch_duration=10.0,
+            min_request_interval=0.0,
+            cache_data=True,
+            verbose=False,
+        )
+        src1.internal()
+
+        # Second source with same params should hit cache
+        src2 = GWOSCSource(
+            start=0,
+            end=10,
+            batch_duration=10.0,
+            min_request_interval=0.0,
+            cache_data=True,
+            verbose=True,
+        )
+        with patch("builtins.print") as mock_print:
+            src2.internal()
+            cache_hit_calls = [
+                c for c in mock_print.call_args_list if "Cache Hit" in str(c)
+            ]
+            assert len(cache_hit_calls) > 0
+
+        _GWOSC_RAM_CACHE.clear()
+
+
+class TestGwoscFrameType:
+    """Test frame_type parameter."""
+
+    def test_frame_type_passed_to_fetch(self, mock_fetch_real_object):
+        """Line 136: frame_type is passed to fetch_open_data."""
+        from sgnligo.sources.gwosc import _GWOSC_RAM_CACHE
+
+        _GWOSC_RAM_CACHE.clear()
+
+        src = GWOSCSource(
+            start=0,
+            end=10,
+            frame_type="H1_HOFT_C01",
+            min_request_interval=0.0,
+        )
+        src.internal()
+        assert mock_fetch_real_object.fetch_open_data.called
+        call_kwargs = mock_fetch_real_object.fetch_open_data.call_args[1]
+        assert call_kwargs.get("frametype") == "H1_HOFT_C01"
+
+        _GWOSC_RAM_CACHE.clear()
+
+
+class TestGwoscEdgeCases:
+    """Test edge cases."""
+
+    def test_fetch_at_end_returns_early(self, mock_fetch_real_object):
+        """Line 112: _fetch_next_batch returns early when cursor is at end."""
+        src = GWOSCSource(
+            start=0, end=10, batch_duration=10.0, min_request_interval=0.0
+        )
+        src.internal()
+        initial_call_count = mock_fetch_real_object.fetch_open_data.call_count
+        src._fetch_next_batch("H1")
+        assert mock_fetch_real_object.fetch_open_data.call_count == initial_call_count
 
 
 class TestGwoscVisuals:

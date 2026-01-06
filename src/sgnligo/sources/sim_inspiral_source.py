@@ -11,8 +11,9 @@ tidal deformability, higher-order modes, and approximant-specific settings.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import lal
 import lalsimulation as lalsim
@@ -54,6 +55,27 @@ OPTIONAL_FIELDS: Dict[str, float] = {
     "mean_per_ano": 0.0,  # Mean periastron anomaly [rad]
     "f_ref": 20.0,  # Reference frequency [Hz]
 }
+
+# =============================================================================
+# Test Mode Configuration
+# =============================================================================
+#
+# Constants for test mode, which generates periodic injections overhead
+# of State College, PA for testing purposes.
+
+# State College, PA coordinates
+STATE_COLLEGE_LAT_RAD = 0.7119059  # 40.7934° N in radians
+STATE_COLLEGE_LON_RAD = -1.3582196  # 77.86° W in radians (west is negative)
+
+# Test mode injection parameters (masses in solar masses, distance in Mpc)
+TEST_MODE_PARAMS: Dict[str, Dict[str, float]] = {
+    "bns": {"mass1": 1.4, "mass2": 1.4, "distance": 100.0},
+    "nsbh": {"mass1": 10.0, "mass2": 1.4, "distance": 200.0},
+    "bbh": {"mass1": 30.0, "mass2": 30.0, "distance": 500.0},
+}
+
+# Interval between test injections in seconds
+TEST_INJECTION_INTERVAL = 30.0
 
 
 def _validate_injection(params: lal.Dict, index: int = 0) -> None:
@@ -122,6 +144,79 @@ def _get_dict_string(d: lal.Dict, key: str, default: str = "") -> str:
         return lal.DictLookupStringValue(d, key)
     except (KeyError, RuntimeError):
         return default
+
+
+def calculate_overhead_ra(gps_time: float, longitude_rad: float) -> float:
+    """Calculate the right ascension for a source directly overhead at a location.
+
+    For a source to be at zenith (directly overhead), its right ascension must
+    equal the local sidereal time (LST) at the observer's location.
+
+    LST = GMST + longitude (where longitude is positive east, negative west)
+
+    Args:
+        gps_time: GPS time of observation (e.g., coalescence time)
+        longitude_rad: Observer longitude in radians (negative for west)
+
+    Returns:
+        Right ascension in radians, normalized to [0, 2π)
+    """
+    gmst = lal.GreenwichMeanSiderealTime(gps_time)
+    # Normalize to [0, 2π)
+    ra = (gmst + longitude_rad) % (2 * math.pi)
+    return ra
+
+
+def generate_test_injection(
+    test_mode: str,
+    t_co_gps: float,
+    latitude_rad: float = STATE_COLLEGE_LAT_RAD,
+    longitude_rad: float = STATE_COLLEGE_LON_RAD,
+) -> lal.Dict:
+    """Generate a test injection for the given GPS coalescence time.
+
+    Creates a LAL dictionary with injection parameters for a test signal
+    positioned directly overhead of the specified location at coalescence time.
+
+    Args:
+        test_mode: Type of injection ("bns", "nsbh", or "bbh")
+        t_co_gps: GPS coalescence time
+        latitude_rad: Observer latitude in radians (default: State College, PA)
+        longitude_rad: Observer longitude in radians (default: State College, PA)
+
+    Returns:
+        LAL dictionary with injection parameters in SI units
+    """
+    mode_params = TEST_MODE_PARAMS[test_mode]
+    ra = calculate_overhead_ra(t_co_gps, longitude_rad)
+
+    inj = lal.CreateDict()
+
+    # Masses - convert from solar masses to SI (kg)
+    lal.DictInsertREAL8Value(inj, "mass1", mode_params["mass1"] * lal.MSUN_SI)
+    lal.DictInsertREAL8Value(inj, "mass2", mode_params["mass2"] * lal.MSUN_SI)
+
+    # Distance - convert from Mpc to SI (meters)
+    lal.DictInsertREAL8Value(inj, "distance", mode_params["distance"] * 1e6 * lal.PC_SI)
+
+    # Sky position - overhead means dec = latitude, ra = LST
+    lal.DictInsertREAL8Value(inj, "ra", ra)
+    lal.DictInsertREAL8Value(inj, "dec", latitude_rad)
+
+    # Polarization angle
+    lal.DictInsertREAL8Value(inj, "psi", 0.0)
+
+    # Coalescence time
+    lal.DictInsertREAL8Value(inj, "t_co_gps", t_co_gps)
+
+    # Approximant
+    lal.DictInsertStringValue(inj, "approximant", "IMRPhenomD")
+
+    # Optional fields with defaults (non-spinning, face-on)
+    for field_name, default_value in OPTIONAL_FIELDS.items():
+        lal.DictInsertREAL8Value(inj, field_name, default_value)
+
+    return inj
 
 
 def _load_xml_injections(filepath: str) -> List[lal.Dict]:
@@ -433,6 +528,7 @@ class WaveformCache:
         sample_rate: int,
         f_min: float,
         approximant_override: Optional[str] = None,
+        test_mode: Optional[str] = None,
     ):
         """Initialize the waveform cache.
 
@@ -442,6 +538,7 @@ class WaveformCache:
             sample_rate: Output sample rate in Hz
             f_min: Minimum frequency for waveform generation
             approximant_override: Override approximant for all injections
+            test_mode: If set, generate test injections ("bns", "nsbh", "bbh")
         """
         self.injections = injections
         self.ifos = ifos
@@ -449,6 +546,10 @@ class WaveformCache:
         self.f_min = f_min
         self.approximant_override = approximant_override
         self.cache: Dict[int, CachedWaveform] = {}
+
+        # Test mode configuration
+        self._test_mode = test_mode
+        self._generated_test_times: Set[float] = set()
 
         # Pre-compute injection time windows for fast overlap queries
         self._injection_windows: List[tuple[float, float]] = []
@@ -459,8 +560,62 @@ class WaveformCache:
             end = t_co_gps + post_dur
             self._injection_windows.append((start, end))
 
+    def _ensure_test_injections_for_range(
+        self, start_gps: float, end_gps: float
+    ) -> None:
+        """Generate test injections whose waveforms could overlap the range.
+
+        For test mode, this method dynamically creates injections at every
+        TEST_INJECTION_INTERVAL seconds. We need to generate injections with
+        coalescence times that could produce waveforms overlapping [start_gps, end_gps].
+
+        Since waveforms extend before (inspiral) and after (ringdown) the coalescence
+        time, we need to look for t_co values where:
+        - t_co - pre_dur < end_gps  (waveform starts before buffer ends)
+        - t_co + post_dur > start_gps  (waveform ends after buffer starts)
+
+        We use a conservative lookahead to ensure we don't miss any injections.
+
+        Args:
+            start_gps: Start of the time range (GPS seconds)
+            end_gps: End of the time range (GPS seconds)
+        """
+        if not self._test_mode:
+            return
+
+        # Use a conservative estimate for maximum waveform duration before coalescence
+        # BNS from 10-20 Hz can have inspirals of 100+ seconds, BBH is shorter
+        # We'll use 300 seconds as a safe upper bound for any test mode
+        max_pre_duration_estimate = 300.0
+
+        # Expand the range to catch all injections whose waveforms could overlap
+        # Look back by max_pre_duration (for late coalescence times with long inspirals)
+        # Look ahead by one interval (for early coalescence with long post-merger)
+        search_start = start_gps - max_pre_duration_estimate
+        search_end = end_gps + TEST_INJECTION_INTERVAL
+
+        # Find the first 30-second boundary at or after search_start
+        first_t_co = (
+            math.ceil(search_start / TEST_INJECTION_INTERVAL) * TEST_INJECTION_INTERVAL
+        )
+
+        t_co = first_t_co
+        while t_co <= search_end:
+            if t_co not in self._generated_test_times:
+                self._generated_test_times.add(t_co)
+                # Generate the injection
+                inj = generate_test_injection(self._test_mode, t_co)
+                # Add to injections list
+                self.injections.append(inj)
+                # Compute and add time window
+                pre_dur, post_dur = estimate_waveform_duration(inj, self.f_min)
+                self._injection_windows.append((t_co - pre_dur, t_co + post_dur))
+            t_co += TEST_INJECTION_INTERVAL
+
     def get_overlapping_injections(self, buf_start: float, buf_end: float) -> List[int]:
         """Find injections that overlap the buffer time window.
+
+        For test mode, this also ensures test injections exist for the query range.
 
         Args:
             buf_start: Buffer start GPS time
@@ -469,6 +624,9 @@ class WaveformCache:
         Returns:
             List of injection indices that overlap the buffer
         """
+        # For test mode, ensure we have injections for this time range
+        self._ensure_test_injections_for_range(buf_start, buf_end)
+
         overlapping = []
         for i, (inj_start, inj_end) in enumerate(self._injection_windows):
             if inj_start < buf_end and inj_end > buf_start:
@@ -558,11 +716,15 @@ class WaveformCache:
 
 @dataclass
 class SimInspiralSource(TSSource):
-    """Source element that generates GW waveforms from an injection file.
+    """Source element that generates GW waveforms from an injection file or test mode.
 
     Reads injection parameters from XML (LIGOLW SimInspiralTable) or HDF5 files
     and generates time-domain waveforms projected onto each detector with proper
     time delays, antenna patterns, and phase corrections using LALSimulation.
+
+    Alternatively, test mode can be used to generate periodic test injections
+    (BNS, NSBH, or BBH) every 30 seconds, positioned directly overhead of
+    State College, PA.
 
     All injection parameters are stored as LAL dictionaries, which allows
     pass-through of any LAL-supported parameters including tidal deformability,
@@ -573,13 +735,18 @@ class SimInspiralSource(TSSource):
     to create realistic data with injections.
 
     Args:
-        injection_file: Path to injection file (XML or HDF5)
+        injection_file: Path to injection file (XML or HDF5). Mutually exclusive
+            with test_mode.
+        test_mode: Generate test injections instead of loading from file.
+            Valid values: "bns" (100 Mpc), "nsbh" (200 Mpc), "bbh" (500 Mpc).
+            Mutually exclusive with injection_file.
         ifos: List of interferometer prefixes, e.g., ["H1", "L1", "V1"]
         sample_rate: Output sample rate in Hz (default: 16384)
         f_min: Minimum frequency for waveform generation in Hz (default: 10)
         approximant_override: Override approximant for all injections (optional)
 
     Example:
+        >>> # Using injection file
         >>> source = SimInspiralSource(
         ...     name="Injections",
         ...     injection_file="injections.xml",
@@ -587,9 +754,19 @@ class SimInspiralSource(TSSource):
         ...     t0=1234567890,
         ...     end=1234567900,
         ... )
+
+        >>> # Using test mode
+        >>> source = SimInspiralSource(
+        ...     name="TestInjections",
+        ...     test_mode="bbh",
+        ...     ifos=["H1", "L1"],
+        ...     t0=1234567890,
+        ...     end=1234567900,
+        ... )
     """
 
     injection_file: Optional[str] = None
+    test_mode: Optional[str] = None
     ifos: Optional[List[str]] = None
     sample_rate: int = 16384
     f_min: float = 10.0
@@ -602,8 +779,22 @@ class SimInspiralSource(TSSource):
 
     def __post_init__(self):
         """Initialize the source."""
-        if self.injection_file is None:
-            raise ValueError("injection_file must be specified")
+        # Validate mutual exclusivity of injection_file and test_mode
+        if self.injection_file and self.test_mode:
+            raise ValueError("Cannot specify both injection_file and test_mode")
+        if not self.injection_file and not self.test_mode:
+            raise ValueError("Must specify either injection_file or test_mode")
+
+        # Validate test_mode value
+        if self.test_mode:
+            test_mode_lower = self.test_mode.lower()
+            if test_mode_lower not in TEST_MODE_PARAMS:
+                raise ValueError(
+                    f"Invalid test_mode '{self.test_mode}'. "
+                    f"Must be one of: {list(TEST_MODE_PARAMS.keys())}"
+                )
+            # Normalize to lowercase
+            self.test_mode = test_mode_lower
 
         if self.ifos is None:
             self.ifos = ["H1", "L1"]
@@ -612,8 +803,12 @@ class SimInspiralSource(TSSource):
         self._channel_dict = {ifo: f"{ifo}:INJ-STRAIN" for ifo in self.ifos}
         self.source_pad_names = list(self._channel_dict.values())
 
-        # Load injections as LAL dicts
-        self._injections = load_injections(self.injection_file)
+        # Load injections from file or start with empty list for test mode
+        if self.injection_file:
+            self._injections = load_injections(self.injection_file)
+        else:
+            # Test mode: injections will be generated dynamically
+            self._injections = []
 
         # Initialize waveform cache
         self._waveform_cache = WaveformCache(
@@ -622,6 +817,7 @@ class SimInspiralSource(TSSource):
             sample_rate=self.sample_rate,
             f_min=self.f_min,
             approximant_override=self.approximant_override,
+            test_mode=self.test_mode,
         )
 
         # Call parent's post_init
