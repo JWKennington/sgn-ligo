@@ -8,7 +8,8 @@ from __future__ import annotations
 import math
 import signal
 import sys
-from typing import Dict, Iterable, Optional, Tuple, Union
+from pathlib import Path
+from typing import Dict, Iterable, Literal, Optional, Tuple, Union
 
 import lal
 import lal.series
@@ -28,7 +29,20 @@ from scipy import interpolate
 #
 
 
-# The measure_psd function has been moved to sgnl.measure_psd
+def psd_to_arrays(
+    psd: lal.REAL8FrequencySeries,
+) -> Tuple[numpy.ndarray, numpy.ndarray]:
+    """Convert LAL series to frequency and PSD value arrays.
+
+    Args:
+        psd: The LAL frequency series.
+
+    Returns:
+        (freqs, psd_values) as numpy arrays.
+    """
+    data = psd.data.data
+    freqs = psd.f0 + numpy.arange(len(data)) * psd.deltaF
+    return freqs, data
 
 
 def read_psd(
@@ -827,3 +841,109 @@ def fake_gwdata_psd(ifos=("H1", "L1", "V1")):
     )
     psd.data.data[:] = out[:]
     return {ifo: psd for ifo in ifos}
+
+
+# Supported output formats with hints on usage
+FormatType = Literal[
+    "xml",  # Standard LIGO XML format (supports multiple instruments)
+    "xml.gz",  # Compressed LIGO XML (standard for sharing/archiving)
+    "npy",  # NumPy binary (fast, single array; splits to multiple files if needed)
+    "npz",  # NumPy archive (convenient for Python, supports multiple instruments)
+    "txt",  # ASCII text (human readable; splits to multiple files if needed)
+]
+
+
+class PSDWriter:
+    """Helper class to handle dispatching PSD writes to different formats."""
+
+    @staticmethod
+    def write(
+        path: Union[str, Path],
+        psd_dict: Dict[str, lal.REAL8FrequencySeries],
+        fmt: Optional[FormatType] = None,
+        verbose: bool = False,
+        trap_signals: Optional[Iterable[signal.Signals]] = None,
+    ) -> None:
+        """
+        Write a dictionary of PSDs to disk.
+
+        Args:
+            path: Base output path.
+            psd_dict: Dictionary mapping instrument/channel names to PSD series.
+            fmt: Explicit format string. If None, inferred from path extension.
+            verbose: If True, log write operations.
+            trap_signals: Optional signals to trap (only used for XML).
+        """
+        path = Path(path)
+        if fmt is None:
+            # Infer format from extension
+            suffixes = "".join(path.suffixes)
+            if "xml" in suffixes:
+                fmt = "xml"
+            elif "npz" in suffixes:
+                fmt = "npz"
+            elif "npy" in suffixes:
+                fmt = "npy"
+            else:
+                fmt = "txt"
+
+        if verbose:
+            print(f"Writing PSDs to {path} (format={fmt})")
+
+        if fmt == "xml" or fmt == "xml.gz":
+            # DRY: Reuse the module-level function
+            write_psd(str(path), psd_dict, trap_signals=trap_signals, verbose=verbose)
+        elif fmt == "npz":
+            PSDWriter._write_npz(path, psd_dict)
+        elif fmt == "npy":
+            PSDWriter._write_npy(path, psd_dict)
+        else:
+            PSDWriter._write_txt(path, psd_dict)
+
+    @staticmethod
+    def _write_npz(path: Path, psds: Dict):
+        """Write all PSDs into a single .npz archive."""
+        arrays = {}
+        for name, psd in psds.items():
+            f, d = psd_to_arrays(psd)
+            arrays[f"{name}_freq"] = f
+            arrays[f"{name}_psd"] = d
+        numpy.savez(path, **arrays)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _write_npy(path: Path, psds: Dict):
+        """Write PSDs to .npy files. Splits by instrument if >1."""
+        if len(psds) == 1:
+            # Single file
+            _, psd = next(iter(psds.items()))
+            f, d = psd_to_arrays(psd)
+            numpy.save(path, numpy.column_stack((f, d)))
+        else:
+            # Multiple files: path.npy -> path_H1.npy, path_L1.npy
+            for name, psd in psds.items():
+                f, d = psd_to_arrays(psd)
+                sub_path = path.with_name(f"{path.stem}_{name}{path.suffix}")
+                numpy.save(sub_path, numpy.column_stack((f, d)))
+
+    @staticmethod
+    def _write_txt(path: Path, psds: Dict):
+        """Write PSDs to text files. Splits by instrument if >1."""
+        if len(psds) == 1:
+            # Single file
+            name, psd = next(iter(psds.items()))
+            f, d = psd_to_arrays(psd)
+            numpy.savetxt(
+                path,
+                numpy.column_stack((f, d)),
+                header=f"Frequency(Hz) PSD({name})",
+            )
+        else:
+            # Multiple files: path.txt -> path_H1.txt, path_L1.txt
+            for name, psd in psds.items():
+                f, d = psd_to_arrays(psd)
+                sub_path = path.with_name(f"{path.stem}_{name}{path.suffix}")
+                numpy.savetxt(
+                    sub_path,
+                    numpy.column_stack((f, d)),
+                    header=f"Frequency(Hz) PSD({name})",
+                )
