@@ -6,7 +6,6 @@ The `sgnligo.gwpy` module provides seamless integration between SGN streaming pi
 
 - Use GWpy's powerful analysis methods within streaming pipelines
 - Convert data between SGN's `SeriesBuffer` and GWpy's `TimeSeries`
-- Access GWOSC open data directly in pipelines
 - Produce output ready for further GWpy-based analysis
 
 This tutorial covers:
@@ -14,10 +13,10 @@ This tutorial covers:
 1. Data conversion utilities
 2. Filtering with GWpyFilter
 3. Time-frequency analysis with GWpyQTransform and GWpySpectrogram
-4. Data sources: TimeSeriesSource and GWOSCSource
+4. Data sources: TimeSeriesSource
 5. Output collection with TimeSeriesSink
-6. Complete pipeline examples
-7. **Visualizing Gravitational Waves** - Plot GW150914 with filtering and Q-transform
+6. Streaming plot generation with GWpyPlotSink
+7. Complete pipeline examples
 
 !!! note "PSD and Whitening"
     For power spectral density computation and whitening, use the native SGN-LIGO transforms in `sgnligo.transforms` and `sgnligo.psd` which provide optimized streaming implementations.
@@ -44,8 +43,8 @@ from sgnligo.gwpy.transforms import (
     GWpyQTransform,
     GWpySpectrogram,
 )
-from sgnligo.gwpy.sources import TimeSeriesSource, GWOSCSource
-from sgnligo.gwpy.sinks import TimeSeriesSink
+from sgnligo.gwpy.sources import TimeSeriesSource
+from sgnligo.gwpy.sinks import TimeSeriesSink, GWpyPlotSink
 ```
 
 ## Data Conversion Utilities
@@ -471,87 +470,6 @@ source = TimeSeriesSource(
 # Source pad names: ("H1:STRAIN", "L1:STRAIN")
 ```
 
-## GWOSCSource: GWOSC Open Data
-
-Fetch data directly from the Gravitational Wave Open Science Center.
-
-### Fetching Event Data
-
-```python
-from sgnligo.gwpy.sources import GWOSCSource
-from sgn.apps import Pipeline
-
-# Fetch GW150914 data
-source = GWOSCSource(
-    name="GWOSC_H1",
-    source_pad_names=("strain",),
-    detector="H1",
-    start_time=1126259462,
-    duration=32,
-    target_sample_rate=4096,
-    chunk_size=16,  # Fetch in 16-second chunks
-)
-```
-
-!!! note "Internet Required"
-    GWOSCSource requires an internet connection to fetch data from GWOSC. Data is cached locally after first fetch.
-
-### Available Detectors
-
-| Detector | Description |
-|----------|-------------|
-| `H1` | LIGO Hanford |
-| `L1` | LIGO Livingston |
-| `V1` | Virgo |
-| `G1` | GEO600 |
-| `K1` | KAGRA |
-
-### Complete GWOSC Example
-
-!!! note "Network Required"
-    This example fetches data from GWOSC and requires an internet connection.
-
-```{.python notest}
-from sgn.apps import Pipeline
-from sgnligo.gwpy.sources import GWOSCSource
-from sgnligo.gwpy.transforms import GWpyFilter
-from sgnligo.gwpy.sinks import TimeSeriesSink
-
-pipeline = Pipeline()
-
-# Fetch 32 seconds around GW150914
-source = GWOSCSource(
-    name="GWOSC",
-    source_pad_names=("strain",),
-    detector="H1",
-    start_time=1126259446,  # 16s before merger
-    duration=32,
-    target_sample_rate=4096,
-)
-pipeline.insert(source)
-
-# Bandpass filter 35-350 Hz
-filt = GWpyFilter(
-    name="BandPass",
-    sink_pad_names=("in",),
-    source_pad_names=("out",),
-    filter_type="bandpass",
-    low_freq=35,
-    high_freq=350,
-)
-pipeline.insert(filt, link_map={"BandPass:snk:in": "GWOSC:src:strain"})
-
-# Collect output
-sink = TimeSeriesSink(name="Sink", sink_pad_names=("in",), channel="H1:FILTERED")
-pipeline.insert(sink, link_map={"Sink:snk:in": "BandPass:src:out"})
-
-pipeline.run()
-
-# Get result for further analysis
-result = sink.get_result()
-print(f"Filtered GW150914 data: {result.duration} seconds")
-```
-
 ## TimeSeriesSink: Collect Pipeline Output
 
 Collect pipeline output into a GWpy TimeSeries for further analysis or plotting.
@@ -602,6 +520,159 @@ sink = TimeSeriesSink(name="Sink", sink_pad_names=("in",), channel="DATA")
 # After first pipeline run, clear for reuse:
 sink.clear()
 ```
+
+## GWpyPlotSink: Streaming Plot Generation
+
+Generate plots at fixed intervals during pipeline execution using the audio adapter pattern.
+
+### Basic Usage
+
+```python
+import numpy as np
+from gwpy.timeseries import TimeSeries
+from sgn.apps import Pipeline
+from sgnligo.gwpy.sources import TimeSeriesSource
+from sgnligo.gwpy.sinks import GWpyPlotSink
+
+# Create sample data
+ts = TimeSeries(
+    np.random.randn(4096 * 10),
+    t0=1000000000,
+    sample_rate=4096,
+    channel="H1:STRAIN",
+)
+
+# Build pipeline
+pipeline = Pipeline()
+source = TimeSeriesSource(name="Source", timeseries=ts, buffer_duration=1.0)
+pipeline.insert(source)
+
+# Create plot sink - generates one plot per stride
+plot_sink = GWpyPlotSink(
+    name="Plotter",
+    sink_pad_names=("in",),
+    ifo="H1",
+    description="STRAIN",
+    plot_type="timeseries",
+    output_dir="./plots",
+    plot_stride=2.0,  # Generate plot every 2 seconds
+    overlap_before=0.0,  # No overlap before
+    overlap_after=0.0,   # No overlap after
+    input_sample_rate=4096,
+)
+pipeline.insert(plot_sink, link_map={"Plotter:snk:in": "Source:src:H1:STRAIN"})
+
+pipeline.run()
+print(f"Generated {plot_sink.plots_generated} plots")
+# Generates: H1-STRAIN-1000000000-2.png, H1-STRAIN-1000000002-2.png, etc.
+```
+
+### Plot Types
+
+GWpyPlotSink supports three plot types:
+
+**Time Series** (default):
+```{.python notest}
+plot_sink = GWpyPlotSink(
+    name="Plotter",
+    sink_pad_names=("in",),
+    plot_type="timeseries",
+    ...
+)
+```
+
+**Spectrogram**:
+```{.python notest}
+plot_sink = GWpyPlotSink(
+    name="Plotter",
+    sink_pad_names=("in",),
+    plot_type="spectrogram",
+    fft_length=0.5,  # FFT length in seconds
+    ...
+)
+```
+
+**Q-Transform**:
+```{.python notest}
+plot_sink = GWpyPlotSink(
+    name="Plotter",
+    sink_pad_names=("in",),
+    plot_type="qtransform",
+    qrange=(4, 64),      # Q range
+    frange=(20, 500),    # Frequency range in Hz
+    ...
+)
+```
+
+### Stride and Overlap
+
+Control plot timing using `plot_stride`, `overlap_before`, and `overlap_after`:
+
+- `plot_stride`: Time between consecutive plot starts
+- `overlap_before`: Data to include before the stride (left overlap)
+- `overlap_after`: Data to include after the stride (right overlap)
+- Total plot duration = `overlap_before` + `plot_stride` + `overlap_after`
+
+```{.python notest}
+# Generate 4-second plots every 2 seconds
+plot_sink = GWpyPlotSink(
+    name="Plotter",
+    sink_pad_names=("in",),
+    plot_stride=2.0,      # New plot every 2 seconds
+    overlap_before=1.0,   # Include 1 second before stride
+    overlap_after=1.0,    # Include 1 second after stride
+    # Total duration = 1 + 2 + 1 = 4 seconds per plot
+    ...
+)
+# Produces: GPS 999999999 (4s), GPS 1000000001 (4s), GPS 1000000003 (4s), ...
+```
+
+### File Naming Convention
+
+Files follow LIGO convention: `<IFO>-<DESCRIPTION>-<GPS_START>-<DURATION>.png`
+
+- Dashes are used only as delimiters
+- Any dashes in `description` are replaced with underscores
+- GPS start and duration are integers
+
+Examples:
+- `H1-STRAIN-1000000000-2.png`
+- `L1-STRAIN_FILTERED-1126259462-4.png`
+
+### Custom Titles
+
+Override the default title using a template:
+
+```{.python notest}
+plot_sink = GWpyPlotSink(
+    name="Plotter",
+    sink_pad_names=("in",),
+    title_template="{ifo} Analysis - GPS {gps_start:.0f} ({duration:.1f}s)",
+    ...
+)
+# Produces title: "H1 Analysis - GPS 1000000000 (2.0s)"
+```
+
+Available placeholders: `{ifo}`, `{gps_start}`, `{duration}`
+
+### GWpyPlotSink Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `ifo` | Interferometer name (H1, L1, V1) | "H1" |
+| `description` | Description for filename | "STRAIN" |
+| `plot_type` | "timeseries", "spectrogram", or "qtransform" | "timeseries" |
+| `output_dir` | Directory for output files | "." |
+| `plot_stride` | Time between plot starts (seconds) | 1.0 |
+| `overlap_before` | Data before stride (seconds) | 0.0 |
+| `overlap_after` | Data after stride (seconds). Duration = before + stride + after | 0.0 |
+| `input_sample_rate` | Expected input sample rate (Hz) | 4096 |
+| `fft_length` | FFT length for spectrogram (seconds) | 0.5 |
+| `qrange` | Q range for Q-transform | (4, 64) |
+| `frange` | Frequency range for Q-transform (Hz) | (20, 500) |
+| `figsize` | Figure size (width, height) inches | (12, 4) |
+| `dpi` | Resolution for saved plots | 150 |
+| `title_template` | Custom title template | None |
 
 ## Complete Pipeline Examples
 
@@ -727,396 +798,6 @@ if np.any(np.isnan(result.value)):
     # Use np.nanmean, np.nanstd, etc. for statistics
 ```
 
-## Visualizing Gravitational Waves: GW150914 Example
-
-This section demonstrates a complete workflow for visualizing gravitational wave events using a pure SGN streaming pipeline. We'll use `GWOSCSource` to fetch data, process it through SGN transforms (whitening, filtering, Q-transform), collect output with `TimeSeriesSink`, and visualize using `sgnts.plotting` utilities.
-
-### Plotting Dependencies
-
-```bash
-pip install matplotlib
-pip install sgn-ts[plot]  # SGN-TS plotting utilities
-```
-
-### Complete GW150914 Pipeline (Pure SGN)
-
-This script demonstrates a fully native SGN approach using only SGN pipeline components:
-
-```{.python notest}
-#!/usr/bin/env python3
-"""Visualize GW150914 using a pure SGN streaming pipeline.
-
-This script uses ONLY SGN pipeline components:
-- GWOSCSource: Fetch data from GWOSC
-- GWpyFilter: Bandpass filter
-- GWpyQTransform: Compute Q-transform (streaming)
-- TimeSeriesSink: Collect output
-- sgnts.plotting: Visualize results
-
-Note: For whitening, use sgnligo.transforms.Whiten which provides
-optimized streaming whitening with proper edge handling.
-"""
-
-import matplotlib.pyplot as plt
-import numpy as np
-
-from sgn.apps import Pipeline
-from sgnligo.gwpy.sources import GWOSCSource
-from sgnligo.gwpy.transforms import GWpyFilter
-from sgnligo.gwpy.sinks import TimeSeriesSink
-from sgnligo.gwpy.converters import timeseries_to_seriesbuffer
-from sgnts.plotting import plot_buffer
-
-# GW150914 event parameters
-EVENT_GPS = 1126259462.4
-START_GPS = 1126259446  # 16s before merger
-DURATION = 32           # 32 seconds total
-
-# ============================================================
-# Build Pure SGN Pipeline
-# ============================================================
-print("Building SGN pipeline...")
-pipeline = Pipeline()
-
-# Source: GWOSCSource fetches directly from GWOSC
-source = GWOSCSource(
-    name="GWOSC",
-    source_pad_names=("strain",),
-    detector="H1",
-    start_time=START_GPS,
-    duration=DURATION,
-    target_sample_rate=4096,
-    chunk_size=8,  # Fetch in 8-second chunks for streaming
-)
-pipeline.insert(source)
-
-# Bandpass filter 30-350 Hz
-bandpass = GWpyFilter(
-    name="Bandpass",
-    sink_pad_names=("in",),
-    source_pad_names=("out",),
-    filter_type="bandpass",
-    low_freq=30,
-    high_freq=350,
-)
-pipeline.insert(bandpass, link_map={"Bandpass:snk:in": "GWOSC:src:strain"})
-
-# Collect filtered strain
-strain_sink = TimeSeriesSink(
-    name="StrainSink",
-    sink_pad_names=("in",),
-    channel="H1:FILTERED",
-)
-pipeline.insert(strain_sink, link_map={"StrainSink:snk:in": "Bandpass:src:out"})
-
-# Run the pipeline
-print("Running pipeline (fetching from GWOSC and processing)...")
-pipeline.run()
-
-# ============================================================
-# Get Results as SGN Buffers
-# ============================================================
-print("Extracting results...")
-
-# Get the collected TimeSeries and convert to buffer for plotting
-filtered_ts = strain_sink.get_result()
-filtered_buf = timeseries_to_seriesbuffer(filtered_ts)
-
-print(f"  Collected {filtered_buf.samples} samples")
-print(f"  Duration: {filtered_buf.samples / filtered_buf.sample_rate:.1f}s")
-
-# ============================================================
-# Visualize Using SGN-TS Plotting
-# ============================================================
-print("Creating visualization...")
-
-fig, ax = plt.subplots(figsize=(12, 4))
-
-# Plot filtered strain using SGN's plot_buffer
-plot_buffer(filtered_buf, ax=ax, time_unit='gps', color='#ee0000', linewidth=0.8)
-ax.set_xlim(EVENT_GPS - 0.5, EVENT_GPS + 0.2)
-ax.set_ylabel('Filtered Strain')
-ax.set_xlabel('GPS Time (s)')
-ax.set_title('H1 GW150914 - Bandpass Filtered (Pure SGN Pipeline)')
-ax.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.savefig('gw150914_sgn_filtered.png', dpi=150, bbox_inches='tight')
-plt.show()
-print("Saved plot to gw150914_sgn_filtered.png")
-```
-
-### Full Streaming Pipeline with Q-Transform
-
-For a complete analysis including the Q-transform computed within the streaming pipeline:
-
-```{.python notest}
-#!/usr/bin/env python3
-"""Complete GW150914 analysis with streaming Q-transform."""
-
-import matplotlib.pyplot as plt
-import numpy as np
-from dataclasses import dataclass, field
-
-from sgn.apps import Pipeline
-from sgnligo.gwpy.sources import GWOSCSource
-from sgnligo.gwpy.transforms import GWpyFilter, GWpyQTransform
-from sgnligo.gwpy.sinks import TimeSeriesSink
-from sgnligo.gwpy.converters import timeseries_to_seriesbuffer
-from sgnts.base import TSSink
-from sgnts.plotting import plot_buffer
-
-EVENT_GPS = 1126259462.4
-
-# ============================================================
-# Custom sink to capture Q-transform metadata
-# ============================================================
-@dataclass
-class QTransformSink(TSSink):
-    """Sink that captures Q-transform output and metadata."""
-    qtransforms: list = field(default_factory=list, init=False, repr=False)
-    buffers: list = field(default_factory=list, init=False, repr=False)
-
-    def internal(self):
-        super().internal()
-        for pad in self.sink_pads:
-            frame = self.preparedframes.get(pad)
-            if frame is None:
-                continue
-            if "qtransform" in frame.metadata and frame.metadata["qtransform"] is not None:
-                self.qtransforms.append(frame.metadata["qtransform"])
-            for buf in frame.buffers:
-                if not buf.is_gap:
-                    self.buffers.append(buf)
-            if frame.EOS:
-                self.mark_eos(pad)
-
-# ============================================================
-# Build Pipeline with Q-Transform
-# ============================================================
-print("Building pipeline...")
-pipeline = Pipeline()
-
-# GWOSCSource for data fetching
-source = GWOSCSource(
-    name="GWOSC",
-    source_pad_names=("strain",),
-    detector="H1",
-    start_time=1126259446,
-    duration=32,
-    target_sample_rate=4096,
-    chunk_size=8,
-)
-pipeline.insert(source)
-
-# Bandpass filter (before Q-transform)
-bandpass = GWpyFilter(
-    name="Bandpass",
-    sink_pad_names=("in",),
-    source_pad_names=("out",),
-    filter_type="bandpass",
-    low_freq=20,
-    high_freq=500,
-)
-pipeline.insert(bandpass, link_map={"Bandpass:snk:in": "GWOSC:src:strain"})
-
-# Collect filtered strain for time-domain plot
-strain_sink = TimeSeriesSink(
-    name="StrainSink",
-    sink_pad_names=("in",),
-    channel="H1:FILTERED",
-)
-pipeline.insert(strain_sink, link_map={"StrainSink:snk:in": "Bandpass:src:out"})
-
-# Q-Transform in the streaming pipeline
-qtrans = GWpyQTransform(
-    name="QTrans",
-    sink_pad_names=("in",),
-    source_pad_names=("out",),
-    qrange=(4, 64),
-    frange=(20, 500),
-    output_rate=64,
-    output_stride=1.0,
-    input_sample_rate=4096,
-)
-pipeline.insert(qtrans, link_map={"QTrans:snk:in": "Bandpass:src:out"})
-
-# Custom sink to capture Q-transform metadata
-qsink = QTransformSink(name="QSink", sink_pad_names=("in",))
-pipeline.insert(qsink, link_map={"QSink:snk:in": "QTrans:src:out"})
-
-# Run pipeline
-print("Running pipeline...")
-pipeline.run()
-
-# ============================================================
-# Visualize Results
-# ============================================================
-print(f"Captured {len(qsink.qtransforms)} Q-transform segments")
-
-# Get filtered strain as buffer
-filtered_ts = strain_sink.get_result()
-filtered_buf = timeseries_to_seriesbuffer(filtered_ts)
-
-# Create figure
-fig, axes = plt.subplots(2, 1, figsize=(12, 8))
-
-# Panel 1: Filtered strain using plot_buffer
-ax1 = axes[0]
-plot_buffer(filtered_buf, ax=ax1, time_unit='gps', color='#ee0000', linewidth=0.8)
-ax1.set_xlim(EVENT_GPS - 0.5, EVENT_GPS + 0.2)
-ax1.set_ylabel('Filtered Strain')
-ax1.set_title('H1 Bandpass Filtered (20-500 Hz) - SGN Pipeline')
-ax1.grid(True, alpha=0.3)
-
-# Panel 2: Q-transform from pipeline metadata
-ax2 = axes[1]
-if qsink.qtransforms:
-    # Find Q-transform segment containing the event
-    best_q = None
-    for q in qsink.qtransforms:
-        t_start = q.times.value[0]
-        t_end = q.times.value[-1]
-        if t_start <= EVENT_GPS <= t_end:
-            best_q = q
-            break
-    if best_q is None:
-        best_q = qsink.qtransforms[len(qsink.qtransforms) // 2]
-
-    pcm = ax2.pcolormesh(
-        best_q.times.value,
-        best_q.frequencies.value,
-        best_q.value.T,
-        shading='auto',
-        vmin=0,
-        vmax=25,
-        cmap='viridis',
-    )
-    ax2.set_yscale('log')
-    ax2.set_ylim(20, 500)
-    ax2.set_ylabel('Frequency (Hz)')
-    ax2.set_xlabel('GPS Time (s)')
-    ax2.set_title('H1 Q-Transform (Streaming Pipeline)')
-    fig.colorbar(pcm, ax=ax2, label='Normalized Energy')
-
-plt.tight_layout()
-plt.savefig('gw150914_sgn_full.png', dpi=150, bbox_inches='tight')
-plt.show()
-```
-
-### Multi-Detector Comparison (Pure SGN)
-
-Process both LIGO detectors using separate SGN pipelines:
-
-```{.python notest}
-#!/usr/bin/env python3
-"""Compare GW150914 in H1 and L1 using pure SGN pipelines."""
-
-import matplotlib.pyplot as plt
-from sgn.apps import Pipeline
-from sgnligo.gwpy.sources import GWOSCSource
-from sgnligo.gwpy.transforms import GWpyFilter
-from sgnligo.gwpy.sinks import TimeSeriesSink
-from sgnligo.gwpy.converters import timeseries_to_seriesbuffer
-from sgnts.plotting import plot_buffer
-
-EVENT_GPS = 1126259462.4
-
-def process_detector(detector: str) -> "SeriesBuffer":
-    """Run pure SGN pipeline for a single detector."""
-    pipeline = Pipeline()
-
-    # GWOSCSource fetches from GWOSC
-    source = GWOSCSource(
-        name="GWOSC",
-        source_pad_names=("strain",),
-        detector=detector,
-        start_time=1126259446,
-        duration=32,
-        target_sample_rate=4096,
-        chunk_size=8,
-    )
-    pipeline.insert(source)
-
-    # Bandpass filter
-    bandpass = GWpyFilter(
-        name="Bandpass",
-        sink_pad_names=("in",),
-        source_pad_names=("out",),
-        filter_type="bandpass",
-        low_freq=30,
-        high_freq=350,
-    )
-    pipeline.insert(bandpass, link_map={"Bandpass:snk:in": "GWOSC:src:strain"})
-
-    # Collect output
-    sink = TimeSeriesSink(
-        name="Sink",
-        sink_pad_names=("in",),
-        channel=f"{detector}:FILTERED",
-    )
-    pipeline.insert(sink, link_map={"Sink:snk:in": "Bandpass:src:out"})
-
-    pipeline.run()
-
-    # Convert to SeriesBuffer for SGN plotting
-    return timeseries_to_seriesbuffer(sink.get_result())
-
-# Process both detectors
-print("Processing H1...")
-h1_buf = process_detector("H1")
-print("Processing L1...")
-l1_buf = process_detector("L1")
-
-# ============================================================
-# Plot comparison using SGN plot_buffer
-# ============================================================
-fig, axes = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
-
-# H1
-plot_buffer(h1_buf, ax=axes[0], time_unit='gps', color='#ee0000', linewidth=0.8)
-axes[0].set_xlim(EVENT_GPS - 0.4, EVENT_GPS + 0.1)
-axes[0].set_ylabel('H1 Strain')
-axes[0].set_title('H1 Bandpass Filtered (Pure SGN Pipeline)')
-axes[0].grid(True, alpha=0.3)
-
-# L1
-plot_buffer(l1_buf, ax=axes[1], time_unit='gps', color='#4ba6ff', linewidth=0.8)
-axes[1].set_xlim(EVENT_GPS - 0.4, EVENT_GPS + 0.1)
-axes[1].set_ylabel('L1 Strain')
-axes[1].set_xlabel('GPS Time (s)')
-axes[1].set_title('L1 Bandpass Filtered (Pure SGN Pipeline)')
-axes[1].grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.savefig('gw150914_h1_l1_sgn.png', dpi=150, bbox_inches='tight')
-plt.show()
-print("Saved comparison plot")
-```
-
-### SGN-TS Plotting Reference
-
-| Function | Description | Key Parameters |
-|----------|-------------|----------------|
-| `plot_buffer(buf, ax=None)` | Plot a SeriesBuffer | `time_unit`, `label`, `color`, `show_gaps` |
-| `plot_frame(frame, ax=None)` | Plot a TSFrame (multiple buffers) | Same as above, plus `multichannel` |
-| `plot_frames(frames, ax=None)` | Plot multiple frames overlaid | `labels` |
-
-**Time unit options:**
-- `'gps'` - Absolute GPS time in seconds (default)
-- `'s'` - Time in seconds
-- `'ms'` - Time in milliseconds
-- `'ns'` - Time in nanoseconds
-
-### Output Examples
-
-Running the GW150914 scripts produces plots showing:
-
-1. **Whitened strain (plot_buffer)**: Noise-normalized signal from the pure SGN streaming pipeline where the chirp is clearly visible
-2. **Q-transform (from pipeline metadata)**: Time-frequency representation showing the characteristic "chirp" pattern computed within the streaming pipeline
-
-The chirp pattern in the Q-transform is the signature of a binary black hole merger - the frequency sweeps from ~35 Hz to ~150 Hz in about 0.2 seconds, corresponding to the final orbits before merger.
-
 ## Summary
 
 | Component | Purpose | Key Parameters |
@@ -1127,8 +808,8 @@ The chirp pattern in the Q-transform is the signature of a binary black hole mer
 | `GWpyQTransform` | Q-transform | qrange, frange, output_rate |
 | `GWpySpectrogram` | FFT spectrogram | spec_stride, fft_length |
 | `TimeSeriesSource` | GWpy data to pipeline | timeseries, buffer_duration |
-| `GWOSCSource` | GWOSC open data | detector, start_time, duration |
 | `TimeSeriesSink` | Collect to GWpy | channel, collect_all |
+| `GWpyPlotSink` | Streaming plot generation | plot_type, plot_stride, output_dir |
 
 !!! note "PSD and Whitening"
     For power spectral density computation and whitening, use the native SGN-LIGO transforms in `sgnligo.transforms` and `sgnligo.psd` which provide optimized streaming implementations.

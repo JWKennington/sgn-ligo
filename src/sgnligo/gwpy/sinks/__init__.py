@@ -5,11 +5,10 @@ Sinks:
     GWpyPlotSink: Generate plots using GWpy's visualization
 """
 
+from sgnligo.gwpy.sinks.plot_sink import GWpyPlotSink
 from sgnligo.gwpy.sinks.timeseries_sink import TimeSeriesSink
-
-# from sgnligo.gwpy.sinks.plot_sink import GWpyPlotSink
 
 __all__ = [
     "TimeSeriesSink",
-    # "GWpyPlotSink",
+    "GWpyPlotSink",
 ]

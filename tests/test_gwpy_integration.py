@@ -1376,248 +1376,335 @@ class TestGWpySpectrogramEdgeCases:
             )
 
 
-class TestGWOSCSource:
-    """Test GWOSCSource."""
+class TestGWpyPlotSink:
+    """Test GWpyPlotSink."""
 
-    def test_gwosc_source_creation(self):
-        """Test creating a GWOSC source."""
-        from sgnligo.gwpy.sources.gwosc_source import GWOSCSource
+    def test_plot_sink_creation(self):
+        """Test creating a plot sink with default parameters."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
 
-        source = GWOSCSource(
-            name="H1_GWOSC",
-            source_pad_names=("strain",),
-            detector="H1",
-            start_time=1126259462,
-            duration=32,
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
         )
 
-        assert source.detector == "H1"
-        assert source.target_sample_rate == 4096  # Default
-        assert source.chunk_size == 64  # Default
+        assert sink.ifo == "H1"
+        assert sink.description == "STRAIN"
+        assert sink.plot_type == "timeseries"
+        assert sink.plot_stride == 1.0
+        assert sink.overlap_before == 0.0
+        assert sink.overlap_after == 0.0
 
-    def test_gwosc_source_invalid_detector_raises(self):
-        """Test that invalid detector raises ValueError."""
-        from sgnligo.gwpy.sources.gwosc_source import GWOSCSource
+    def test_plot_sink_custom_parameters(self):
+        """Test creating a plot sink with custom parameters."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
 
-        with pytest.raises(ValueError, match="Invalid detector"):
-            GWOSCSource(
-                name="Invalid",
-                source_pad_names=("strain",),
-                detector="XX",  # Invalid
-                start_time=1126259462,
-                duration=32,
-            )
-
-    def test_gwosc_source_missing_start_time_raises(self):
-        """Test that missing start_time raises ValueError."""
-        from sgnligo.gwpy.sources.gwosc_source import GWOSCSource
-
-        with pytest.raises(ValueError, match="start_time is required"):
-            GWOSCSource(
-                name="H1_GWOSC",
-                source_pad_names=("strain",),
-                detector="H1",
-                start_time=None,
-                duration=32,
-            )
-
-    def test_gwosc_source_missing_duration_raises(self):
-        """Test that missing duration raises ValueError."""
-        from sgnligo.gwpy.sources.gwosc_source import GWOSCSource
-
-        with pytest.raises(ValueError, match="duration is required"):
-            GWOSCSource(
-                name="H1_GWOSC",
-                source_pad_names=("strain",),
-                detector="H1",
-                start_time=1126259462,
-                duration=None,
-            )
-
-    def test_gwosc_source_all_valid_detectors(self):
-        """Test that all valid detectors are accepted."""
-        from sgnligo.gwpy.sources.gwosc_source import GWOSCSource
-
-        for detector in ["H1", "L1", "V1", "G1", "K1"]:
-            source = GWOSCSource(
-                name=f"{detector}_GWOSC",
-                source_pad_names=("strain",),
-                detector=detector,
-                start_time=1126259462,
-                duration=32,
-            )
-            assert source.detector == detector
-
-    def test_gwosc_source_worker_process_success(self):
-        """Test worker_process with mocked GWOSC fetch."""
-        from queue import Queue
-        from unittest.mock import MagicMock, patch
-
-        from gwpy.timeseries import TimeSeries
-
-        from sgnligo.gwpy.sources.gwosc_source import GWOSCSource
-
-        # Create mock TimeSeries
-        sample_rate = 4096
-        duration = 2  # seconds
-        data = np.random.randn(sample_rate * duration)
-        mock_ts = TimeSeries(data, t0=1126259462, sample_rate=sample_rate)
-
-        # Mock context
-        output_queue = Queue()
-        context = MagicMock()
-        context.output_queue = output_queue
-        context.should_stop.return_value = False
-
-        # Mock source pad
-        mock_pad = MagicMock()
-        srcs = {"strain": mock_pad}
-
-        with patch.object(TimeSeries, "fetch_open_data", return_value=mock_ts):
-            GWOSCSource.worker_process(
-                None,  # self - not used since it's a minimal instance
-                context=context,
-                srcs=srcs,
-                detector="H1",
-                start_time=1126259462,
-                _duration_sec=2,
-                target_sample_rate=4096,
-                chunk_size=64,
-                channel=None,
-                cache=True,
-                timeout=120,
-                max_retries=3,
-            )
-
-        # Check that data was put in the queue
-        assert not output_queue.empty()
-        pad, buf = output_queue.get()
-        assert pad == mock_pad
-        assert len(buf.data) > 0
-
-    def test_gwosc_source_worker_process_with_channel(self):
-        """Test worker_process with specified channel."""
-        from queue import Queue
-        from unittest.mock import MagicMock, patch
-
-        from gwpy.timeseries import TimeSeries
-
-        from sgnligo.gwpy.sources.gwosc_source import GWOSCSource
-
-        # Create mock TimeSeries
-        sample_rate = 4096
-        duration = 2
-        data = np.random.randn(sample_rate * duration)
-        mock_ts = TimeSeries(data, t0=1126259462, sample_rate=sample_rate)
-
-        # Mock context
-        output_queue = Queue()
-        context = MagicMock()
-        context.output_queue = output_queue
-        context.should_stop.return_value = False
-
-        # Mock source pad
-        mock_pad = MagicMock()
-        srcs = {"strain": mock_pad}
-
-        with patch.object(TimeSeries, "get", return_value=mock_ts) as mock_get:
-            GWOSCSource.worker_process(
-                None,  # self - not used since it's a minimal instance
-                context=context,
-                srcs=srcs,
-                detector="H1",
-                start_time=1126259462,
-                _duration_sec=2,
-                target_sample_rate=4096,
-                chunk_size=64,
-                channel="H1:GWOSC-4KHZ_R1_STRAIN",  # Specified channel
-                cache=True,
-                timeout=120,
-                max_retries=3,
-            )
-
-        # Check that TimeSeries.get was called with channel
-        mock_get.assert_called()
-        assert not output_queue.empty()
-
-    def test_gwosc_source_worker_process_handles_error(self):
-        """Test worker_process handles fetch errors gracefully."""
-        from queue import Queue
-        from unittest.mock import MagicMock, patch
-
-        from gwpy.timeseries import TimeSeries
-
-        from sgnligo.gwpy.sources.gwosc_source import GWOSCSource
-
-        # Mock context
-        output_queue = Queue()
-        context = MagicMock()
-        context.output_queue = output_queue
-        context.should_stop.return_value = False
-
-        # Mock source pad
-        mock_pad = MagicMock()
-        srcs = {"strain": mock_pad}
-
-        # Make fetch_open_data raise an exception
-        with patch.object(
-            TimeSeries, "fetch_open_data", side_effect=Exception("Network error")
-        ):
-            GWOSCSource.worker_process(
-                None,  # self - not used since it's a minimal instance
-                context=context,
-                srcs=srcs,
-                detector="H1",
-                start_time=1126259462,
-                _duration_sec=2,
-                target_sample_rate=4096,
-                chunk_size=64,
-                channel=None,
-                cache=True,
-                timeout=120,
-                max_retries=1,  # Only 1 retry so test runs quickly
-            )
-
-        # Check that a gap buffer was sent
-        assert not output_queue.empty()
-        pad, buf = output_queue.get()
-        assert pad == mock_pad
-        assert buf.is_gap  # Should be a gap buffer due to error
-
-    def test_gwosc_source_worker_process_respects_should_stop(self):
-        """Test that worker_process stops when context.should_stop() returns True."""
-        from queue import Queue
-        from unittest.mock import MagicMock
-
-        from sgnligo.gwpy.sources.gwosc_source import GWOSCSource
-
-        # Mock context that immediately says to stop
-        output_queue = Queue()
-        context = MagicMock()
-        context.output_queue = output_queue
-        context.should_stop.return_value = True  # Stop immediately
-
-        # Mock source pad
-        mock_pad = MagicMock()
-        srcs = {"strain": mock_pad}
-
-        GWOSCSource.worker_process(
-            None,  # self - not used since it's a minimal instance
-            context=context,
-            srcs=srcs,
-            detector="H1",
-            start_time=1126259462,
-            _duration_sec=32,
-            target_sample_rate=4096,
-            chunk_size=64,
-            channel=None,
-            cache=True,
-            timeout=120,
-            max_retries=3,
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            ifo="L1",
+            description="STRAIN_FILTERED",
+            plot_type="spectrogram",
+            plot_stride=2.0,
+            overlap_before=0.5,
+            overlap_after=0.5,
+            fft_length=0.25,
         )
 
-        # Should have stopped immediately without fetching any data
-        assert output_queue.empty()
+        assert sink.ifo == "L1"
+        assert sink.description == "STRAIN_FILTERED"
+        assert sink.plot_type == "spectrogram"
+        assert sink.plot_stride == 2.0
+        assert sink.overlap_before == 0.5
+        assert sink.overlap_after == 0.5
+        assert sink.fft_length == 0.25
+
+    def test_plot_sink_invalid_plot_type_raises(self):
+        """Test that invalid plot_type raises ValueError."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        with pytest.raises(ValueError, match="plot_type must be one of"):
+            GWpyPlotSink(
+                name="plotter",
+                sink_pad_names=("in",),
+                plot_type="invalid",
+            )
+
+    def test_plot_sink_negative_stride_raises(self):
+        """Test that negative plot_stride raises ValueError."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        with pytest.raises(ValueError, match="plot_stride must be positive"):
+            GWpyPlotSink(
+                name="plotter",
+                sink_pad_names=("in",),
+                plot_stride=-1.0,
+            )
+
+    def test_plot_sink_negative_overlap_before_raises(self):
+        """Test that negative overlap_before raises ValueError."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        with pytest.raises(ValueError, match="overlap_before must be non-negative"):
+            GWpyPlotSink(
+                name="plotter",
+                sink_pad_names=("in",),
+                overlap_before=-0.5,
+            )
+
+    def test_plot_sink_negative_overlap_after_raises(self):
+        """Test that negative overlap_after raises ValueError."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        with pytest.raises(ValueError, match="overlap_after must be non-negative"):
+            GWpyPlotSink(
+                name="plotter",
+                sink_pad_names=("in",),
+                overlap_after=-0.5,
+            )
+
+    def test_plot_sink_overlap_configuration(self):
+        """Test that overlaps can be configured independently."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        # Symmetric overlap: 1s before + 2s stride + 1s after = 4s plots
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            plot_stride=2.0,
+            overlap_before=1.0,
+            overlap_after=1.0,
+        )
+        assert sink.plot_stride == 2.0
+        assert sink.overlap_before == 1.0
+        assert sink.overlap_after == 1.0
+
+        # Asymmetric overlap: 2s before + 1s stride + 0s after = 3s plots
+        sink2 = GWpyPlotSink(
+            name="plotter2",
+            sink_pad_names=("in",),
+            plot_stride=1.0,
+            overlap_before=2.0,
+            overlap_after=0.0,
+        )
+        assert sink2.plot_stride == 1.0
+        assert sink2.overlap_before == 2.0
+        assert sink2.overlap_after == 0.0
+
+    def test_plot_sink_filename_generation(self):
+        """Test LIGO filename convention generation."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            ifo="H1",
+            description="STRAIN",
+        )
+
+        filename = sink._generate_filename(1126259462.0, 2.0)
+        assert filename == "H1-STRAIN-1126259462-2.png"
+
+    def test_plot_sink_filename_replaces_dashes(self):
+        """Test that dashes in description are replaced with underscores."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            ifo="L1",
+            description="STRAIN-FILTERED-WHITENED",
+        )
+
+        filename = sink._generate_filename(1126259462.0, 4.0)
+        assert filename == "L1-STRAIN_FILTERED_WHITENED-1126259462-4.png"
+
+    def test_plot_sink_invalid_qrange_raises(self):
+        """Test that invalid qrange raises ValueError."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        with pytest.raises(ValueError, match="qrange must be"):
+            GWpyPlotSink(
+                name="plotter",
+                sink_pad_names=("in",),
+                qrange=(64, 4),  # min > max
+            )
+
+    def test_plot_sink_invalid_frange_raises(self):
+        """Test that invalid frange raises ValueError."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        with pytest.raises(ValueError, match="frange must be"):
+            GWpyPlotSink(
+                name="plotter",
+                sink_pad_names=("in",),
+                frange=(500, 20),  # min > max
+            )
+
+    def test_plot_sink_timeseries_pipeline(self, tmp_path):
+        """Test GWpyPlotSink in a pipeline generating timeseries plots."""
+        from gwpy.timeseries import TimeSeries
+        from sgn.apps import Pipeline
+
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+        from sgnligo.gwpy.sources import TimeSeriesSource
+
+        # Create test data - 4 seconds at 4096 Hz
+        sample_rate = 4096
+        duration = 4
+        t = np.arange(0, duration, 1 / sample_rate)
+        data = np.sin(2 * np.pi * 100 * t)
+        ts = TimeSeries(data, t0=1000000000, sample_rate=sample_rate, channel="H1:TEST")
+
+        # Build pipeline
+        pipeline = Pipeline()
+
+        source = TimeSeriesSource(
+            name="Source",
+            timeseries=ts,
+            buffer_duration=1.0,
+        )
+        pipeline.insert(source)
+
+        plot_sink = GWpyPlotSink(
+            name="Plotter",
+            sink_pad_names=("in",),
+            ifo="H1",
+            description="TEST",
+            plot_type="timeseries",
+            output_dir=str(tmp_path),
+            plot_stride=2.0,
+        )
+        pipeline.insert(
+            plot_sink,
+            link_map={"Plotter:snk:in": "Source:src:H1:TEST"},
+        )
+
+        # Run pipeline
+        pipeline.run()
+
+        # Check that plots were generated
+        plots = list(tmp_path.glob("*.png"))
+        assert len(plots) >= 1
+        assert plot_sink.plots_generated >= 1
+
+    def test_plot_sink_spectrogram_pipeline(self, tmp_path):
+        """Test GWpyPlotSink in a pipeline generating spectrogram plots."""
+        from gwpy.timeseries import TimeSeries
+        from sgn.apps import Pipeline
+
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+        from sgnligo.gwpy.sources import TimeSeriesSource
+
+        # Create test data
+        sample_rate = 4096
+        duration = 4
+        data = np.random.randn(sample_rate * duration)
+        ts = TimeSeries(
+            data, t0=1000000000, sample_rate=sample_rate, channel="L1:NOISE"
+        )
+
+        # Build pipeline
+        pipeline = Pipeline()
+
+        source = TimeSeriesSource(
+            name="Source",
+            timeseries=ts,
+            buffer_duration=2.0,
+        )
+        pipeline.insert(source)
+
+        plot_sink = GWpyPlotSink(
+            name="Plotter",
+            sink_pad_names=("in",),
+            ifo="L1",
+            description="NOISE",
+            plot_type="spectrogram",
+            output_dir=str(tmp_path),
+            plot_stride=2.0,
+            fft_length=0.25,
+        )
+        pipeline.insert(
+            plot_sink,
+            link_map={"Plotter:snk:in": "Source:src:L1:NOISE"},
+        )
+
+        # Run pipeline
+        pipeline.run()
+
+        # Check that plots were generated
+        plots = list(tmp_path.glob("*.png"))
+        assert len(plots) >= 1
+
+    def test_plot_sink_qtransform_pipeline(self, tmp_path):
+        """Test GWpyPlotSink in a pipeline generating Q-transform plots."""
+        from gwpy.timeseries import TimeSeries
+        from sgn.apps import Pipeline
+
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+        from sgnligo.gwpy.sources import TimeSeriesSource
+
+        # Create test data with chirp signal
+        sample_rate = 4096
+        duration = 4
+        t = np.arange(0, duration, 1 / sample_rate)
+        # Chirp from 50 to 200 Hz
+        chirp = np.sin(2 * np.pi * (50 * t + 75 * t**2 / duration))
+        data = chirp + 0.1 * np.random.randn(len(t))
+        ts = TimeSeries(
+            data, t0=1000000000, sample_rate=sample_rate, channel="H1:CHIRP"
+        )
+
+        # Build pipeline
+        pipeline = Pipeline()
+
+        source = TimeSeriesSource(
+            name="Source",
+            timeseries=ts,
+            buffer_duration=2.0,
+        )
+        pipeline.insert(source)
+
+        plot_sink = GWpyPlotSink(
+            name="Plotter",
+            sink_pad_names=("in",),
+            ifo="H1",
+            description="CHIRP",
+            plot_type="qtransform",
+            output_dir=str(tmp_path),
+            plot_stride=2.0,
+            qrange=(4, 64),
+            frange=(20, 300),
+        )
+        pipeline.insert(
+            plot_sink,
+            link_map={"Plotter:snk:in": "Source:src:H1:CHIRP"},
+        )
+
+        # Run pipeline
+        pipeline.run()
+
+        # Check that plots were generated
+        plots = list(tmp_path.glob("*.png"))
+        assert len(plots) >= 1
+
+    def test_plot_sink_custom_title(self, tmp_path):
+        """Test GWpyPlotSink with custom title template."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            ifo="H1",
+            description="STRAIN",
+            title_template="{ifo} Custom Title - GPS {gps_start:.0f}",
+            output_dir=str(tmp_path),
+        )
+
+        # Create mock timeseries for title generation
+        ts = TimeSeries(np.zeros(4096), t0=1000000000, sample_rate=4096)
+        title = sink._get_title(ts, 1000000000.0, 1.0)
+        assert title == "H1 Custom Title - GPS 1000000000"
 
 
 if __name__ == "__main__":
