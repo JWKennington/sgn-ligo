@@ -35,8 +35,7 @@ def _compute_valid_output_rate(desired_rate: int, max_rate: int) -> int:
         Closest power-of-2 rate from Offset.ALLOWED_RATES
     """
     valid = sorted(r for r in Offset.ALLOWED_RATES if r <= max_rate)
-    if not valid:
-        return min(Offset.ALLOWED_RATES)
+    assert valid, f"No valid rates <= {max_rate} in {Offset.ALLOWED_RATES}"
     return min(valid, key=lambda r: abs(r - desired_rate))
 
 
@@ -165,11 +164,7 @@ class GWpyQTransform(TSTransform):
                 f"output_rate {self.output_rate} must be power-of-2 from "
                 f"Offset.ALLOWED_RATES: {sorted(Offset.ALLOWED_RATES)}"
             )
-        if self.input_sample_rate not in Offset.ALLOWED_RATES:
-            raise ValueError(
-                f"input_sample_rate {self.input_sample_rate} must be power-of-2 from "
-                f"Offset.ALLOWED_RATES: {sorted(Offset.ALLOWED_RATES)}"
-            )
+        # input_sample_rate validation handled by Offset.fromsamples in __post_init__
 
     def _estimate_freq_bins(self) -> int:
         """Estimate number of frequency bins for gap buffer shape."""

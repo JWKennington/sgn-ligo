@@ -275,6 +275,19 @@ class TestGWpyFilter:
         # 100 Hz should have significant power, 500 Hz should be attenuated
         assert psd[idx_100] > psd[idx_500] * 1000
 
+    def test_explicit_edge_duration(self):
+        """Test creating filter with explicit edge_duration (line 276)."""
+        filt = GWpyFilter(
+            name="BP",
+            sink_pad_names=("in",),
+            source_pad_names=("out",),
+            filter_type="bandpass",
+            low_freq=20,
+            high_freq=500,
+            edge_duration=0.5,  # Explicitly set edge duration
+        )
+        assert filt.edge_duration == 0.5
+
     def test_lowpass_apply_filter(self):
         """Test lowpass filter application."""
         sample_rate = 4096
@@ -494,6 +507,38 @@ class TestGWpyQTransform:
                 output_rate=100,  # Not power of 2
             )
 
+    def test_qtransform_linear_freq_spacing_with_fres(self):
+        """Test _estimate_freq_bins with logf=False and fres (lines 182-183)."""
+        from sgnligo.gwpy.transforms.qtransform import GWpyQTransform
+
+        qt = GWpyQTransform(
+            name="QT",
+            sink_pad_names=("in",),
+            source_pad_names=("out",),
+            qrange=(4, 64),
+            frange=(20, 520),  # 500 Hz range
+            logf=False,  # Linear frequency spacing
+            fres=10.0,  # 10 Hz resolution -> 50 bins expected
+        )
+        # _estimate_freq_bins should return (520-20)/10 = 50
+        assert qt._estimate_freq_bins() == 50
+
+    def test_qtransform_linear_freq_spacing_no_fres(self):
+        """Test _estimate_freq_bins with logf=False and no fres (line 184)."""
+        from sgnligo.gwpy.transforms.qtransform import GWpyQTransform
+
+        qt = GWpyQTransform(
+            name="QT",
+            sink_pad_names=("in",),
+            source_pad_names=("out",),
+            qrange=(4, 64),
+            frange=(20, 520),
+            logf=False,  # Linear frequency spacing
+            fres=None,  # No fres specified -> defaults to 100
+        )
+        # _estimate_freq_bins should return 100 (default)
+        assert qt._estimate_freq_bins() == 100
+
 
 class TestTimeSeriesSource:
     """Test TimeSeriesSource."""
@@ -613,6 +658,36 @@ class TestTimeSeriesSource:
         # Last frame should have EOS
         frame4 = source.new(pad)
         assert frame4.EOS
+
+    def test_source_new_after_eos_returns_empty_buffer(self):
+        """Test new() after EOS returns empty buffer (lines 141, 159)."""
+        from sgnligo.gwpy.sources.timeseries_source import TimeSeriesSource
+
+        sample_rate = 4096
+        gps_time = 1126259462.0
+        data = np.random.randn(4096)  # 1 second
+
+        ts = TimeSeries(data, t0=gps_time, sample_rate=sample_rate, channel="H1:TEST")
+
+        source = TimeSeriesSource(
+            name="Source",
+            timeseries=ts,
+            buffer_duration=1.0,
+        )
+
+        pad = source.source_pads[0]
+
+        # Get first (and last) frame with EOS
+        frame1 = source.new(pad)
+        assert frame1.EOS
+        assert frame1.buffers[0].shape[0] == 4096
+
+        # Call new() after EOS - should return empty buffer
+        frame2 = source.new(pad)
+        assert frame2.EOS
+        # Buffer should have data=None (gap) with shape (0,)
+        assert frame2.buffers[0].data is None
+        assert frame2.buffers[0].shape == (0,)
 
 
 class TestTimeSeriesSink:
@@ -832,6 +907,209 @@ class TestTimeSeriesSink:
         sink._buffers = [buf2]
 
         assert len(sink._buffers) == 1
+
+    def test_sink_handles_none_frame(self):
+        """Test that TimeSeriesSink handles None frames gracefully (line 86)."""
+        from unittest.mock import MagicMock, patch
+
+        from sgnts.base import TSSink
+
+        from sgnligo.gwpy.sinks.timeseries_sink import TimeSeriesSink
+
+        sink = TimeSeriesSink(
+            name="Sink",
+            sink_pad_names=("in",),
+        )
+
+        # Mock preparedframes to return None
+        mock_pad = MagicMock()
+        sink.sink_pads = [mock_pad]
+        sink.preparedframes = {mock_pad: None}
+
+        # Mock parent internal() to avoid audio adapter issues
+        with patch.object(TSSink, "internal"):
+            sink.internal()
+
+        # No data should be collected
+        assert sink.samples_collected == 0
+
+    def test_sink_handles_zero_length_buffer(self):
+        """Test that TimeSeriesSink skips zero-length buffers (line 97)."""
+        from unittest.mock import MagicMock, patch
+
+        from sgnts.base import TSSink
+
+        from sgnligo.gwpy.sinks.timeseries_sink import TimeSeriesSink
+
+        sink = TimeSeriesSink(
+            name="Sink",
+            sink_pad_names=("in",),
+        )
+
+        # Create mock frame with zero-length buffer
+        mock_pad = MagicMock()
+        mock_buffer = MagicMock()
+        mock_buffer.shape = (0,)  # Zero-length buffer
+
+        mock_frame = MagicMock()
+        mock_frame.EOS = False
+        mock_frame.buffers = [mock_buffer]
+
+        sink.sink_pads = [mock_pad]
+        sink.preparedframes = {mock_pad: mock_frame}
+
+        # Mock parent internal() to avoid audio adapter issues
+        with patch.object(TSSink, "internal"):
+            sink.internal()
+
+        # No data should be collected from zero-length buffer
+        assert sink.samples_collected == 0
+
+    def test_sink_collect_all_false_internal(self):
+        """Test internal() with collect_all=False keeps only last buffer (line 109)."""
+        from unittest.mock import MagicMock, patch
+
+        from sgnts.base import TSSink
+
+        from sgnligo.gwpy.sinks.timeseries_sink import TimeSeriesSink
+
+        sink = TimeSeriesSink(
+            name="Sink",
+            sink_pad_names=("in",),
+            collect_all=False,
+        )
+
+        gps_time = 1126259462.0
+        mock_pad = MagicMock()
+
+        # First buffer
+        buf1 = SeriesBuffer(
+            offset=Offset.fromsec(gps_time),
+            sample_rate=4096,
+            data=np.random.randn(4096),
+        )
+        mock_frame1 = MagicMock()
+        mock_frame1.EOS = False
+        mock_frame1.buffers = [buf1]
+
+        sink.sink_pads = [mock_pad]
+        sink.preparedframes = {mock_pad: mock_frame1}
+
+        with patch.object(TSSink, "internal"):
+            sink.internal()
+
+        assert len(sink._buffers) == 1
+
+        # Second buffer - should replace the first
+        buf2 = SeriesBuffer(
+            offset=Offset.fromsec(gps_time + 1.0),
+            sample_rate=4096,
+            data=np.random.randn(4096),
+        )
+        mock_frame2 = MagicMock()
+        mock_frame2.EOS = False
+        mock_frame2.buffers = [buf2]
+
+        sink.preparedframes = {mock_pad: mock_frame2}
+
+        with patch.object(TSSink, "internal"):
+            sink.internal()
+
+        # Should still be only 1 buffer (the second one)
+        assert len(sink._buffers) == 1
+        assert sink._buffers[0] is buf2
+
+    def test_sink_handles_eos_frame(self):
+        """Test that TimeSeriesSink handles EOS frames (lines 90-91)."""
+        from unittest.mock import MagicMock, patch
+
+        from sgnts.base import TSSink
+
+        from sgnligo.gwpy.sinks.timeseries_sink import TimeSeriesSink
+
+        sink = TimeSeriesSink(
+            name="Sink",
+            sink_pad_names=("in",),
+        )
+
+        gps_time = 1126259462.0
+        mock_pad = MagicMock()
+
+        buf = SeriesBuffer(
+            offset=Offset.fromsec(gps_time),
+            sample_rate=4096,
+            data=np.random.randn(4096),
+        )
+        mock_frame = MagicMock()
+        mock_frame.EOS = True  # End of stream
+        mock_frame.buffers = [buf]
+
+        sink.sink_pads = [mock_pad]
+        sink.preparedframes = {mock_pad: mock_frame}
+
+        # Mock parent internal() and mark_eos()
+        with patch.object(TSSink, "internal"):
+            with patch.object(sink, "mark_eos") as mock_mark_eos:
+                sink.internal()
+
+        # Should have marked complete and called mark_eos
+        assert sink._is_complete is True
+        mock_mark_eos.assert_called_once_with(mock_pad)
+
+    def test_sink_collect_all_true_appends(self):
+        """Test internal() with collect_all=True appends buffers (line 106)."""
+        from unittest.mock import MagicMock, patch
+
+        from sgnts.base import TSSink
+
+        from sgnligo.gwpy.sinks.timeseries_sink import TimeSeriesSink
+
+        sink = TimeSeriesSink(
+            name="Sink",
+            sink_pad_names=("in",),
+            collect_all=True,  # Default, but explicit
+        )
+
+        gps_time = 1126259462.0
+        mock_pad = MagicMock()
+
+        # First buffer
+        buf1 = SeriesBuffer(
+            offset=Offset.fromsec(gps_time),
+            sample_rate=4096,
+            data=np.random.randn(4096),
+        )
+        mock_frame1 = MagicMock()
+        mock_frame1.EOS = False
+        mock_frame1.buffers = [buf1]
+
+        sink.sink_pads = [mock_pad]
+        sink.preparedframes = {mock_pad: mock_frame1}
+
+        with patch.object(TSSink, "internal"):
+            sink.internal()
+
+        assert len(sink._buffers) == 1
+
+        # Second buffer - should be appended
+        buf2 = SeriesBuffer(
+            offset=Offset.fromsec(gps_time + 1.0),
+            sample_rate=4096,
+            data=np.random.randn(4096),
+        )
+        mock_frame2 = MagicMock()
+        mock_frame2.EOS = False
+        mock_frame2.buffers = [buf2]
+
+        sink.preparedframes = {mock_pad: mock_frame2}
+
+        with patch.object(TSSink, "internal"):
+            sink.internal()
+
+        # Should now have 2 buffers
+        assert len(sink._buffers) == 2
+        assert sink._buffers[0] is buf1
+        assert sink._buffers[1] is buf2
 
 
 class TestConverterEdgeCases:
@@ -1375,6 +1653,18 @@ class TestGWpySpectrogramEdgeCases:
                 output_stride=-1.0,
             )
 
+    def test_spectrogram_invalid_output_rate_raises(self):
+        """Test that non-power-of-2 output_rate raises ValueError (line 143)."""
+        from sgnligo.gwpy.transforms.spectrogram import GWpySpectrogram
+
+        with pytest.raises(ValueError, match="output_rate.*power-of-2"):
+            GWpySpectrogram(
+                name="spec",
+                sink_pad_names=("in",),
+                source_pad_names=("out",),
+                output_rate=100,  # Not power of 2
+            )
+
 
 class TestGWpyPlotSink:
     """Test GWpyPlotSink."""
@@ -1705,6 +1995,156 @@ class TestGWpyPlotSink:
         ts = TimeSeries(np.zeros(4096), t0=1000000000, sample_rate=4096)
         title = sink._get_title(ts, 1000000000.0, 1.0)
         assert title == "H1 Custom Title - GPS 1000000000"
+
+    def test_plot_sink_invalid_fft_length_raises(self):
+        """Test that invalid fft_length raises ValueError."""
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        with pytest.raises(ValueError, match="fft_length must be positive"):
+            GWpyPlotSink(
+                name="plotter",
+                sink_pad_names=("in",),
+                fft_length=0,
+            )
+
+        with pytest.raises(ValueError, match="fft_length must be positive"):
+            GWpyPlotSink(
+                name="plotter",
+                sink_pad_names=("in",),
+                fft_length=-0.5,
+            )
+
+    def test_plot_sink_handles_plot_exception(self, tmp_path, caplog):
+        """Test that GWpyPlotSink handles exceptions during plot generation."""
+        from unittest.mock import patch
+
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            ifo="H1",
+            description="TEST",
+            output_dir=str(tmp_path),
+        )
+
+        # Create test timeseries
+        ts = TimeSeries(np.zeros(4096), t0=1000000000, sample_rate=4096)
+
+        # Mock _plot_timeseries to raise an exception
+        with patch.object(
+            sink, "_plot_timeseries", side_effect=RuntimeError("Test error")
+        ):
+            # Should not raise, just log warning
+            sink._generate_plot(ts, 1000000000.0)
+
+        # Check that warning was logged
+        assert "Failed to generate plot" in caplog.text
+        assert "Test error" in caplog.text
+
+    def test_plot_sink_handles_none_frame(self, tmp_path):
+        """Test that GWpyPlotSink handles None frames gracefully."""
+        from unittest.mock import MagicMock, patch
+
+        from sgnts.base import TSSink
+
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            ifo="H1",
+            description="TEST",
+            output_dir=str(tmp_path),
+        )
+
+        # Mock preparedframes to return None
+        mock_pad = MagicMock()
+        sink.sink_pads = [mock_pad]
+        sink.preparedframes = {mock_pad: None}
+
+        # Mock parent internal() to avoid audio adapter issues
+        with patch.object(TSSink, "internal"):
+            # Should not raise - just continue
+            sink.internal()
+
+        # No plots should be generated
+        assert sink.plots_generated == 0
+
+    def test_plot_sink_handles_gap_buffer(self, tmp_path):
+        """Test that GWpyPlotSink skips gap buffers."""
+        from unittest.mock import MagicMock, patch
+
+        from sgnts.base import TSSink
+
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            ifo="H1",
+            description="TEST",
+            output_dir=str(tmp_path),
+        )
+
+        # Create mock frame with gap buffer
+        mock_pad = MagicMock()
+        mock_buffer = MagicMock()
+        mock_buffer.is_gap = True
+
+        mock_frame = MagicMock()
+        mock_frame.EOS = False
+        mock_frame.is_gap = False
+        mock_frame.buffers = [mock_buffer]
+
+        sink.sink_pads = [mock_pad]
+        sink.preparedframes = {mock_pad: mock_frame}
+
+        # Mock parent internal() to avoid audio adapter issues
+        with patch.object(TSSink, "internal"):
+            # Should not raise - just skip the gap buffer
+            sink.internal()
+
+        # No plots should be generated from gap buffer
+        assert sink.plots_generated == 0
+
+    def test_plot_sink_handles_empty_buffer(self, tmp_path):
+        """Test that GWpyPlotSink skips empty buffers."""
+        from unittest.mock import MagicMock, patch
+
+        from sgnts.base import TSSink
+
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            ifo="H1",
+            description="TEST",
+            output_dir=str(tmp_path),
+        )
+
+        # Create mock frame with empty buffer
+        mock_pad = MagicMock()
+        mock_buffer = MagicMock()
+        mock_buffer.is_gap = False
+        mock_buffer.shape = (0,)  # Empty buffer
+
+        mock_frame = MagicMock()
+        mock_frame.EOS = False
+        mock_frame.is_gap = False
+        mock_frame.buffers = [mock_buffer]
+
+        sink.sink_pads = [mock_pad]
+        sink.preparedframes = {mock_pad: mock_frame}
+
+        # Mock parent internal() to avoid audio adapter issues
+        with patch.object(TSSink, "internal"):
+            # Should not raise - just skip the empty buffer
+            sink.internal()
+
+        # No plots should be generated from empty buffer
+        assert sink.plots_generated == 0
 
 
 if __name__ == "__main__":

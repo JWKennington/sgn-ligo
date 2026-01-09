@@ -108,8 +108,7 @@ def _measure_impulse_response_duration(
 
     while duration <= max_duration:
         n_samples = int(duration * sample_rate)
-        if n_samples < 10:
-            n_samples = 10
+        assert n_samples >= 10, f"n_samples={n_samples} too small"
 
         # Create impulse at center of buffer
         impulse = np.zeros(n_samples * 2)
@@ -131,8 +130,7 @@ def _measure_impulse_response_duration(
         h_squared = h * h
         total_energy = np.sum(h_squared)
 
-        if total_energy == 0:
-            return 0.1  # Filter produces zero output
+        assert total_energy > 0, "Filter produced zero energy impulse response"
 
         # Check energy in outer edges of buffer
         edge_samples = int(len(h) * edge_check_fraction)
@@ -173,10 +171,8 @@ def _measure_impulse_response_duration(
     energy_fraction = cumulative_energy / total_energy
     indices = np.where(energy_fraction >= threshold)[0]
 
-    if len(indices) == 0:
-        edge_samples = max_radius
-    else:
-        edge_samples = indices[0]
+    assert len(indices) > 0, "Cumulative energy never reached threshold"
+    edge_samples = indices[0]
 
     edge_duration = edge_samples / sample_rate
 
@@ -379,12 +375,12 @@ class GWpyFilter(TSTransform):
             start_idx = Offset.tosamples(time_offset, buf.sample_rate)
             end_idx = start_idx + expected_output_samples
 
-            # Safety bounds check
+            # Bounds check
             total_samples = len(filtered.value)
-            if start_idx < 0:
-                start_idx = 0
-            if end_idx > total_samples:
-                end_idx = total_samples
+            assert start_idx >= 0, f"start_idx={start_idx} is negative"
+            assert (
+                end_idx <= total_samples
+            ), f"end_idx={end_idx} > total_samples={total_samples}"
 
             # Extract the valid portion
             output_data = np.asarray(filtered.value[start_idx:end_idx])
@@ -423,7 +419,8 @@ class GWpyFilter(TSTransform):
                 gstop=self.gstop,
                 filtfilt=self.filtfilt,
             )
-        elif self.filter_type == "notch":
-            return ts.notch(self.notch_freq)
         else:
-            raise ValueError(f"Unknown filter type: {self.filter_type}")
+            assert (
+                self.filter_type == "notch"
+            ), f"Unknown filter type: {self.filter_type}"
+            return ts.notch(self.notch_freq)

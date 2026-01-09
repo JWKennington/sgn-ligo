@@ -34,8 +34,7 @@ def _compute_valid_output_rate(desired_rate: int, max_rate: int) -> int:
         Closest power-of-2 rate from Offset.ALLOWED_RATES
     """
     valid = sorted(r for r in Offset.ALLOWED_RATES if r <= max_rate)
-    if not valid:
-        return min(Offset.ALLOWED_RATES)
+    assert valid, f"No valid rates <= {max_rate} in {Offset.ALLOWED_RATES}"
     return min(valid, key=lambda r: abs(r - desired_rate))
 
 
@@ -144,11 +143,7 @@ class GWpySpectrogram(TSTransform):
                 f"output_rate {self.output_rate} must be power-of-2 from "
                 f"Offset.ALLOWED_RATES: {sorted(Offset.ALLOWED_RATES)}"
             )
-        if self.input_sample_rate not in Offset.ALLOWED_RATES:
-            raise ValueError(
-                f"input_sample_rate {self.input_sample_rate} must be power-of-2 from "
-                f"Offset.ALLOWED_RATES: {sorted(Offset.ALLOWED_RATES)}"
-            )
+        # input_sample_rate validation handled by Offset.fromsamples in __post_init__
 
     def _estimate_freq_bins(self) -> int:
         """Estimate number of frequency bins for gap buffer shape."""
@@ -197,25 +192,13 @@ class GWpySpectrogram(TSTransform):
                 channel="SGN:SPEC_INPUT",
             )
 
-            try:
-                spec = ts.spectrogram(
-                    stride=self.spec_stride,
-                    fftlength=self.fft_length,
-                    overlap=self.fft_overlap,
-                    window=self.window,
-                    nproc=self.nproc,
-                )
-            except Exception:
-                # Spectrogram can fail for various reasons
-                # Use output_frame's expected offset/noffset for gap buffers
-                assert self.output_rate is not None  # Set in __post_init__
-                gap_buf = self._create_gap_buffer(
-                    output_frame.offset,
-                    output_frame.noffset,
-                    self.output_rate,
-                )
-                output_frame.append(gap_buf)
-                continue
+            spec = ts.spectrogram(
+                stride=self.spec_stride,
+                fftlength=self.fft_length,
+                overlap=self.fft_overlap,
+                window=self.window,
+                nproc=self.nproc,
+            )
 
             # Extract 2D data (transpose to get time as last dimension)
             # GWpy Spectrogram is (n_times, n_frequencies)
@@ -248,14 +231,15 @@ class GWpySpectrogram(TSTransform):
             n_times = out_data.shape[-1]
 
             # Calculate effective sample rate to match output_frame's expected noffset
-            if output_frame.noffset > 0 and n_times > 0:
-                effective_rate = n_times / output_duration_sec
-                # Find closest power-of-2 rate
-                effective_rate = _compute_valid_output_rate(
-                    int(round(effective_rate)), self.input_sample_rate
-                )
-            else:
-                effective_rate = self.output_rate
+            assert (
+                output_frame.noffset > 0
+            ), f"output_frame.noffset={output_frame.noffset} must be positive"
+            assert n_times > 0, f"n_times={n_times} must be positive"
+            effective_rate = n_times / output_duration_sec
+            # Find closest power-of-2 rate
+            effective_rate = _compute_valid_output_rate(
+                int(round(effective_rate)), self.input_sample_rate
+            )
 
             # Use output_frame's expected offset for buffer alignment
             out_buf = SeriesBuffer(

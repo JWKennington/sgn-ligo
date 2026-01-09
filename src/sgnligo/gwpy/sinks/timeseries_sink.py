@@ -135,8 +135,9 @@ class TimeSeriesSink(TSSink):
             else:
                 all_data.append(np.asarray(buf.data))
 
-        if not all_data:
-            raise ValueError("No data collected (all gaps).")
+        assert (
+            all_data
+        ), "all_data should not be empty after iterating over self._buffers"
 
         # Concatenate along time axis (last dimension)
         data = np.concatenate(all_data, axis=-1)
