@@ -243,8 +243,12 @@ class TestModuleSetup:
         The module sets specific plotting parameters for publication-quality
         figures with LaTeX rendering.
         """
-        # Import matplotlib to check rcParams
+        import shutil
+
         import matplotlib
+
+        # Import the module that sets rcParams to ensure they're configured
+        import sgnligo.plots.psd  # noqa: F401 - imported for side effects
 
         # Check key parameters that should be set
         assert matplotlib.rcParams["font.size"] == 10.0
@@ -255,7 +259,9 @@ class TestModuleSetup:
         assert matplotlib.rcParams["legend.fontsize"] == 8.0
         assert matplotlib.rcParams["figure.dpi"] == 300
         assert matplotlib.rcParams["savefig.dpi"] == 300
-        assert matplotlib.rcParams["text.usetex"] is True
+        # Only check usetex if LaTeX is available (may be disabled in CI)
+        if shutil.which("latex") is not None:
+            assert matplotlib.rcParams["text.usetex"] is True
         assert matplotlib.rcParams["path.simplify"] is True
 
     @patch("sgnligo.bin.plot_psd.set_matplotlib_cache_directory")

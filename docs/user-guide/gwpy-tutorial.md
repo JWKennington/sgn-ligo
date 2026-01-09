@@ -170,7 +170,9 @@ Apply bandpass, lowpass, highpass, or notch filters using GWpy's filtering metho
 
 ### Bandpass Filter
 
-```python
+```python skip
+import matplotlib
+matplotlib.use("Agg")  # Use non-interactive backend
 import matplotlib.pyplot as plt
 from sgn.apps import Pipeline
 from sgnligo.gwpy.transforms import GWpyFilter
