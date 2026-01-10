@@ -180,13 +180,12 @@ class TestWhitenInit:
         assert whiten.tukey is not None
         assert whiten.z_whiten > 0
 
-    def test_init_z_whiten_positive(self, tmp_path):
-        """Test that z_whiten is always positive with valid parameters.
+    def test_init_z_whiten_always_positive(self):
+        """Verify z_whiten > 0 with valid parameters.
 
-        Due to the calculation z_whiten = int(fft_length / 4 * whiten_sample_rate),
-        z_whiten is always > 0 with valid sample rates and fft_length values.
-        The else branch (self.tukey = None) is marked with pragma: no cover
-        as it's unreachable with valid parameters.
+        Due to constraints in the Whiten class (stride must map to integer
+        samples at both input and whiten rates), z_whiten is always > 0
+        with valid parameters. An assertion in __post_init__ enforces this.
         """
         whiten = Whiten(
             name="test_whiten",
@@ -199,7 +198,7 @@ class TestWhitenInit:
             fft_length=8,
         )
 
-        # z_whiten is always > 0 with valid parameters
+        # With valid parameters, z_whiten is always > 0 and tukey is set
         assert whiten.z_whiten > 0
         assert whiten.tukey is not None
 

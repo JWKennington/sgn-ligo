@@ -13,6 +13,7 @@ from lal import LIGOTimeGPS
 
 from sgnligo.psd import (
     HorizonDistance,
+    PSDWriter,
     condition_psd,
     effective_distance_factor,
     fake_gwdata_psd,
@@ -21,6 +22,7 @@ from sgnligo.psd import (
     movingaverage,
     movingmedian,
     polyfit,
+    psd_to_arrays,
     read_asd_txt,
     read_psd,
     taperzero_fseries,
@@ -641,3 +643,127 @@ class TestFakeGwdataPSD:
         min_idx = np.argmin(psd.data.data[10 * 8 : 1000 * 8]) + 10 * 8
         min_freq = min_idx * psd.deltaF
         assert 100 < min_freq < 400
+
+
+class TestPSDUtils:
+    """Test helper functions in sgnligo.psd."""
+
+    def test_psd_to_arrays(self, mock_psd):
+        """Test conversion of LAL series to numpy arrays."""
+        # Setup known data
+        mock_psd.f0 = 10.0
+        mock_psd.deltaF = 2.0
+        # Set first 3 bins
+        mock_psd.data.data[:3] = np.array([1.0, 2.0, 3.0])
+
+        freqs, data = psd_to_arrays(mock_psd)
+
+        # Check types
+        assert isinstance(freqs, np.ndarray)
+        assert isinstance(data, np.ndarray)
+
+        # Check values
+        # Frequencies should be [10, 12, 14]
+        np.testing.assert_array_equal(freqs[:3], np.array([10.0, 12.0, 14.0]))
+        # Data should match
+        np.testing.assert_array_equal(data[:3], np.array([1.0, 2.0, 3.0]))
+
+
+class TestPSDWriter:
+    """Test the format-agnostic PSDWriter class."""
+
+    def test_write_xml_inference(self, mock_psd_dict, tmp_path):
+        """Test writing standard LIGO XML with format inference."""
+        output = tmp_path / "test_writer.xml"
+        PSDWriter.write(output, mock_psd_dict)
+
+        assert output.exists()
+        # Verify round-trip using existing read_psd
+        read_back = read_psd(str(output))
+        assert "H1" in read_back
+        assert "L1" in read_back
+        # Check integrity
+        assert read_back["H1"].data.length == mock_psd_dict["H1"].data.length
+
+    def test_write_xml_gz(self, mock_psd_dict, tmp_path):
+        """Test writing compressed XML."""
+        output = tmp_path / "test_writer.xml.gz"
+        PSDWriter.write(output, mock_psd_dict)
+
+        assert output.exists()
+        # read_psd handles .gz transparently
+        read_back = read_psd(str(output))
+        assert "H1" in read_back
+
+    def test_write_npz(self, mock_psd_dict, tmp_path):
+        """Test writing NumPy Archive (supports multiple instruments)."""
+        output = tmp_path / "test_writer.npz"
+        PSDWriter.write(output, mock_psd_dict)
+
+        assert output.exists()
+
+        # Verify contents
+        with np.load(output) as data:
+            # Check keys
+            assert "H1_psd" in data
+            assert "H1_freq" in data
+            assert "L1_psd" in data
+            # Check integrity
+            assert len(data["H1_psd"]) == 100
+            assert data["H1_freq"][0] == 0.0
+
+    def test_write_npy_single(self, mock_psd_dict, tmp_path):
+        """Test writing a single PSD to NPY."""
+        single_dict = {"H1": mock_psd_dict["H1"]}
+        output = tmp_path / "single.npy"
+
+        PSDWriter.write(output, single_dict)
+        assert output.exists()
+
+        # Verify structure: [freq, psd] columns
+        data = np.load(output)
+        assert data.shape == (100, 2)
+        # Check first column is frequency
+        assert data[1, 0] == 1.0  # f0=0, deltaF=1, so index 1 is 1.0 Hz
+
+    def test_write_npy_multi_split(self, mock_psd_dict, tmp_path):
+        """Test that multiple PSDs split into separate NPY files."""
+        output = tmp_path / "multi.npy"
+        PSDWriter.write(output, mock_psd_dict)
+
+        # The base filename should NOT exist
+        assert not output.exists()
+
+        # Split filenames should exist
+        h1_path = tmp_path / "multi_H1.npy"
+        l1_path = tmp_path / "multi_L1.npy"
+
+        assert h1_path.exists()
+        assert l1_path.exists()
+
+        # Verify content
+        data_l1 = np.load(l1_path)
+        assert data_l1.shape == (100, 2)
+
+    def test_write_txt_multi_split(self, mock_psd_dict, tmp_path):
+        """Test that multiple PSDs split into separate TXT files."""
+        output = tmp_path / "multi.txt"
+        PSDWriter.write(output, mock_psd_dict)
+
+        assert not output.exists()
+        assert (tmp_path / "multi_H1.txt").exists()
+        assert (tmp_path / "multi_L1.txt").exists()
+
+        # Verify content can be loaded
+        data = np.loadtxt(tmp_path / "multi_H1.txt")
+        assert data.shape == (100, 2)
+
+    def test_explicit_format_override(self, mock_psd_dict, tmp_path):
+        """Test forcing format via the 'fmt' argument."""
+        # Filename indicates .dat (unknown), but we force 'txt'
+        output = tmp_path / "test.dat"
+        PSDWriter.write(output, mock_psd_dict, fmt="txt")
+
+        # Should behave like multi-txt write
+        assert not output.exists()
+        assert (tmp_path / "test_H1.dat").exists()

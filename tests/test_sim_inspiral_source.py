@@ -13,6 +13,9 @@ from sgnts.sinks import NullSeriesSink
 from sgnligo.sources.sim_inspiral_source import (
     OPTIONAL_FIELDS,
     REQUIRED_FIELDS,
+    STATE_COLLEGE_LAT_RAD,
+    STATE_COLLEGE_LON_RAD,
+    TEST_INJECTION_INTERVAL,
     SimInspiralSource,
     WaveformCache,
     _get_dict_real8,
@@ -20,7 +23,9 @@ from sgnligo.sources.sim_inspiral_source import (
     _load_lal_h5_injections,
     _load_xml_injections,
     _validate_injection,
+    calculate_overhead_ra,
     estimate_waveform_duration,
+    generate_test_injection,
     generate_waveform_td,
     load_injections,
     project_to_detector,
@@ -478,9 +483,11 @@ class TestWaveformCache:
 class TestSimInspiralSource:
     """Test cases for SimInspiralSource class."""
 
-    def test_init_requires_injection_file(self):
-        """Test that injection_file is required."""
-        with pytest.raises(ValueError, match="injection_file must be specified"):
+    def test_init_requires_injection_file_or_test_mode(self):
+        """Test that injection_file or test_mode is required."""
+        with pytest.raises(
+            ValueError, match="Must specify either injection_file or test_mode"
+        ):
             SimInspiralSource(name="TestSource", t0=1000000000.0, duration=10.0)
 
     def test_init_with_xml_file(self, sample_xml_file):
@@ -995,3 +1002,287 @@ class TestLalH5Format:
             assert mass1_1 == pytest.approx(30.0, rel=1e-6)
         finally:
             os.unlink(sample_lal_h5_file)
+
+
+# =============================================================================
+# Test Mode Tests
+# =============================================================================
+
+
+class TestCalculateOverheadRA:
+    """Tests for calculate_overhead_ra function."""
+
+    def test_calculate_overhead_ra_basic(self):
+        """Test basic RA calculation."""
+        # At some GPS time, calculate the RA for overhead position
+        gps_time = 1000000000.0
+        ra = calculate_overhead_ra(gps_time, STATE_COLLEGE_LON_RAD)
+        # RA should be in [0, 2π)
+        assert 0 <= ra < 2 * np.pi
+
+    def test_calculate_overhead_ra_different_times(self):
+        """Test that RA changes with GPS time."""
+        ra1 = calculate_overhead_ra(1000000000.0, STATE_COLLEGE_LON_RAD)
+        # 6 hours later (approximately 1/4 sidereal day)
+        ra2 = calculate_overhead_ra(1000000000.0 + 6 * 3600, STATE_COLLEGE_LON_RAD)
+        # RA should have changed by approximately π/2 (90 degrees)
+        # Use modular arithmetic since RA wraps around
+        diff = abs(ra2 - ra1)
+        if diff > np.pi:
+            diff = 2 * np.pi - diff
+        # Allow some tolerance due to sidereal vs solar time difference
+        assert diff == pytest.approx(np.pi / 2, rel=0.05)
+
+    def test_calculate_overhead_ra_different_longitudes(self):
+        """Test that different longitudes give different RAs."""
+        gps_time = 1000000000.0
+        ra_west = calculate_overhead_ra(gps_time, -np.pi / 2)  # 90° West
+        ra_east = calculate_overhead_ra(gps_time, np.pi / 2)  # 90° East
+        # Difference should be π (180 degrees)
+        diff = abs(ra_east - ra_west)
+        if diff > np.pi:
+            diff = 2 * np.pi - diff
+        assert diff == pytest.approx(np.pi, rel=1e-6)
+
+
+class TestGenerateTestInjection:
+    """Tests for generate_test_injection function."""
+
+    def test_generate_bns_injection(self):
+        """Test BNS test injection generation."""
+        t_co = 1000000000.0
+        inj = generate_test_injection("bns", t_co)
+
+        # Check masses
+        mass1 = _get_dict_real8(inj, "mass1") / lal.MSUN_SI
+        mass2 = _get_dict_real8(inj, "mass2") / lal.MSUN_SI
+        assert mass1 == pytest.approx(1.4, rel=1e-6)
+        assert mass2 == pytest.approx(1.4, rel=1e-6)
+
+        # Check distance
+        distance = _get_dict_real8(inj, "distance") / (1e6 * lal.PC_SI)
+        assert distance == pytest.approx(100.0, rel=1e-6)
+
+        # Check sky position
+        dec = _get_dict_real8(inj, "dec")
+        assert dec == pytest.approx(STATE_COLLEGE_LAT_RAD, rel=1e-6)
+
+        # Check coalescence time
+        t_co_gps = _get_dict_real8(inj, "t_co_gps")
+        assert t_co_gps == pytest.approx(t_co, rel=1e-9)
+
+    def test_generate_nsbh_injection(self):
+        """Test NSBH test injection generation."""
+        t_co = 1000000000.0
+        inj = generate_test_injection("nsbh", t_co)
+
+        mass1 = _get_dict_real8(inj, "mass1") / lal.MSUN_SI
+        mass2 = _get_dict_real8(inj, "mass2") / lal.MSUN_SI
+        assert mass1 == pytest.approx(10.0, rel=1e-6)
+        assert mass2 == pytest.approx(1.4, rel=1e-6)
+
+        distance = _get_dict_real8(inj, "distance") / (1e6 * lal.PC_SI)
+        assert distance == pytest.approx(200.0, rel=1e-6)
+
+    def test_generate_bbh_injection(self):
+        """Test BBH test injection generation."""
+        t_co = 1000000000.0
+        inj = generate_test_injection("bbh", t_co)
+
+        mass1 = _get_dict_real8(inj, "mass1") / lal.MSUN_SI
+        mass2 = _get_dict_real8(inj, "mass2") / lal.MSUN_SI
+        assert mass1 == pytest.approx(30.0, rel=1e-6)
+        assert mass2 == pytest.approx(30.0, rel=1e-6)
+
+        distance = _get_dict_real8(inj, "distance") / (1e6 * lal.PC_SI)
+        assert distance == pytest.approx(500.0, rel=1e-6)
+
+    def test_injection_has_all_required_fields(self):
+        """Test that generated injection has all required fields."""
+        inj = generate_test_injection("bns", 1000000000.0)
+        # Should not raise
+        _validate_injection(inj, index=0)
+
+    def test_injection_has_optional_fields(self):
+        """Test that generated injection has optional fields set."""
+        inj = generate_test_injection("bns", 1000000000.0)
+        for field_name in OPTIONAL_FIELDS:
+            # Should not raise - all optional fields should be present
+            _get_dict_real8(inj, field_name)
+
+
+class TestSimInspiralSourceTestMode:
+    """Tests for SimInspiralSource test mode."""
+
+    def test_test_mode_validation_mutual_exclusivity(self, sample_xml_file):
+        """Test that injection_file and test_mode are mutually exclusive."""
+        with pytest.raises(ValueError, match="Cannot specify both"):
+            SimInspiralSource(
+                name="TestSource",
+                injection_file=sample_xml_file,
+                test_mode="bns",
+                t0=1000000000.0,
+                duration=10.0,
+            )
+
+    def test_test_mode_validation_requires_one(self):
+        """Test that either injection_file or test_mode must be specified."""
+        with pytest.raises(ValueError, match="Must specify either"):
+            SimInspiralSource(
+                name="TestSource",
+                t0=1000000000.0,
+                duration=10.0,
+            )
+
+    def test_test_mode_validation_invalid_mode(self):
+        """Test that invalid test_mode raises an error."""
+        with pytest.raises(ValueError, match="Invalid test_mode"):
+            SimInspiralSource(
+                name="TestSource",
+                test_mode="invalid",
+                t0=1000000000.0,
+                duration=10.0,
+            )
+
+    def test_test_mode_case_insensitive(self):
+        """Test that test_mode is case insensitive."""
+        source = SimInspiralSource(
+            name="TestSource",
+            test_mode="BNS",  # uppercase
+            ifos=["H1"],
+            t0=1000000000.0,
+            duration=10.0,
+            sample_rate=4096,
+            f_min=20.0,
+        )
+        assert source.test_mode == "bns"  # normalized to lowercase
+
+    def test_test_mode_bns_creates_source(self):
+        """Test that BNS test mode creates a valid source."""
+        source = SimInspiralSource(
+            name="TestSource",
+            test_mode="bns",
+            ifos=["H1", "L1"],
+            t0=1000000000.0,
+            duration=60.0,  # Long enough to capture injections
+            sample_rate=4096,
+            f_min=20.0,
+        )
+        assert source.test_mode == "bns"
+        assert source._waveform_cache._test_mode == "bns"
+        # Initially empty, injections generated on demand
+        assert len(source._injections) == 0
+
+    def test_test_mode_nsbh_creates_source(self):
+        """Test that NSBH test mode creates a valid source."""
+        source = SimInspiralSource(
+            name="TestSource",
+            test_mode="nsbh",
+            ifos=["H1"],
+            t0=1000000000.0,
+            duration=60.0,
+            sample_rate=4096,
+            f_min=20.0,
+        )
+        assert source.test_mode == "nsbh"
+
+    def test_test_mode_bbh_creates_source(self):
+        """Test that BBH test mode creates a valid source."""
+        source = SimInspiralSource(
+            name="TestSource",
+            test_mode="bbh",
+            ifos=["H1"],
+            t0=1000000000.0,
+            duration=60.0,
+            sample_rate=4096,
+            f_min=20.0,
+        )
+        assert source.test_mode == "bbh"
+
+
+class TestWaveformCacheTestMode:
+    """Tests for WaveformCache with test mode."""
+
+    def test_test_mode_generates_injections_on_demand(self):
+        """Test that test mode generates injections when queried."""
+        cache = WaveformCache(
+            injections=[],
+            ifos=["H1", "L1"],
+            sample_rate=4096,
+            f_min=20.0,
+            test_mode="bbh",
+        )
+
+        # Initially no injections
+        assert len(cache.injections) == 0
+
+        # Query for a time range that should contain injections
+        # BBH at 30-second intervals, query around t=1000000030
+        cache.get_overlapping_injections(1000000025.0, 1000000035.0)
+
+        # Should have generated at least one injection (at t=1000000030)
+        assert len(cache.injections) >= 1
+        assert len(cache._generated_test_times) >= 1
+
+    def test_test_mode_injection_interval(self):
+        """Test that injections are generated at correct intervals."""
+        cache = WaveformCache(
+            injections=[],
+            ifos=["H1"],
+            sample_rate=4096,
+            f_min=20.0,
+            test_mode="bbh",
+        )
+
+        # Query a range spanning multiple injection times
+        # From t=1000000000 to t=1000000100 should have ~3-4 injections IN the range
+        # Plus additional injections before/after to account for waveform duration
+        cache.get_overlapping_injections(1000000000.0, 1000000100.0)
+
+        # All generated times should be at 30-second intervals
+        for t_co in cache._generated_test_times:
+            # Check that t_co is a multiple of 30
+            assert t_co % TEST_INJECTION_INTERVAL == 0
+
+        # The 30-second boundaries near our query range
+        # (1000000000 is NOT a multiple of 30!)
+        # Actual multiples: 999999990, 1000000020, 1000000050, 1000000080
+        expected_times = {1000000020.0, 1000000050.0, 1000000080.0}
+        assert expected_times.issubset(cache._generated_test_times)
+
+    def test_test_mode_no_duplicate_injections(self):
+        """Test that querying the same range twice doesn't create duplicates."""
+        cache = WaveformCache(
+            injections=[],
+            ifos=["H1"],
+            sample_rate=4096,
+            f_min=20.0,
+            test_mode="bbh",
+        )
+
+        # Query same range twice
+        cache.get_overlapping_injections(1000000025.0, 1000000035.0)
+        initial_count = len(cache.injections)
+
+        cache.get_overlapping_injections(1000000025.0, 1000000035.0)
+        final_count = len(cache.injections)
+
+        assert final_count == initial_count
+
+    def test_non_test_mode_no_dynamic_generation(self):
+        """Test that non-test mode doesn't generate injections dynamically."""
+        inj = generate_test_injection("bns", 1000000000.0)
+        cache = WaveformCache(
+            injections=[inj],
+            ifos=["H1"],
+            sample_rate=4096,
+            f_min=20.0,
+            test_mode=None,  # Not test mode
+        )
+
+        initial_count = len(cache.injections)
+        cache.get_overlapping_injections(1000000025.0, 1000000035.0)
+        final_count = len(cache.injections)
+
+        # Should not have generated any new injections
+        assert final_count == initial_count
