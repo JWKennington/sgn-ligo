@@ -5,6 +5,7 @@
 
 
 import os
+import shutil
 from argparse import ArgumentParser
 
 from sgnligo.plots.util import set_matplotlib_cache_directory
@@ -25,7 +26,8 @@ matplotlib.rcParams.update(
         "legend.fontsize": 8.0,
         "figure.dpi": 300,
         "savefig.dpi": 300,
-        "text.usetex": True,
+        # Only enable LaTeX if available
+        "text.usetex": shutil.which("latex") is not None,
         "path.simplify": True,
     }
 )

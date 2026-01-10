@@ -5,6 +5,7 @@ nav:
   - User Guide:
     - Key Concepts: user-guide/concepts.md
     - DataSource Tutorial: user-guide/datasource-tutorial.md
+    - GWpy Integration Tutorial: user-guide/gwpy-tutorial.md
     - GWDataNoiseSource Tutorial: user-guide/gwdata_noise_source.md
     - SimInspiralSource Tutorial: user-guide/sim_inspiral_source.md
     - GWIStat Tutorial: user-guide/gwistat-tutorial.md
