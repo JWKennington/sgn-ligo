@@ -118,6 +118,7 @@ class GWpyPlotSink(TSSink):
 
     # Internal state
     _plot_count: int = field(default=0, init=False, repr=False)
+    _extra_padding: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self):
         """Configure audio adapter and initialize sink."""
@@ -131,8 +132,24 @@ class GWpyPlotSink(TSSink):
         # overlap_before = data from before current stride (left overlap)
         # overlap_after = data from after current stride (right overlap)
         # Total plot duration = overlap_before + plot_stride + overlap_after
-        before_samples = int(self.overlap_before * self.input_sample_rate)
-        after_samples = int(self.overlap_after * self.input_sample_rate)
+
+        # For spectrogram/qtransform, add extra padding to handle edge effects
+        # from windowing. The extra padding is half the total output duration
+        # on each side, which will be trimmed before plotting.
+        if self.plot_type in ("spectrogram", "qtransform"):
+            total_output_duration = (
+                self.overlap_before + self.plot_stride + self.overlap_after
+            )
+            self._extra_padding = total_output_duration / 2
+        else:
+            self._extra_padding = 0.0
+
+        # Calculate internal overlap (user overlap + extra padding for edge effects)
+        internal_overlap_before = self.overlap_before + self._extra_padding
+        internal_overlap_after = self.overlap_after + self._extra_padding
+
+        before_samples = int(internal_overlap_before * self.input_sample_rate)
+        after_samples = int(internal_overlap_after * self.input_sample_rate)
 
         # Set stride and overlap on adapter config
         self.adapter_config.stride = stride_offset
@@ -229,13 +246,20 @@ class GWpyPlotSink(TSSink):
         type_name = plot_type_names.get(self.plot_type, self.plot_type)
         return f"{self.ifo} {type_name} - GPS {int(gps_start)}"
 
-    def _plot_timeseries(self, fig: Figure, ts: TimeSeries, title: str) -> None:
+    def _plot_timeseries(
+        self,
+        fig: Figure,
+        ts: TimeSeries,
+        title: str,
+        xlim: Optional[Tuple[float, float]] = None,
+    ) -> None:
         """Plot time series waveform.
 
         Args:
             fig: Matplotlib figure
             ts: TimeSeries to plot
             title: Plot title
+            xlim: Optional (start, end) GPS time limits for x-axis
         """
         ax = fig.add_subplot(111)
         ax.plot(ts.times.value, ts.value, linewidth=0.5, color="#1f77b4")
@@ -243,14 +267,23 @@ class GWpyPlotSink(TSSink):
         ax.set_ylabel("Strain")
         ax.set_title(title)
         ax.grid(True, alpha=0.3)
+        if xlim is not None:
+            ax.set_xlim(xlim)
 
-    def _plot_spectrogram(self, fig: Figure, ts: TimeSeries, title: str) -> None:
+    def _plot_spectrogram(
+        self,
+        fig: Figure,
+        ts: TimeSeries,
+        title: str,
+        xlim: Optional[Tuple[float, float]] = None,
+    ) -> None:
         """Plot spectrogram.
 
         Args:
             fig: Matplotlib figure
             ts: TimeSeries to plot
             title: Plot title
+            xlim: Optional (start, end) GPS time limits for x-axis
         """
         ax = fig.add_subplot(111)
 
@@ -271,14 +304,23 @@ class GWpyPlotSink(TSSink):
         ax.set_ylabel("Frequency (Hz)")
         ax.set_title(title)
         fig.colorbar(pcm, ax=ax, label="ASD")
+        if xlim is not None:
+            ax.set_xlim(xlim)
 
-    def _plot_qtransform(self, fig: Figure, ts: TimeSeries, title: str) -> None:
+    def _plot_qtransform(
+        self,
+        fig: Figure,
+        ts: TimeSeries,
+        title: str,
+        xlim: Optional[Tuple[float, float]] = None,
+    ) -> None:
         """Plot Q-transform.
 
         Args:
             fig: Matplotlib figure
             ts: TimeSeries to plot
             title: Plot title
+            xlim: Optional (start, end) GPS time limits for x-axis
         """
         ax = fig.add_subplot(111)
 
@@ -299,16 +341,31 @@ class GWpyPlotSink(TSSink):
         ax.set_ylabel("Frequency (Hz)")
         ax.set_title(title)
         fig.colorbar(pcm, ax=ax, label="Normalized Energy")
+        if xlim is not None:
+            ax.set_xlim(xlim)
 
-    def _generate_plot(self, ts: TimeSeries, gps_start: float) -> None:
+    def _generate_plot(
+        self,
+        ts: TimeSeries,
+        gps_start: float,
+        xlim: Optional[Tuple[float, float]] = None,
+    ) -> None:
         """Generate and save plot based on plot_type.
 
         Args:
             ts: TimeSeries data to plot
             gps_start: GPS start time for filename
+            xlim: Optional (start, end) GPS time limits for x-axis (used to
+                crop view for spectrogram/qtransform after computing on
+                padded data to avoid edge effects)
         """
-        duration = float(ts.duration.value)
-        filename = self._generate_filename(gps_start, duration)
+        # For filename/title, use the visible duration (xlim) if provided
+        if xlim is not None:
+            visible_duration = xlim[1] - xlim[0]
+        else:
+            visible_duration = float(ts.duration.value)
+
+        filename = self._generate_filename(gps_start, visible_duration)
         filepath = Path(self.output_dir) / filename
 
         # Create figure
@@ -316,16 +373,16 @@ class GWpyPlotSink(TSSink):
         FigureCanvas(fig)
 
         # Generate title
-        title = self._get_title(ts, gps_start, duration)
+        title = self._get_title(ts, gps_start, visible_duration)
 
         # Generate plot based on type
         try:
             if self.plot_type == "timeseries":
-                self._plot_timeseries(fig, ts, title)
+                self._plot_timeseries(fig, ts, title, xlim=xlim)
             elif self.plot_type == "spectrogram":
-                self._plot_spectrogram(fig, ts, title)
+                self._plot_spectrogram(fig, ts, title, xlim=xlim)
             elif self.plot_type == "qtransform":
-                self._plot_qtransform(fig, ts, title)
+                self._plot_qtransform(fig, ts, title, xlim=xlim)
 
             # Save
             fig.tight_layout()
@@ -387,8 +444,21 @@ class GWpyPlotSink(TSSink):
                     channel=f"{self.ifo}:{self.description}",
                 )
 
+                # For spectrogram/qtransform with extra padding, calculate the
+                # plot region. The full data is used for the transform to avoid
+                # edge effects, but we only plot the user-requested region.
+                if self._extra_padding > 0:
+                    plot_xlim = (
+                        t0_gps + self._extra_padding,
+                        t0_gps + buf_duration - self._extra_padding,
+                    )
+                    plot_t0 = plot_xlim[0]
+                else:
+                    plot_xlim = None
+                    plot_t0 = t0_gps
+
                 # Generate plot
-                self._generate_plot(ts, t0_gps)
+                self._generate_plot(ts, plot_t0, xlim=plot_xlim)
 
     @property
     def plots_generated(self) -> int:
