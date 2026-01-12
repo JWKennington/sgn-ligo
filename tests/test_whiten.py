@@ -1,165 +1,19 @@
 #!/usr/bin/env python3
 
-import os
-from optparse import OptionParser
-
+import lal
+import numpy as np
 import pytest
-from sgn.apps import Pipeline
-from sgnts.sinks import DumpSeriesSink
-from sgnts.transforms import Resampler
 
-from sgnligo.sources import FrameReader
 from sgnligo.transforms import Whiten
-
-
-def parse_command_line():
-    parser = OptionParser()
-
-    parser.add_option(
-        "--instrument", metavar="ifo", help="Instrument to analyze. H1, L1, or V1."
-    )
-    parser.add_option(
-        "--gps-start-time",
-        metavar="seconds",
-        help="Set the start time of the segment to analyze in GPS seconds.",
-    )
-    parser.add_option(
-        "--gps-end-time",
-        metavar="seconds",
-        help="Set the end time of the segment to analyze in GPS seconds.",
-    )
-    parser.add_option(
-        "--output-dir", metavar="path", help="Directory to write output data into."
-    )
-    parser.add_option(
-        "--sample-rate",
-        metavar="Hz",
-        type=int,
-        default=16384,
-        help="Requested sampling rate of the data.",
-    )
-    parser.add_option(
-        "--buffer-duration",
-        metavar="seconds",
-        type=int,
-        default=1,
-        help="Length of output buffers in seconds. Default is 1 second.",
-    )
-    parser.add_option(
-        "--frame-cache",
-        metavar="file",
-        help="Set the path to the frame cache file to analyze.",
-    )
-    parser.add_option(
-        "--channel-name", metavar="channel", help="Name of the data channel to analyze."
-    )
-    parser.add_option(
-        "--reference-psd",
-        metavar="file",
-        help="load the spectrum from this LIGO light-weight XML file (optional).",
-    )
-    parser.add_option(
-        "--track-psd",
-        action="store_true",
-        help="Enable dynamic PSD tracking.  Always enabled if --reference-psd is not"
-        " given.",
-    )
-
-    options, args = parser.parse_args()
-
-    return options, args
-
-
-@pytest.mark.skip(reason="Not currently pytest compatible")
-def test_whitengraph(capsys):
-
-    # parse arguments
-    options, args = parse_command_line()
-
-    os.makedirs(options.output_dir, exist_ok=True)
-
-    num_samples = options.sample_rate * options.buffer_duration
-
-    if not (options.gps_start_time and options.gps_end_time):
-        raise ValueError("Must provide both --gps-start-time and --gps-end-time.")
-
-    if options.reference_psd is None:
-        options.track_psd = True  # FIXME not implemented
-
-    pipeline = Pipeline()
-
-    #
-    #          ------   H1   -------
-    #         | src1 | ---- | snk2  |
-    #          ------   SR1  -------
-    #         /
-    #     H1 /
-    #   ----------
-    #  |  whiten  |
-    #   ----------
-    #          \
-    #       H1  \
-    #           ------
-    #          | snk1 |
-    #           ------
-    #
-
-    pipeline.insert(
-        FrameReader(
-            name="FrameReader",
-            source_pad_names=("frsrc",),
-            rate=options.sample_rate,
-            num_samples=num_samples,
-            framecache=options.frame_cache,
-            channel_name=options.channel_name,
-            instrument=options.instrument,
-            gps_start_time=options.gps_start_time,
-            gps_end_time=options.gps_end_time,
-        ),
-        Resampler(
-            name="Resampler",
-            source_pad_names=("resamp",),
-            sink_pad_names=("frsrc",),
-            inrate=options.sample_rate,
-            outrate=2048,
-        ),
-        Whiten(
-            name="Whitener",
-            source_pad_names=("hoft", "spectrum"),
-            sink_pad_names=("resamp",),
-            instrument=options.instrument,
-            sample_rate=2048,
-            fft_length=4,
-            reference_psd=options.reference_psd,
-            psd_pad_name="spectrum",
-            whiten_pad_name="hoft",
-        ),
-        DumpSeriesSink(
-            name="HoftSnk",
-            sink_pad_names=("hoft",),
-            fname=os.path.join(options.output_dir, "out.txt"),
-        ),
-        DumpSeriesSink(
-            name="SpectrumSnk",
-            sink_pad_names=("spectrum",),
-            fname=os.path.join(options.output_dir, "psd_out.txt"),
-        ),
-    )
-
-    pipeline.insert(
-        DumpSeriesSink(name="RawSnk", sink_pad_names=("frsrc",), fname="in.txt")
-    )
-    pipeline.insert(
-        link_map={
-            "Resampler:snk:frsrc": "FrameReader:src:frsrc",
-            "Whitener:snk:resamp": "Resampler:src:resamp",
-            "HoftSnk:snk:hoft": "Whitener:src:hoft",
-            "SpectrumSnk:snk:spectrum": "Whitener:src:spectrum",
-            "RawSnk:snk:frsrc": "FrameReader:src:frsrc",
-        }
-    )
-
-    pipeline.run()
+from sgnligo.transforms.whiten import (
+    DriftCorrectionKernel,
+    Kernel,
+    WhiteningKernel,
+    correction_kernel_from_psds,
+    kernel_from_psd,
+)
+from sgnts.base import EventFrame, TSFrame
+from sgnts.base.slice_tools import TIME_MAX
 
 
 class TestWhitenInit:
@@ -525,5 +379,174 @@ class TestInterpolatePSD:
         assert result is psd
 
 
-if __name__ == "__main__":
-    test_whitengraph(None)
+def _make_psd(length=1025, deltaF=1.0, val=1.0):
+    """Helper to create a flat LAL REAL8FrequencySeries."""
+    series = lal.CreateREAL8FrequencySeries(
+        "test_psd", lal.LIGOTimeGPS(0), 0.0, deltaF, lal.StrainUnit, length
+    )
+    series.data.data[:] = val
+    return series
+
+
+class TestKernelFactories:
+    """Test the kernel generation factory functions."""
+
+    def test_kernel_from_psd_zero_latency(self):
+        """Test generating a Minimum Phase kernel."""
+        psd = _make_psd(val=1.0)
+        k = kernel_from_psd(psd, zero_latency=True)
+
+        assert isinstance(k, Kernel)
+        assert k.latency == 0
+        assert len(k.fir_matrix) > 0
+        # Energy check
+        assert np.isclose(np.sum(k.fir_matrix**2), 1.0, atol=1e-3)
+
+    def test_kernel_from_psd_linear_phase(self):
+        """Test generating a Linear Phase kernel."""
+        psd = _make_psd(val=1.0)
+        k = kernel_from_psd(psd, zero_latency=False)
+
+        latency = k.latency
+        taps = k.fir_matrix
+        peak_idx = np.argmax(np.abs(taps))
+
+        # Check peak alignment
+        assert abs(peak_idx - latency) <= 1
+        # Energy check
+        assert np.isclose(np.sum(taps**2), 1.0, atol=1e-3)
+
+    def test_correction_kernel_identity(self):
+        psd = _make_psd(val=1.0)
+        L = 128
+        k = correction_kernel_from_psds(psd_live=psd, psd_ref=psd, truncation_samples=L)
+
+        assert k.latency == L - 1
+        assert len(k.fir_matrix) == L
+        assert np.isclose(k.fir_matrix[-1], 1.0, atol=1e-3)
+
+    def test_correction_kernel_gain_logic(self):
+        # Ref=1, Live=4 -> Gain=2.0
+        psd_ref = _make_psd(val=1.0)
+        psd_live = _make_psd(val=4.0)
+        L = 128
+        k = correction_kernel_from_psds(
+            psd_live=psd_live, psd_ref=psd_ref, truncation_samples=L
+        )
+        assert np.isclose(k.fir_matrix[-1], 2.0, atol=1e-2)
+
+        # Ref=1, Live=0.25 -> Gain=0.5
+        psd_live_small = _make_psd(val=0.25)
+        k_small = correction_kernel_from_psds(
+            psd_live=psd_live_small, psd_ref=psd_ref, truncation_samples=L
+        )
+        assert np.isclose(k_small.fir_matrix[-1], 0.5, atol=1e-2)
+
+
+class TestWhiteningKernelElement:
+    """Test the WhiteningKernel TSTransform element."""
+
+    def test_init(self):
+        elem = WhiteningKernel(
+            name="wk",
+            sink_pad_names=("spec",),
+            zero_latency=True,
+        )
+        assert isinstance(elem, WhiteningKernel)
+
+    def test_process_generates_event(self):
+        elem = WhiteningKernel(
+            name="wk",
+            sink_pad_names=("spec",),
+            zero_latency=True,
+            verbose=True,
+        )
+        elem.configure()
+
+        psd = _make_psd()
+        input_frame = TSFrame(
+            buffers=[],
+            metadata={"psd": psd, "epoch": 123456789},
+            EOS=False,
+        )
+
+        # Output frame must span the full range to accept buffers up to TIME_MAX
+        output_frame = EventFrame(data=[], offset=0, noffset=int(TIME_MAX), EOS=False)
+
+        # Bypass decorator to test logic directly
+        elem.process.__wrapped__(elem, input_frame, output_frame)
+
+        # Check .data, which holds the list of buffers
+        assert len(output_frame.data) == 1
+        taps = output_frame.data[0].data[0][0]
+        assert len(taps) > 0
+
+    def test_throttling(self):
+        elem = WhiteningKernel(
+            name="wk",
+            sink_pad_names=("spec",),
+            min_update_interval=1_000_000_000,
+            verbose=True,
+        )
+        elem.configure()
+
+        psd = _make_psd()
+        in1 = TSFrame(buffers=[], metadata={"psd": psd, "epoch": 100})
+        # Initialize with full span
+        out1 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+
+        elem.process.__wrapped__(elem, in1, out1)
+        assert len(out1.data) == 1
+
+        in2 = TSFrame(buffers=[], metadata={"psd": psd, "epoch": 101})
+        out2 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+
+        elem.process.__wrapped__(elem, in2, out2)
+        assert len(out2.data) == 0
+
+
+class TestDriftCorrectionKernelElement:
+    """Test the DriftCorrectionKernel TSTransform element."""
+
+    def test_missing_reference_psd(self):
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=None,
+        )
+        elem.configure()
+
+        in1 = TSFrame(buffers=[], metadata={"psd": _make_psd(), "epoch": 100})
+        out1 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+
+        elem.process.__wrapped__(elem, in1, out1)
+        assert len(out1.data) == 0
+
+    def test_correction_generation(self):
+        ref_psd = _make_psd(val=1.0)
+        live_psd = _make_psd(val=4.0)
+
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=ref_psd,
+            truncation_samples=64,
+            verbose=True,
+        )
+        elem.configure()
+
+        input_frame = TSFrame(
+            buffers=[],
+            metadata={"psd": live_psd, "epoch": 1000},
+        )
+        output_frame = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+
+        elem.process.__wrapped__(elem, input_frame, output_frame)
+
+        assert len(output_frame.data) == 1
+        taps = output_frame.data[0].data[0][0]
+        assert len(taps) == 64
+        assert np.isclose(taps[-1], 2.0, atol=1e-2)
+
+
+

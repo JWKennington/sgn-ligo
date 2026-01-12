@@ -19,8 +19,25 @@ from igwn_ligolw import utils as ligolw_utils
 from scipy import interpolate
 from scipy.signal import butter, sosfilt
 from scipy.special import loggamma
-from sgnts.base import AdapterConfig, Offset, SeriesBuffer, TSFrame, TSTransform
+
+from sgn import SourcePad
+from sgnligo.base import now
+from sgnts.base import (
+    AdapterConfig,
+    EventBuffer,
+    EventFrame,
+    Offset,
+    SeriesBuffer,
+    TSFrame,
+    TSTransform,
+)
 from sympy import EulerGamma
+
+from sgnts.base.slice_tools import TIME_MAX
+from sgnts.decorators import transform
+from zlw.corrections import ExtPsdDriftCorrection
+from zlw.kernels import LPWhiteningFilter, MPWhiteningFilter
+from zlw.window import WindowSpec
 
 EULERGAMMA = float(EulerGamma.evalf())
 
@@ -611,3 +628,230 @@ class Whiten(TSTransform):
 
     def new(self, pad):
         return self.output_frames[pad]
+
+
+# --- Kernel Container ---
+
+
+@dataclass
+class Kernel:
+    """Container for FIR taps and latency metadata."""
+
+    fir_matrix: np.ndarray
+    latency: int
+
+
+def kernel_from_psd(
+    psd: lal.REAL8FrequencySeries,
+    zero_latency: bool = False,
+    window_spec: Optional[WindowSpec] = None,
+) -> Kernel:
+    """Build a time-domain whitening kernel from a one-sided PSD using ZLW."""
+    psd_data = np.asarray(psd.data.data, dtype=np.float64)
+    df = psd.deltaF
+    f0 = psd.f0
+
+    n_fft = 2 * (len(psd_data) - 1)
+    fs = 2.0 * (f0 + (len(psd_data) - 1) * df)
+
+    if zero_latency:
+        # Minimum Phase: Causal, Latency = 0
+        filt = MPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft)
+        taps = filt.impulse_response(window=window_spec)
+        latency = 0
+    else:
+        # Linear Phase: Symmetric, Latency = Group Delay
+        # We must explicitly set the delay to center the impulse for a causal filter.
+        # Length of impulse response typically defaults to n_fft unless windowed shorter,
+        # but here we rely on standard n_fft length.
+
+        # Center of the filter in samples
+        # Note: If window_spec dictates a different length, we should ideally know it,
+        # but LPWhiteningFilter uses n_fft by default.
+        L = (
+            n_fft if window_spec is None else int(window_spec.length * fs)
+        )  # Simplified assumption
+        # Safer: Use standard FFT centering
+        delay_samples = (n_fft - 1) / 2.0
+        delay_seconds = delay_samples / fs
+
+        filt = LPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft, delay=delay_seconds)
+        taps = filt.impulse_response(window=window_spec)
+
+        # The peak of the LP filter is now at index `delay_samples`
+        latency = int(delay_samples)
+
+    # Normalize energy
+    norm = np.linalg.norm(taps)
+    if norm > 0:
+        taps /= norm
+
+    return Kernel(fir_matrix=taps, latency=latency)
+
+
+def correction_kernel_from_psds(
+    psd_live: lal.REAL8FrequencySeries,
+    psd_ref: lal.REAL8FrequencySeries,
+    truncation_samples: int = 1024,
+    smoothing_hz: float = 0.0,
+) -> Kernel:
+    """Generate a drift correction kernel using ZLW Adjoint logic."""
+    assert len(psd_live.data.data) == len(psd_ref.data.data)
+
+    n_bins = len(psd_live.data.data)
+    fs = 2.0 * (n_bins - 1) * psd_live.deltaF
+
+    corrector = ExtPsdDriftCorrection(
+        freqs=np.linspace(0, fs / 2, n_bins),
+        psd_ref=np.asarray(psd_live.data.data, dtype=float),
+        psd_live=np.asarray(psd_ref.data.data, dtype=float),
+        fs=fs,
+    )
+
+    k_circ = corrector.compute_adjoint_kernel(
+        smoothing_hz=smoothing_hz,
+        truncate_samples=truncation_samples,
+        check_aliasing=False,
+    )
+
+    L = truncation_samples
+    N = len(k_circ)
+    taps = np.zeros(L, dtype=np.float64)
+
+    if L > 1:
+        taps[0 : L - 1] = k_circ[N - (L - 1) : N]
+
+    taps[L - 1] = k_circ[0]
+
+    return Kernel(fir_matrix=taps, latency=L - 1)
+
+
+@dataclass
+class WhiteningKernel(TSTransform):
+    """Generates a live whitening kernel (1/sqrt(S_live))."""
+
+    filters_pad_name: str = "filters"
+    zero_latency: bool = False
+    window_spec: Optional[WindowSpec] = None
+    min_update_interval: Optional[int] = None
+    verbose: bool = False
+
+    @property
+    def static_source_pads(self) -> list[str]:
+        return [self.filters_pad_name]
+
+    def configure(self) -> None:
+        self.output_frame_types[self.filters_pad_name] = EventFrame
+        self._latest_epoch: Optional[int] = None
+        self._latest_send_ns: Optional[int] = None
+        self.source_pad = self.srcs[self.filters_pad_name]
+
+    @transform.one_to_one
+    def process(self, input_frame: TSFrame, output_frame: EventFrame) -> None:
+        live_psd = input_frame.metadata.get("psd", None)
+        epoch = input_frame.metadata.get("epoch", None)
+
+        if epoch is None or live_psd is None:
+            return
+
+        if self._latest_epoch is not None and epoch <= self._latest_epoch:
+            return
+
+        if self.min_update_interval:
+            curr_ns = now().ns()
+            if (
+                self._latest_send_ns
+                and (curr_ns - self._latest_send_ns) < self.min_update_interval
+            ):
+                return
+            self._latest_send_ns = curr_ns
+
+        self._latest_epoch = epoch
+
+        try:
+            k = kernel_from_psd(
+                live_psd, zero_latency=self.zero_latency, window_spec=self.window_spec
+            )
+
+            buf = EventBuffer(
+                offset=Offset.fromns(epoch),
+                noffset=int(TIME_MAX) - Offset.fromns(epoch),
+                data=[np.asarray([k.fir_matrix])],
+            )
+            output_frame.append(buf)
+
+            if self.verbose:
+                print(f"WhiteningKernel: Updated at {epoch}, lat={k.latency}")
+
+        except Exception as e:
+            if self.verbose:
+                print(f"WhiteningKernel Error: {e}")
+
+
+@dataclass
+class DriftCorrectionKernel(TSTransform):
+    """Generates a correction kernel using ZLW Adjoint logic."""
+
+    filters_pad_name: str = "filters"
+    reference_psd: Optional[lal.REAL8FrequencySeries] = None
+    truncation_samples: int = 1024
+    smoothing_hz: float = 0.0
+    min_update_interval: Optional[int] = None
+    verbose: bool = False
+
+    @property
+    def static_source_pads(self) -> list[str]:
+        return [self.filters_pad_name]
+
+    def configure(self) -> None:
+        self.output_frame_types[self.filters_pad_name] = EventFrame
+        self._latest_epoch: Optional[int] = None
+        self._latest_send_ns: Optional[int] = None
+        self.source_pad = self.srcs[self.filters_pad_name]
+
+        if self.reference_psd is None and self.verbose:
+            print("DriftCorrectionKernel warning: No reference_psd provided.")
+
+    @transform.one_to_one
+    def process(self, input_frame: TSFrame, output_frame: EventFrame) -> None:
+        live_psd = input_frame.metadata.get("psd", None)
+        epoch = input_frame.metadata.get("epoch", None)
+
+        if epoch is None or self.reference_psd is None or live_psd is None:
+            return
+
+        if self._latest_epoch is not None and epoch <= self._latest_epoch:
+            return
+
+        if self.min_update_interval:
+            curr_ns = now().ns()
+            if (
+                self._latest_send_ns
+                and (curr_ns - self._latest_send_ns) < self.min_update_interval
+            ):
+                return
+            self._latest_send_ns = curr_ns
+
+        self._latest_epoch = epoch
+
+        try:
+            k = correction_kernel_from_psds(
+                psd_live=live_psd,
+                psd_ref=self.reference_psd,
+                truncation_samples=self.truncation_samples,
+                smoothing_hz=self.smoothing_hz,
+            )
+
+            buf = EventBuffer(
+                offset=Offset.fromns(epoch),
+                noffset=int(TIME_MAX) - Offset.fromns(epoch),
+                data=[np.asarray([k.fir_matrix])],
+            )
+            output_frame.append(buf)
+
+            if self.verbose:
+                print(f"DriftCorrection: Updated {epoch}, lat={k.latency}")
+
+        except Exception as e:
+            if self.verbose:
+                print(f"DriftCorrectionKernel Error: {e}")
