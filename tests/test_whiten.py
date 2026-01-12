@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 
 import lal
+import lal.series
 import numpy as np
 import pytest
+from igwn_ligolw import ligolw, lsctables, utils as ligolw_utils
 
-from sgnligo.transforms import Whiten
+from sgn import CollectSink, Pipeline
+from sgnligo.sources import GWDataNoiseSource
 from sgnligo.transforms.whiten import (
     DriftCorrectionKernel,
     Kernel,
+    Whiten,
     WhiteningKernel,
     correction_kernel_from_psds,
     kernel_from_psd,
@@ -549,4 +553,210 @@ class TestDriftCorrectionKernelElement:
         assert np.isclose(taps[-1], 2.0, atol=1e-2)
 
 
+@pytest.fixture
+def mock_psd_file(tmp_path):
+    """Create a dummy PSD XML file for testing."""
+    # Create a flat PSD
+    rate = 2048
+    deltaF = 0.25
+    length = int(rate / 2 / deltaF) + 1
 
+    psd = lal.CreateREAL8FrequencySeries(
+        "H1_PSD",
+        lal.LIGOTimeGPS(0),
+        0.0,
+        deltaF,
+        lal.StrainUnit**2 / lal.HertzUnit,
+        length,
+    )
+    # Set to 1.0 (white noise level for unit variance)
+    # For GWDataNoiseSource, this defines the color of the noise.
+    psd.data.data[:] = 1.0
+
+    # Write to XML
+    xmldoc = ligolw.Document()
+    xmldoc.appendChild(ligolw.LIGO_LW())
+
+    # Create PSD element (using LAL's writing utilities is cleanest if available,
+    # but manually wrapping is safer for basic tests if dependencies vary)
+    # simpler: use lal.series.make_psd_xmldoc
+
+    psd_dict = {"H1": psd}
+    lal.series.make_psd_xmldoc(psd_dict, xmldoc)
+
+    fname = tmp_path / "test_psd.xml.gz"
+    ligolw_utils.write_filename(xmldoc, str(fname))
+
+    return str(fname)
+
+
+class TestPipelineWhiteningKernel:
+    """Integration tests for WhiteningKernel using GWDataNoiseSource."""
+
+    def test_pipeline_generation(self, mock_psd_file):
+        """Verify WhiteningKernel produces kernels from a live source."""
+        pipeline = Pipeline()
+        rate = 2048
+
+        # 1. Source: GWDataNoiseSource (Color noise based on PSD file)
+        src = GWDataNoiseSource(
+            name="source",
+            source_pad_names=("h1",),
+            instrument="H1",
+            psd_file=mock_psd_file,
+            sample_rate=rate,
+            segment_duration=4,
+            t0=0,
+            end=10,
+        )
+
+        # 2. Whiten: Measure PSD
+        whiten = Whiten(
+            name="whiten",
+            sink_pad_names=("h1",),
+            psd_pad_name="spectrum",
+            whiten_pad_name="hoft",
+            input_sample_rate=rate,
+            whiten_sample_rate=rate,
+            fft_length=4,
+            instrument="H1",
+        )
+
+        # 3. Kernel Generator
+        kernel_gen = WhiteningKernel(
+            name="kernel_gen",
+            sink_pad_names=("spectrum",),
+            filters_pad_name="filters",
+            zero_latency=True,
+            verbose=True,
+        )
+
+        # 4. Standard CollectSink
+        sink = CollectSink(
+            name="sink",
+            sink_pad_names=("filters",),
+        )
+
+        pipeline.insert(
+            src,
+            whiten,
+            kernel_gen,
+            sink,
+            link_map={
+                whiten.snks["h1"]: src.srcs["h1"],
+                kernel_gen.snks["spectrum"]: whiten.srcs["spectrum"],
+                sink.snks["filters"]: kernel_gen.srcs["filters"],
+            },
+        )
+
+        pipeline.run()
+
+        # Verification
+        frames = sink.collects["filters"]
+        assert len(frames) > 0, "Sink should have collected frames"
+
+        # Filter out initial gaps (Whiten needs time to compute first PSD)
+        valid_frames = [f for f in frames if not f.is_gap]
+        assert len(valid_frames) > 0, "Should have received valid kernel updates"
+
+        first_valid = valid_frames[0]
+        assert isinstance(first_valid, EventFrame)
+
+        # Check structure: data -> [EventBuffer] -> data -> [kernel]
+        assert len(first_valid.data) > 0
+        taps = first_valid.data[0].data[0]
+        assert len(taps) > 0
+
+        # Since input is white (mock_psd=1.0), WhiteningKernel should be ~Identity
+        # MP Identity is peak at 0
+        assert np.abs(taps[0]) > 0.5
+
+
+class TestPipelineDriftCorrectionKernel:
+    """Integration tests for DriftCorrectionKernel using GWDataNoiseSource."""
+
+    def test_pipeline_identity_correction(self, mock_psd_file):
+        """Verify DriftCorrectionKernel produces identity when Source matches Ref."""
+        pipeline = Pipeline()
+        rate = 2048
+
+        # 1. Source: Generates noise matching mock_psd_file
+        src = GWDataNoiseSource(
+            name="source",
+            source_pad_names=("h1",),
+            instrument="H1",
+            psd_file=mock_psd_file,
+            sample_rate=rate,
+            segment_duration=4,
+            t0=0,
+            end=10,
+        )
+
+        # 2. Whiten: Estimates Live PSD
+        whiten = Whiten(
+            name="whiten",
+            sink_pad_names=("h1",),
+            psd_pad_name="spectrum",
+            whiten_pad_name="hoft",
+            input_sample_rate=rate,
+            whiten_sample_rate=rate,
+            fft_length=4,
+            instrument="H1",
+        )
+
+        # 3. Load Reference PSD object for the kernel element
+        # (DriftCorrectionKernel usually takes a loaded object in latest design,
+        # or we update it to load from file if that's preferred.
+        # Based on previous code, it took a static LAL object.)
+
+        # Let's load the PSD manually to pass it
+        psd_dict = lal.series.read_psd_xmldoc(ligolw_utils.load_filename(mock_psd_file))
+        ref_psd_series = psd_dict["H1"]
+
+        drift_corr = DriftCorrectionKernel(
+            name="drift_corr",
+            sink_pad_names=("spectrum",),
+            filters_pad_name="filters",
+            reference_psd=ref_psd_series,
+            truncation_samples=64,
+            verbose=True,
+        )
+
+        # 4. Sink
+        sink = CollectSink(
+            name="sink",
+            sink_pad_names=("filters",),
+        )
+
+        pipeline.insert(
+            src,
+            whiten,
+            drift_corr,
+            sink,
+            link_map={
+                whiten.snks["h1"]: src.srcs["h1"],
+                drift_corr.snks["spectrum"]: whiten.srcs["spectrum"],
+                sink.snks["filters"]: drift_corr.srcs["filters"],
+            },
+        )
+
+        pipeline.run()
+
+        # Verification
+        frames = sink.collects["filters"]
+        valid_frames = [f for f in frames if not f.is_gap]
+        assert len(valid_frames) > 0
+
+        # Check Kernel
+        # Since Live Source matches Reference File, Correction ~ Identity
+        # Causal identity for DriftCorrection is a peak at the END (latency index)
+        frame = valid_frames[-1]
+        taps = frame.data[0].data[0]
+
+        assert len(taps) == 64
+        peak_idx = np.argmax(np.abs(taps))
+
+        assert (
+            peak_idx == 63
+        ), "Identity correction should peak at the latency index (end)"
+        assert np.abs(taps[-1]) > 0.5
