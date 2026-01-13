@@ -18,7 +18,7 @@ dependencies = [
     "igwn-segments",
     "lalsuite>=7.26",
     "ligo-scald",
-    "scipy",
+    "scipy < 1.17",
     "sgn >= 0.4",
     "sgn-arrakis",
     "sgn-ts >= 0.4",
