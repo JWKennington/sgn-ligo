@@ -67,6 +67,7 @@ class ConditionInfo:
     whiten_sample_rate: int = 2048
     psd_fft_length: int = 8
     reference_psd: Optional[str] = None
+    drift_reference_psd: Optional[str] = None
     ht_gate_threshold: float = float("+inf")
     track_psd: bool = True
     zero_latency: bool = False
@@ -136,6 +137,12 @@ class ConditionInfo:
             help="Disable the drift correction stage in zero-latency mode. "
             "Drift correction is enabled by default if a reference PSD is provided.",
         )
+        group.add_argument(
+            "--drift-reference-psd",
+            metavar="file",
+            help="Load the reference PSD specifically for the drift correction kernel "
+            "from this XML file. If not specified, defaults to --reference-psd.",
+        )
 
         group = parser.add_argument_group(
             "Data Qualtiy", "Adjust data quality handling"
@@ -154,6 +161,7 @@ class ConditionInfo:
             whiten_sample_rate=options.whiten_sample_rate,
             psd_fft_length=options.psd_fft_length,
             reference_psd=options.reference_psd,
+            drift_reference_psd=getattr(options, "drift_reference_psd", None),
             ht_gate_threshold=options.ht_gate_threshold,
             track_psd=options.track_psd,
             zero_latency=getattr(options, "zero_latency", False),
@@ -205,8 +213,12 @@ def condition(
 
     ref_psds = {}
     if zero_latency and condition_info.reference_psd:
+        # Prefer drift_reference_psd if provided, else fall back to reference_psd
+        drift_psd_file = (
+            condition_info.drift_reference_psd or condition_info.reference_psd
+        )
         try:
-            ref_psds = _read_psd(condition_info.reference_psd, verbose=True)
+            ref_psds = _read_psd(drift_psd_file, verbose=True)
         except Exception as e:
             print(f"Warning: Could not load reference PSD for drift correction: {e}")
 
