@@ -684,7 +684,7 @@ def kernel_from_psd(
 def correction_kernel_from_psds(
     psd_live: lal.REAL8FrequencySeries,
     psd_ref: lal.REAL8FrequencySeries,
-    truncation_samples: int = 1024,
+    truncation_samples: Optional[int] = 1024,
     smoothing_hz: float = 0.0,
 ) -> Kernel:
     """Generate a drift correction kernel using ZLW Adjoint logic."""
@@ -814,7 +814,7 @@ class DriftCorrectionKernel(TSTransform):
 
     filters_pad_name: str = "filters"
     reference_psd: Optional[lal.REAL8FrequencySeries] = None
-    truncation_samples: int = 1024
+    truncation_samples: Optional[int] = 1024
     smoothing_hz: float = 0.0
     min_update_interval: Optional[int] = None
     similarity_threshold: float = 0.9999

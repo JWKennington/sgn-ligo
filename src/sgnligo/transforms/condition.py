@@ -355,7 +355,8 @@ def condition(
                         sink_pad_names=(f"spectrum_{ifo}",),
                         filters_pad_name="filters",
                         reference_psd=ref_psds[ifo],
-                        truncation_samples=128,
+                        # truncation_samples=128,
+                        truncation_samples=None,
                         smoothing_hz=0.5,
                     ),
                     link_map={
