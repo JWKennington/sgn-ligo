@@ -389,7 +389,7 @@ def condition_psd(
     minfs: Optional[Tuple[float, float]] = (35.0, 40.0),
     maxfs: Optional[Tuple[float, float]] = (1800.0, 2048.0),
     smoothing_frequency: Optional[float] = 4.0,
-    fir_whiten: Optional[bool] = False,
+    zero_latency: Optional[bool] = False,
 ) -> lal.REAL8FrequencySeries:
     """Condition a PSD suitable for whitening waveforms.
 
@@ -412,7 +412,7 @@ def condition_psd(
             float, default = 4 Hz, the target frequency resolution after smoothing.
             Lines with bandwidths << smoothing_frequency are removed via a median
             calculation.  Remaining features will be blurred out to this resolution.
-        fir_whiten:
+        zero_latency:
             bool, default False, whether to enable causal whitening with a time-domain
             whitening kernel vs. traditional acausal whitening
 
@@ -452,7 +452,7 @@ def condition_psd(
     # is effectively done as a part of deriving a frequency series of the FIR-whitner
     # kernel
     #
-    if not fir_whiten:
+    if not zero_latency:
         #
         # Taper to infinity to turn this psd into an effective band pass filter
         #

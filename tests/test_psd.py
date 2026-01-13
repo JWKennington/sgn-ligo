@@ -359,7 +359,7 @@ class TestConditionPSD:
             minfs=(35.0, 40.0),
             maxfs=(1800.0, 2048.0),
             smoothing_frequency=4.0,
-            fir_whiten=False,
+            zero_latency=False,
         )
 
         # Verify calls
@@ -392,7 +392,7 @@ class TestConditionPSD:
         mock_median.return_value = mock_psd.data.data
         mock_avg.return_value = mock_psd.data.data
 
-        result = condition_psd(mock_psd, newdeltaF=0.5, fir_whiten=True)
+        result = condition_psd(mock_psd, newdeltaF=0.5, zero_latency=True)
 
         # Check that tapering was NOT applied for time domain
         assert not np.any(np.isinf(result.data.data))
@@ -422,7 +422,7 @@ class TestConditionPSD:
             minfs=(35.0, 40.0),
             maxfs=(1800.0, 2048.0),
             smoothing_frequency=4.0,
-            fir_whiten=False,
+            zero_latency=False,
         )
 
         # Check that tapering was applied
