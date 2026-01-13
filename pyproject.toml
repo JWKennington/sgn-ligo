@@ -22,6 +22,7 @@ dependencies = [
     "sgn >= 0.4",
     "sgn-arrakis",
     "sgn-ts >= 0.4",
+    "zlw",
     "sympy",
     "watchdog",
     "pandas",
