@@ -68,8 +68,8 @@ def mock_psd_dict():
 class TestReadWritePSD:
     """Test cases for read/write PSD functions."""
 
-    @patch("sgnligo.psd.ligolw_utils.load_filename")
-    @patch("sgnligo.psd.lal.series.read_psd_xmldoc")
+    @patch("sgnligo.psd.psd.ligolw_utils.load_filename")
+    @patch("sgnligo.psd.psd.lal.series.read_psd_xmldoc")
     def test_read_psd(self, mock_read_xmldoc, mock_load_filename):
         """Test reading PSD from XML file."""
         # Mock the loaded XML document
@@ -94,8 +94,8 @@ class TestReadWritePSD:
             "test.xml", verbose=True, contenthandler=lal.series.PSDContentHandler
         )
 
-    @patch("sgnligo.psd.ligolw_utils.write_filename")
-    @patch("sgnligo.psd.lal.series.make_psd_xmldoc")
+    @patch("sgnligo.psd.psd.ligolw_utils.write_filename")
+    @patch("sgnligo.psd.psd.lal.series.make_psd_xmldoc")
     def test_write_psd(self, mock_make_xmldoc, mock_write_filename, mock_psd_dict):
         """Test writing PSD to XML file."""
         # Mock the XML document
@@ -259,7 +259,7 @@ class TestSmoothingFunctions:
         assert result.deltaF == mock_psd.deltaF
         assert len(result.data.data) == len(mock_psd.data.data)
 
-    @patch("sgnligo.psd.lal.CreateTukeyREAL8Window")
+    @patch("sgnligo.psd.psd.lal.CreateTukeyREAL8Window")
     def test_movingaverage(self, mock_window):
         """Test moving average function."""
         # Mock the window
@@ -322,10 +322,10 @@ class TestTaperZeroFSeries:
 class TestConditionPSD:
     """Test cases for condition_psd function."""
 
-    @patch("sgnligo.psd.HorizonDistance")
-    @patch("sgnligo.psd.interpolate_psd")
-    @patch("sgnligo.psd.movingmedian")
-    @patch("sgnligo.psd.movingaverage")
+    @patch("sgnligo.psd.psd.HorizonDistance")
+    @patch("sgnligo.psd.psd.interpolate_psd")
+    @patch("sgnligo.psd.psd.movingmedian")
+    @patch("sgnligo.psd.psd.movingaverage")
     def test_condition_psd_frequency_domain(
         self, mock_avg, mock_median, mock_interp, mock_horizon
     ):
@@ -372,10 +372,10 @@ class TestConditionPSD:
         # Check that horizon distance normalization was called
         assert mock_horizon_instance.call_count == 2
 
-    @patch("sgnligo.psd.HorizonDistance")
-    @patch("sgnligo.psd.interpolate_psd")
-    @patch("sgnligo.psd.movingmedian")
-    @patch("sgnligo.psd.movingaverage")
+    @patch("sgnligo.psd.psd.HorizonDistance")
+    @patch("sgnligo.psd.psd.interpolate_psd")
+    @patch("sgnligo.psd.psd.movingmedian")
+    @patch("sgnligo.psd.psd.movingaverage")
     def test_condition_psd_time_domain(
         self, mock_avg, mock_median, mock_interp, mock_horizon, mock_psd
     ):
@@ -397,7 +397,7 @@ class TestConditionPSD:
         # Check that tapering was NOT applied for time domain
         assert not np.any(np.isinf(result.data.data))
 
-    @patch("sgnligo.psd.HorizonDistance")
+    @patch("sgnligo.psd.psd.HorizonDistance")
     def test_condition_psd_with_tapering(self, mock_horizon):
         """Test conditioning PSD with tapering for frequency domain."""
         # Create a real PSD
@@ -490,7 +490,7 @@ class TestHarmonicMean:
 class TestHorizonDistance:
     """Test cases for HorizonDistance class."""
 
-    @patch("sgnligo.psd.lalsimulation.SimInspiralFD")
+    @patch("sgnligo.psd.psd.lalsimulation.SimInspiralFD")
     def test_horizon_distance_init(self, mock_sim_inspiral):
         """Test HorizonDistance initialization."""
         # Mock the waveform generation
@@ -524,8 +524,8 @@ class TestHorizonDistance:
         assert isinstance(hd.model, lal.REAL8FrequencySeries)
         assert hd.model.data.length == 100
 
-    @patch("sgnligo.psd.lalsimulation.SimInspiralFD")
-    @patch("sgnligo.psd.lalsimulation.GetApproximantFromString")
+    @patch("sgnligo.psd.psd.lalsimulation.SimInspiralFD")
+    @patch("sgnligo.psd.psd.lalsimulation.GetApproximantFromString")
     def test_horizon_distance_call(self, mock_get_approx, mock_sim_inspiral, mock_psd):
         """Test computing horizon distance."""
         # Mock the waveform generation
@@ -551,7 +551,7 @@ class TestHorizonDistance:
         assert isinstance(model, np.ndarray)
         assert len(f) == len(model)
 
-    @patch("sgnligo.psd.lalsimulation.SimInspiralFD")
+    @patch("sgnligo.psd.psd.lalsimulation.SimInspiralFD")
     def test_horizon_distance_zero_length_error(self, mock_sim_inspiral):
         """Test that zero-length waveform raises assertion error."""
         # Mock zero-length waveform
