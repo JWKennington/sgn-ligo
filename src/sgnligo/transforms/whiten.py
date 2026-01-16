@@ -673,11 +673,6 @@ def kernel_from_psd(
         # The peak of the LP filter is now at index `delay_samples`
         latency = int(delay_samples)
 
-    # Normalize energy
-    norm = np.linalg.norm(taps)
-    if norm > 0:
-        taps /= norm
-
     return Kernel(fir_matrix=taps, latency=latency)
 
 
