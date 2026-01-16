@@ -3,17 +3,19 @@
 This module provides the MockGWEventSource class which generates realistic mock
 gravitational wave detection events with proper SNR, timing, and phase calculations.
 Events are output as coinc XML files (in-memory bytes) on pipeline-named pads
-(sgnl, pycbc, mbta, spiir) with configurable latencies to simulate real pipelines.
+(SGNL, pycbc, MBTA, spiir) with configurable latencies to simulate real pipelines.
 """
 
 from __future__ import annotations
 
+import base64
+import gzip
 import io
 import math
 import time
 import warnings
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import lal
 import lal.series as lalseries
@@ -28,9 +30,9 @@ with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=UserWarning, module="igwn_ligolw.param")
     from igwn_ligolw.ligolw import Param as ligolw_param
 
-from sgn.base import SourcePad
+from sgn.base import SourceElement, SourcePad
 from sgn.frames import Frame
-from sgnts.base import TSSource
+from sgn.sources import SignalEOS
 
 from sgnligo.base import now
 from sgnligo.psd import HorizonDistance, effective_distance_factor, fake_gwdata_psd
@@ -64,23 +66,23 @@ SOURCE_TYPE_PARAMS = {
 
 # Default pipeline latencies (mean, std) in seconds
 DEFAULT_PIPELINE_LATENCIES = {
-    "sgnl": (6.0, 1.0),
+    "SGNL": (6.0, 1.0),
     "pycbc": (30.0, 5.0),
-    "mbta": (10.0, 2.0),
+    "MBTA": (10.0, 2.0),
     "spiir": (8.0, 1.5),
+}
+
+# Default pipeline multiplicity (min, max) triggers per event
+DEFAULT_PIPELINE_MULTIPLICITY = {
+    "SGNL": (1, 3),
+    "pycbc": (1, 3),
+    "MBTA": (1, 3),
+    "spiir": (1, 3),
 }
 
 # Effective bandwidth for timing uncertainty (Hz)
 # Typical values: BBH ~50 Hz, BNS ~100 Hz
 EFFECTIVE_BANDWIDTH_HZ = 80.0
-
-
-# =============================================================================
-# LIGOLW Content Handler Setup
-# =============================================================================
-
-# Note: igwn_ligolw now handles custom table support automatically
-# when lsctables is imported - no decorators needed
 
 
 # =============================================================================
@@ -724,10 +726,13 @@ def _build_coinc_xmldoc(
                 trigger.mass2,
                 psds[trigger.ifo],
             )
+            # Set the time series name to include the IFO for easy identification
+            ts.name = f"snr_{trigger.ifo}"
             snr_ts_element = lalseries.build_COMPLEX8TimeSeries(ts)
             snr_ts_element.appendChild(
                 ligolw_param.from_pyvalue("event_id", row.event_id)
             )
+            snr_ts_element.appendChild(ligolw_param.from_pyvalue("ifo", trigger.ifo))
             xmldoc.childNodes[-1].appendChild(snr_ts_element)
 
     # Add coinc inspiral table
@@ -772,7 +777,7 @@ def _serialize_xmldoc(xmldoc: ligolw.Document) -> bytes:
 
 
 @dataclass
-class MockGWEventSource(TSSource):
+class MockGWEventSource(SourceElement, SignalEOS):
     """Source element to generate mock GW events with GraceDB-compatible coinc XML.
 
     Generates realistic gravitational wave detection events with proper SNR,
@@ -780,40 +785,42 @@ class MockGWEventSource(TSSource):
     (in-memory bytes) on pipeline-named pads (sgnl, pycbc, mbta, spiir) with
     configurable latencies to simulate real pipeline behavior.
 
-    The source synchronizes with real GPS time when real_time=True and generates
-    events at a configurable cadence (default: every 20 seconds).
+    The source runs in simulated real-time mode, starting at GPS now and
+    emitting events at wall-clock times that match their GPS report times.
+
+    Architecture:
+        1. Scheduler (in internal): Schedules coalescences and distributes to pipelines
+        2. Generator (in internal): Pre-generates XML for events within lookahead window
+        3. Emitter (in new): Simple queue lookup, returns ready events or gap frames
 
     Args:
         event_cadence: Seconds between coalescence times (default: 20.0)
-        t0: Start GPS time. If None, uses current GPS time.
-        end: End GPS time. If None and real_time=True, runs indefinitely.
-        duration: Duration in seconds. Cannot combine with end.
+        lookahead: Pre-generate events this far ahead in seconds (default: 60.0)
+        stride: Max blocking time in seconds when no events ready (default: 1.0)
         ifos: List of detectors (default: ["H1", "L1", "V1"])
         source_types: List of source types to generate (default: ["bns", "nsbh", "bbh"])
         source_weights: Weights for source type selection (default: [0.6, 0.2, 0.2])
         pipeline_latencies: Dict mapping pipeline name to (mean, std) latency in seconds
+        pipeline_multiplicity: Dict mapping pipeline name to (min, max) triggers per
+            event. Models pipelines producing multiple coinc events for different
+            template bank points matching the same signal (default: (1, 3) for all)
         template_min_match: Template bank minimum match (default: 0.97)
         snr_threshold: Minimum SNR for detection (default: 4.0)
         sky_position: "overhead" for State College overhead, "random" for uniform sky
         latitude_rad: Observer latitude for overhead position (default: State College)
         longitude_rad: Observer longitude for overhead position (default: State College)
         include_snr_series: Include SNR time series in XML (default: True)
-        real_time: If True, sync with wall clock time
         verbose: If True, print additional information
 
     Example:
-        >>> source = MockGWEventSource(
-        ...     event_cadence=20.0,
-        ...     ifos=["H1", "L1", "V1"],
-        ...     real_time=True,
-        ... )
-        >>> # Connect to pipeline - each pad produces EventFrames with XML bytes
-        >>> # source.srcs["sgnl"] -> events with ~6s latency
-        >>> # source.srcs["pycbc"] -> events with ~30s latency
+        >>> source = MockGWEventSource()
+        >>> # Runs in real-time from GPS now, emitting events with pipeline latencies
     """
 
     # Event scheduling
     event_cadence: float = 20.0
+    lookahead: float = 60.0
+    stride: float = 1.0
 
     # Detector configuration
     ifos: List[str] = field(default_factory=lambda: ["H1", "L1", "V1"])
@@ -824,6 +831,9 @@ class MockGWEventSource(TSSource):
 
     # Pipeline latencies (mean, std) in seconds
     pipeline_latencies: Optional[Dict[str, Tuple[float, float]]] = None
+
+    # Pipeline multiplicity (min, max) triggers per event
+    pipeline_multiplicity: Optional[Dict[str, Tuple[int, int]]] = None
 
     # Noise model parameters
     template_min_match: float = 0.97
@@ -836,69 +846,59 @@ class MockGWEventSource(TSSource):
 
     # Output options
     include_snr_series: bool = True
-
-    # Real-time mode
-    real_time: bool = False
     verbose: bool = False
 
     def __post_init__(self):
         """Initialize the source after creation."""
-        # Validate parameters
-        if not self.real_time and self.end is None and self.duration is None:
-            raise ValueError(
-                "When real_time is False, either end or duration must be specified"
-            )
-
         # Set default pipeline latencies
         if self.pipeline_latencies is None:
             self.pipeline_latencies = DEFAULT_PIPELINE_LATENCIES.copy()
 
+        # Set default pipeline multiplicity
+        if self.pipeline_multiplicity is None:
+            self.pipeline_multiplicity = DEFAULT_PIPELINE_MULTIPLICITY.copy()
+
         # Set source pad names to pipeline names
         self.source_pad_names = list(self.pipeline_latencies.keys())
-
-        # Set t0 if not provided
-        if self.t0 is None:
-            self.t0 = int(now())
-            if self.verbose:
-                print(f"Using current GPS time as start: {self.t0}")
 
         # Call parent's post_init
         super().__post_init__()
 
+        # Timing: GPS start = now, track wall time offset
+        self._gps_start = float(now())
+        self._wall_start = time.time()
+
         # Initialize PSDs
         self._psds = fake_gwdata_psd(self.ifos)
 
-        # Initialize event state
-        self._central_event_queue: List[_CoincEvent] = []
-        self._pipeline_queues: Dict[str, List[Tuple[float, _CoincEvent]]] = {
+        # Event ID counter
+        self._next_event_id = 0
+
+        # Next coalescence time to schedule
+        self._next_coalescence_gps = self._gps_start + self.event_cadence
+
+        # Stage 1: Pending events (scheduled but not yet generated)
+        # List of (coalescence_gps, report_gps, event, pipeline)
+        self._pending_events: List[Tuple[float, float, _CoincEvent, str]] = []
+
+        # Stage 2: Ready queues (generated and ready to emit)
+        # pipeline -> [(report_gps, frame_data_dict), ...]
+        self._ready_queues: Dict[str, List[Tuple[float, Dict[str, Any]]]] = {
             p: [] for p in self.source_pad_names
         }
-        self._next_event_id = 0
-        self._next_event_time = self.t0 + self.event_cadence
-        self._events_per_pipeline: Dict[str, int] = {
-            p: 0 for p in self.source_pad_names
-        }
-
-        # Real-time tracking
-        if self.real_time:
-            self._start_wall_time = time.time()
-            self._start_gps_time = self.t0
 
         if self.verbose:
             print("MockGWEventSource initialized:")
+            print(f"  GPS start: {self._gps_start}")
             print(f"  Pipelines: {self.source_pad_names}")
             print(f"  Detectors: {self.ifos}")
             print(f"  Event cadence: {self.event_cadence}s")
-            print(f"  Source types: {self.source_types}")
+            print(f"  Lookahead: {self.lookahead}s")
+            print(f"  Stride: {self.stride}s")
 
-    def _get_current_gps(self) -> float:
-        """Get current GPS time based on data progress."""
-        # Use the base class tracking of current time
-        return (
-            self.t0 + (time.time() - self._start_wall_time)
-            if self.real_time
-            else self.t0
-        )
+    def _current_gps(self) -> float:
+        """Get current GPS time based on wall clock."""
+        return self._gps_start + (time.time() - self._wall_start)
 
     def _generate_source_params(self) -> Dict:
         """Generate random source parameters based on source type distribution."""
@@ -969,6 +969,18 @@ class MockGWEventSource(TSSource):
             self.ifos,
         )
 
+        # Apply template mismatch ONCE for the whole event
+        # In real searches, all detectors are matched to the same template
+        _, mass1_template, mass2_template = _apply_template_mismatch(
+            1.0,  # SNR doesn't matter here, just getting template masses
+            params["mass1"],
+            params["mass2"],
+            self.template_min_match,
+        )
+
+        # The match factor (SNR reduction) is also the same for all detectors
+        match_factor = numpy.random.uniform(self.template_min_match, 1.0)
+
         # Generate triggers for each detector
         triggers = []
         for ifo in self.ifos:
@@ -986,15 +998,8 @@ class MockGWEventSource(TSSource):
                 self._psds[ifo],
             )
 
-            # Apply template mismatch
-            snr_after_mismatch, mass1_template, mass2_template = (
-                _apply_template_mismatch(
-                    snr_optimal,
-                    params["mass1"],
-                    params["mass2"],
-                    self.template_min_match,
-                )
-            )
+            # Apply SNR reduction from template mismatch
+            snr_after_mismatch = snr_optimal * match_factor
 
             # Skip if below threshold
             if snr_after_mismatch < self.snr_threshold:
@@ -1038,116 +1043,211 @@ class MockGWEventSource(TSSource):
         )
         self._next_event_id += 1
 
-        if self.verbose:
-            print(
-                f"Generated event {event.event_id}: {params['source_type']} "
-                f"at t={t_co_gps:.1f}, network SNR={event.network_snr:.1f}, "
-                f"IFOs={event.ifos}"
-            )
-
         return event
 
-    def _distribute_event_to_pipelines(self, event: _CoincEvent, current_gps: float):
-        """Distribute an event to pipeline queues with appropriate latencies."""
-        assert self.pipeline_latencies is not None  # Set in __post_init__
+    def _create_event_variant(self, event: _CoincEvent) -> _CoincEvent:
+        """Create a variant of an event with slightly different template parameters.
+
+        Models different template bank points matching the same signal, with
+        small variations in recovered masses, SNR, timing, and phase.
+        """
+        # Create modified triggers with template variations
+        variant_triggers = []
+        for trigger in event.triggers:
+            # Small mass variations (different template bank point)
+            mass_jitter = numpy.random.normal(0, 0.02)  # ~2% variation
+            new_mass1 = trigger.mass1 * (1 + mass_jitter)
+            new_mass2 = trigger.mass2 * (1 + mass_jitter)
+
+            # Slightly reduced SNR (suboptimal template match)
+            snr_reduction = numpy.random.uniform(0.95, 1.0)
+            new_snr = trigger.snr * snr_reduction
+
+            # Small timing jitter
+            timing_jitter = numpy.random.normal(0, 0.001)  # ~1ms
+            new_end_time = trigger.end_time + timing_jitter
+
+            # Small phase variation
+            phase_jitter = numpy.random.normal(0, 0.1)  # ~0.1 rad
+            new_phase = (trigger.coa_phase + phase_jitter) % (2 * math.pi)
+
+            variant_triggers.append(
+                _SingleTrigger(
+                    ifo=trigger.ifo,
+                    end_time=new_end_time,
+                    snr=new_snr,
+                    coa_phase=new_phase,
+                    mass1=new_mass1,
+                    mass2=new_mass2,
+                    spin1z=trigger.spin1z,
+                    spin2z=trigger.spin2z,
+                    eff_distance=trigger.eff_distance,
+                    channel=trigger.channel,
+                )
+            )
+
+        # Create variant event with new ID
+        variant = _CoincEvent(
+            event_id=self._next_event_id,
+            t_co_gps=event.t_co_gps,
+            triggers=variant_triggers,
+            far=event.far * numpy.random.uniform(0.5, 2.0),  # Slight FAR variation
+            source_type=event.source_type,
+        )
+        self._next_event_id += 1
+
+        return variant
+
+    def _schedule_coalescence(self, t_co_gps: float) -> None:
+        """Schedule a coalescence: generate event and distribute to pipeline queues."""
+        event = self._generate_event(t_co_gps)
+
+        if self.verbose:
+            print(
+                f"Scheduled coalescence at GPS {t_co_gps:.1f}: "
+                f"{event.source_type}, network SNR={event.network_snr:.1f}"
+            )
+
+        assert self.pipeline_latencies is not None
+        assert self.pipeline_multiplicity is not None
+
         for pipeline, (mean_latency, std_latency) in self.pipeline_latencies.items():
-            # Sample latency from Gaussian (clamped to positive)
-            latency = max(1.0, numpy.random.normal(mean_latency, std_latency))
-            report_time = event.t_co_gps + latency
+            # Determine how many triggers this pipeline produces
+            min_mult, max_mult = self.pipeline_multiplicity.get(pipeline, (1, 1))
+            n_triggers = numpy.random.randint(min_mult, max_mult + 1)
 
-            # Add to pipeline queue
-            self._pipeline_queues[pipeline].append((report_time, event))
+            for i in range(n_triggers):
+                # Sample latency from Gaussian (clamped to positive)
+                latency = max(1.0, numpy.random.normal(mean_latency, std_latency))
+                report_time = t_co_gps + latency
 
-            if self.verbose:
-                print(
-                    f"  -> {pipeline} will report at t={report_time:.1f} "
-                    f"(latency={latency:.1f}s)"
+                # First trigger uses original event, others use variants
+                if i == 0:
+                    trigger_event = event
+                else:
+                    trigger_event = self._create_event_variant(event)
+
+                # Add to pending events
+                self._pending_events.append(
+                    (t_co_gps, report_time, trigger_event, pipeline)
                 )
 
-    def _maybe_generate_events(self, current_gps: float):
-        """Generate new events if it's time."""
-        while current_gps >= self._next_event_time:
-            event = self._generate_event(self._next_event_time)
-            self._central_event_queue.append(event)
-            self._distribute_event_to_pipelines(event, current_gps)
-            self._next_event_time += self.event_cadence
+                if self.verbose:
+                    print(
+                        f"  -> {pipeline} trigger {i+1}/{n_triggers} "
+                        f"(event {trigger_event.event_id}) "
+                        f"report at GPS {report_time:.1f} (latency={latency:.1f}s)"
+                    )
 
-    def _get_ready_events(self, pipeline: str, current_gps: float) -> List[_CoincEvent]:
-        """Get events ready to report for a pipeline."""
-        ready = []
+    def _pregenerate_pending_events(self, lookahead_gps: float) -> None:
+        """Pre-generate XML for pending events within lookahead window."""
         remaining = []
 
-        for report_time, event in self._pipeline_queues[pipeline]:
-            if current_gps >= report_time:
-                ready.append(event)
-            else:
-                remaining.append((report_time, event))
-
-        self._pipeline_queues[pipeline] = remaining
-        return ready
-
-    def new(self, pad: SourcePad) -> Frame:
-        """Generate a new frame for the specified pad.
-
-        Returns a Frame containing coinc XML bytes if events are ready,
-        or a gap frame otherwise.
-        """
-        pipeline = self.rsrcs[pad]
-        current_gps = self._get_current_gps()
-
-        # Check for ready events
-        ready_events = self._get_ready_events(pipeline, current_gps)
-
-        if ready_events:
-            # Build XML for the first ready event
-            event = ready_events[0]
-            xmldoc = _build_coinc_xmldoc(
-                event, pipeline, self._psds, self.include_snr_series
-            )
-            xml_bytes = _serialize_xmldoc(xmldoc)
-
-            self._events_per_pipeline[pipeline] += 1
-
-            if self.verbose:
-                print(
-                    f"{pipeline}: Output event {event.event_id} "
-                    f"at GPS {current_gps:.1f}"
+        for t_co, report_time, event, pipeline in self._pending_events:
+            if report_time <= lookahead_gps:
+                # Generate XML and add to ready queue
+                xmldoc = _build_coinc_xmldoc(
+                    event, pipeline, self._psds, self.include_snr_series
                 )
+                xml_bytes = _serialize_xmldoc(xmldoc)
 
-            # Return frame with XML bytes as data
-            return Frame(
-                EOS=False,
-                is_gap=False,
-                data={
-                    "xml": xml_bytes,
+                # Gzip then base64 encode for efficient transport
+                xml_compressed = gzip.compress(xml_bytes)
+
+                frame_data = {
+                    "xml": base64.b64encode(xml_compressed).decode("ascii"),
                     "event_id": event.event_id,
                     "pipeline": pipeline,
-                },
-                metadata={
-                    "t_co_gps": event.t_co_gps,
-                    "network_snr": event.network_snr,
-                },
-            )
-        else:
-            # Return gap frame
-            return Frame(EOS=False, is_gap=True, data=None, metadata={})
+                    "gpstime": event.t_co_gps,
+                    "snr": event.network_snr,
+                    "ifos": ",".join(event.ifos),
+                    "far": event.far,
+                }
+
+                self._ready_queues[pipeline].append((report_time, frame_data))
+
+                if self.verbose:
+                    print(
+                        f"Pre-generated XML for {pipeline} event {event.event_id} "
+                        f"(report at GPS {report_time:.1f})"
+                    )
+            else:
+                remaining.append((t_co, report_time, event, pipeline))
+
+        self._pending_events = remaining
+
+        # Sort ready queues by report time
+        for pipeline in self._ready_queues:
+            self._ready_queues[pipeline].sort(key=lambda x: x[0])
+
+    def _earliest_ready_event_time(self) -> Optional[float]:
+        """Find the earliest report time across all ready queues."""
+        earliest = None
+        for queue in self._ready_queues.values():
+            if queue:
+                report_time = queue[0][0]
+                if earliest is None or report_time < earliest:
+                    earliest = report_time
+        return earliest
+
+    def _any_event_ready(self, current_gps: float) -> bool:
+        """Check if any event is ready to emit."""
+        for queue in self._ready_queues.values():
+            if queue and queue[0][0] <= current_gps:
+                return True
+        return False
 
     def internal(self) -> None:
-        """Handle event scheduling and real-time synchronization."""
-        super().internal()
+        """Handle event scheduling, pre-generation, and timing."""
+        current_gps = self._current_gps()
+        lookahead_gps = current_gps + self.lookahead
 
-        current_gps = self._get_current_gps()
+        # Stage 1: Schedule new coalescences within lookahead
+        while self._next_coalescence_gps <= lookahead_gps:
+            self._schedule_coalescence(self._next_coalescence_gps)
+            self._next_coalescence_gps += self.event_cadence
 
-        # Generate new events if needed
-        self._maybe_generate_events(current_gps)
+        # Stage 2: Pre-generate XML for pending events within lookahead
+        self._pregenerate_pending_events(lookahead_gps)
 
-        # Real-time synchronization
-        if self.real_time:
-            data_elapsed = current_gps - self._start_gps_time
-            wall_elapsed = time.time() - self._start_wall_time
-            sleep_time = data_elapsed - wall_elapsed
+        # Stage 3: Determine if we need to block
+        if not self._any_event_ready(current_gps):
+            # Nothing ready - block for at most stride seconds
+            earliest = self._earliest_ready_event_time()
+            if earliest is not None:
+                wait_time = min(self.stride, earliest - current_gps)
+            else:
+                wait_time = self.stride
 
-            if sleep_time > 0.1:
-                time.sleep(sleep_time)
-            elif sleep_time < -5.0 and self.verbose:
-                print(f"Warning: Running {-sleep_time:.1f}s behind real-time")
+            if wait_time > 0:
+                time.sleep(wait_time)
+
+    def new(self, pad: SourcePad) -> Frame:
+        """Return next ready event for this pad, or a gap frame.
+
+        This is a simple queue lookup - all heavy lifting is done in internal().
+        """
+        # Check for signal-based EOS
+        if self.signaled_eos():
+            return Frame(EOS=True, is_gap=False, data=None, metadata={})
+
+        pipeline = self.rsrcs[pad]
+        current_gps = self._current_gps()
+
+        # Check for ready event
+        if self._ready_queues[pipeline]:
+            report_time, frame_data = self._ready_queues[pipeline][0]
+            if current_gps >= report_time:
+                # Event is ready - pop and return it
+                self._ready_queues[pipeline].pop(0)
+
+                if self.verbose:
+                    print(
+                        f"{pipeline}: Emitting event {frame_data['event_id']} "
+                        f"at GPS {current_gps:.1f}"
+                    )
+
+                return Frame(EOS=False, is_gap=False, data=frame_data, metadata={})
+
+        # Nothing ready - return gap frame
+        return Frame(EOS=False, is_gap=True, data=None, metadata={})

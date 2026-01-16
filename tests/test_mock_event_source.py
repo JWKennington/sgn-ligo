@@ -1,5 +1,6 @@
 """Tests for MockGWEventSource and its helper functions."""
 
+import base64
 import io
 import math
 
@@ -213,7 +214,7 @@ class TestXMLGeneration:
     def test_build_coinc_xmldoc(self, sample_event, psds):
         """Test coinc XML document building."""
         xmldoc = _build_coinc_xmldoc(
-            sample_event, pipeline="sgnl", psds=psds, include_snr_series=True
+            sample_event, pipeline="SGNL", psds=psds, include_snr_series=True
         )
 
         # Check required tables exist
@@ -233,7 +234,7 @@ class TestXMLGeneration:
     def test_serialize_xmldoc(self, sample_event, psds):
         """Test XML serialization to bytes."""
         xmldoc = _build_coinc_xmldoc(
-            sample_event, pipeline="sgnl", psds=psds, include_snr_series=False
+            sample_event, pipeline="SGNL", psds=psds, include_snr_series=False
         )
         xml_bytes = _serialize_xmldoc(xmldoc)
 
@@ -325,15 +326,11 @@ class TestMockGWEventSourceInit:
 
     def test_default_initialization(self):
         """Test source initializes with defaults."""
-        source = MockGWEventSource(
-            t0=1000000000.0,
-            duration=100.0,
-            real_time=False,
-        )
+        source = MockGWEventSource()
 
         assert source.event_cadence == 20.0
         assert source.ifos == ["H1", "L1", "V1"]
-        assert "sgnl" in source.source_pad_names
+        assert "SGNL" in source.source_pad_names
         assert "pycbc" in source.source_pad_names
 
     def test_custom_pipeline_latencies(self):
@@ -344,23 +341,19 @@ class TestMockGWEventSourceInit:
         }
 
         source = MockGWEventSource(
-            t0=1000000000.0,
-            duration=100.0,
-            real_time=False,
             pipeline_latencies=custom_latencies,
         )
 
         assert "fast_pipeline" in source.source_pad_names
         assert "slow_pipeline" in source.source_pad_names
-        assert "sgnl" not in source.source_pad_names
+        assert "SGNL" not in source.source_pad_names
 
-    def test_requires_end_or_duration(self):
-        """Test that non-realtime mode requires end or duration."""
-        with pytest.raises(ValueError, match="either end or duration"):
-            MockGWEventSource(
-                t0=1000000000.0,
-                real_time=False,
-            )
+    def test_custom_event_cadence(self):
+        """Test custom event cadence configuration."""
+        source = MockGWEventSource(
+            event_cadence=10.0,
+        )
+        assert source.event_cadence == 10.0
 
 
 class TestMockGWEventSourceEventGeneration:
@@ -370,11 +363,7 @@ class TestMockGWEventSourceEventGeneration:
         """Test source parameter generation."""
         numpy.random.seed(42)
 
-        source = MockGWEventSource(
-            t0=1000000000.0,
-            duration=100.0,
-            real_time=False,
-        )
+        source = MockGWEventSource()
 
         params = source._generate_source_params()
 
@@ -389,9 +378,6 @@ class TestMockGWEventSourceEventGeneration:
         numpy.random.seed(42)
 
         source = MockGWEventSource(
-            t0=1000000000.0,
-            duration=100.0,
-            real_time=False,
             ifos=["H1", "L1"],
         )
 
@@ -415,12 +401,12 @@ class TestCoincXMLSink:
 
         sink = CoincXMLSink(
             output_dir=str(tmp_path),
-            pipelines=["sgnl", "pycbc"],
+            pipelines=["SGNL", "pycbc"],
             verbose=False,
         )
 
         assert sink.output_dir == str(tmp_path)
-        assert "sgnl" in sink.sink_pad_names
+        assert "SGNL" in sink.sink_pad_names
         assert "pycbc" in sink.sink_pad_names
 
     def test_sink_writes_xml(self, tmp_path):
@@ -431,7 +417,7 @@ class TestCoincXMLSink:
 
         sink = CoincXMLSink(
             output_dir=str(tmp_path),
-            pipelines=["sgnl"],
+            pipelines=["SGNL"],
             verbose=False,
         )
 
@@ -458,19 +444,24 @@ class TestCoincXMLSink:
 
         # Build XML
         psds = fake_gwdata_psd(["H1", "L1"])
-        xmldoc = _build_coinc_xmldoc(event, "sgnl", psds, include_snr_series=False)
+        xmldoc = _build_coinc_xmldoc(event, "SGNL", psds, include_snr_series=False)
         xml_bytes = _serialize_xmldoc(xmldoc)
 
-        # Create frame
+        # Create frame with base64-encoded XML
         frame = Frame(
             EOS=False,
             is_gap=False,
-            data={"xml": xml_bytes, "event_id": 1, "pipeline": "sgnl"},
-            metadata={"t_co_gps": 1000000000.0},
+            data={
+                "xml": base64.b64encode(xml_bytes).decode("ascii"),
+                "event_id": 1,
+                "pipeline": "SGNL",
+                "gpstime": 1000000000.0,
+            },
+            metadata={},
         )
 
         # Send to sink
-        sink.pull(sink.snks["sgnl"], frame)
+        sink.pull(sink.snks["SGNL"], frame)
 
         # Check file was written
         output_files = list(tmp_path.glob("*.xml"))
@@ -479,4 +470,4 @@ class TestCoincXMLSink:
         # Check stats
         stats = sink.get_stats()
         assert stats["total"] == 1
-        assert stats["per_pipeline"]["sgnl"] == 1
+        assert stats["per_pipeline"]["SGNL"] == 1

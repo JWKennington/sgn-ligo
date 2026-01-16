@@ -7,6 +7,8 @@ XML files, with optional verbose output showing event details.
 
 from __future__ import annotations
 
+import base64
+import gzip
 import io
 import os
 from dataclasses import dataclass
@@ -16,6 +18,9 @@ from igwn_ligolw import lsctables
 from igwn_ligolw import utils as ligolw_utils
 from sgn.base import SinkElement, SinkPad
 from sgn.frames import Frame
+
+# Gzip magic header bytes (same as used internally by gzip module)
+GZIP_MAGIC = b"\x1f\x8b"
 
 
 def _format_gps_time(gps_sec: int, gps_ns: int) -> str:
@@ -153,7 +158,7 @@ class CoincXMLSink(SinkElement):
         """Initialize the sink after creation."""
         # Set default pipelines
         if self.pipelines is None:
-            self.pipelines = ["sgnl", "pycbc", "mbta", "spiir"]
+            self.pipelines = ["SGNL", "pycbc", "MBTA", "spiir"]
 
         # Set sink pad names
         self.sink_pad_names = list(self.pipelines)
@@ -197,32 +202,52 @@ class CoincXMLSink(SinkElement):
         pipeline = self.rsnks[pad]
 
         # Extract data from frame
-        xml_bytes = frame.data.get("xml")
+        xml_b64 = frame.data.get("xml")
         event_id = frame.data.get("event_id", self._event_counts[pipeline])
 
-        if xml_bytes is None:
+        if xml_b64 is None:
             return
 
+        # Decode base64 data
+        xml_data = base64.b64decode(xml_b64)
+
+        # Check if data is gzip compressed
+        is_gzipped = len(xml_data) >= 2 and xml_data[:2] == GZIP_MAGIC
+
         # Generate output filename
-        gps_time = frame.metadata.get("t_co_gps", 0)
+        gps_time = frame.data.get("gpstime", 0)
         filename = self.filename_template.format(
             event_id=event_id,
             pipeline=pipeline,
             gps_time=int(gps_time),
         )
-        if self.compress and not filename.endswith(".gz"):
-            filename += ".gz"
 
-        output_path = os.path.join(self.output_dir, filename)
-
-        # Write the XML file
-        with open(output_path, "wb") as f:
-            if self.compress:
-                import gzip
-
-                f.write(gzip.compress(xml_bytes))
-            else:
-                f.write(xml_bytes)
+        # Determine output format and adjust filename
+        if is_gzipped:
+            # Data is already gzipped - write directly as .xml.gz
+            if not filename.endswith(".gz"):
+                filename = filename.replace(".xml", ".xml.gz")
+                if not filename.endswith(".gz"):
+                    filename += ".gz"
+            output_path = os.path.join(self.output_dir, filename)
+            with open(output_path, "wb") as f:
+                f.write(xml_data)
+            # Decompress for summary parsing
+            xml_bytes = gzip.decompress(xml_data)
+        elif self.compress:
+            # Data is not gzipped but user wants compression
+            if not filename.endswith(".gz"):
+                filename += ".gz"
+            output_path = os.path.join(self.output_dir, filename)
+            with open(output_path, "wb") as f:
+                f.write(gzip.compress(xml_data))
+            xml_bytes = xml_data
+        else:
+            # Write as plain XML
+            output_path = os.path.join(self.output_dir, filename)
+            with open(output_path, "wb") as f:
+                f.write(xml_data)
+            xml_bytes = xml_data
 
         # Update counts
         self._event_counts[pipeline] += 1
