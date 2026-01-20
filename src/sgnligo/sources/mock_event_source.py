@@ -67,17 +67,26 @@ SOURCE_TYPE_PARAMS = {
 # Default pipeline latencies (mean, std) in seconds
 DEFAULT_PIPELINE_LATENCIES = {
     "SGNL": (6.0, 1.0),
-    "pycbc": (30.0, 5.0),
+    "pycbc": (12.0, 2.0),
     "MBTA": (10.0, 2.0),
     "spiir": (8.0, 1.5),
 }
 
 # Default pipeline multiplicity (min, max) triggers per event
 DEFAULT_PIPELINE_MULTIPLICITY = {
-    "SGNL": (1, 3),
-    "pycbc": (1, 3),
-    "MBTA": (1, 3),
+    "SGNL": (4, 10),
+    "pycbc": (2, 4),
+    "MBTA": (2, 4),
     "spiir": (1, 3),
+}
+
+# Map pipeline names to ligo.skymap-recognized program names
+# (required for phase convention detection in Bayestar)
+PIPELINE_PROGRAM_NAMES = {
+    "SGNL": "sgnl-inspiral",
+    "pycbc": "pycbc",
+    "MBTA": "MBTAOnline",
+    "spiir": "gstlal_inspiral_postcohspiir_online",
 }
 
 # Effective bandwidth for timing uncertainty (Hz)
@@ -646,10 +655,11 @@ def _build_coinc_xmldoc(
     xmldoc = ligolw.Document()
     xmldoc.appendChild(ligolw.LIGO_LW())
 
-    # Add process table
+    # Add process table with ligo.skymap-recognized program name
+    program_name = PIPELINE_PROGRAM_NAMES.get(pipeline, pipeline)
     ligolw_process.register_to_xmldoc(
         xmldoc,
-        f"mock-{pipeline}",
+        program_name,
         {},
         instruments=event.ifos,
         is_online=True,
@@ -726,8 +736,9 @@ def _build_coinc_xmldoc(
                 trigger.mass2,
                 psds[trigger.ifo],
             )
-            # Set the time series name to include the IFO for easy identification
-            ts.name = f"snr_{trigger.ifo}"
+            # ligo.skymap expects the array to be named "snr" (not "snr_H1" etc.)
+            # The IFO is stored in a separate Param element below
+            ts.name = "snr"
             snr_ts_element = lalseries.build_COMPLEX8TimeSeries(ts)
             snr_ts_element.appendChild(
                 ligolw_param.from_pyvalue("event_id", row.event_id)
@@ -1051,13 +1062,15 @@ class MockGWEventSource(SourceElement, SignalEOS):
         Models different template bank points matching the same signal, with
         small variations in recovered masses, SNR, timing, and phase.
         """
+        # Sample mass jitter once for all detectors (they must match the same template)
+        mass_jitter = numpy.random.normal(0, 0.02)  # ~2% variation
+        ref_trigger = event.triggers[0]
+        new_mass1 = ref_trigger.mass1 * (1 + mass_jitter)
+        new_mass2 = ref_trigger.mass2 * (1 + mass_jitter)
+
         # Create modified triggers with template variations
         variant_triggers = []
         for trigger in event.triggers:
-            # Small mass variations (different template bank point)
-            mass_jitter = numpy.random.normal(0, 0.02)  # ~2% variation
-            new_mass1 = trigger.mass1 * (1 + mass_jitter)
-            new_mass2 = trigger.mass2 * (1 + mass_jitter)
 
             # Slightly reduced SNR (suboptimal template match)
             snr_reduction = numpy.random.uniform(0.95, 1.0)
