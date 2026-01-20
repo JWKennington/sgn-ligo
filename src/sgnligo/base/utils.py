@@ -6,9 +6,8 @@
 from __future__ import annotations
 
 import os
-import types
 from datetime import datetime
-from typing import Optional
+from typing import Any, Callable, Optional
 
 import gwpy
 import numpy as np
@@ -105,7 +104,7 @@ def state_vector_on_off_bits(bit):
 
 def parse_list_to_dict(
     lst: list,
-    value_transform: Optional[types.FunctionType] = None,
+    value_transform: Optional[Callable[[Any], Any]] = None,
     sep: str = "=",
     key_is_range: bool = False,
     range_sep: str = ":",
