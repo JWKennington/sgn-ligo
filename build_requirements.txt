@@ -1,5 +1,8 @@
 # Build requirements for SGN family of packages
 
+# gwpy>=3.0.8 required for scipy 1.14+ compatibility
+gwpy>=3.0.8
+
 stillsuit @ git+https://git.ligo.org/greg/stillsuit.git@main
 strike @ git+https://git.ligo.org/greg/strike.git@main
 sgn @ git+https://git.ligo.org/greg/sgn.git@main
