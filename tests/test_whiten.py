@@ -840,3 +840,301 @@ class TestPipelineDriftCorrectionKernel:
 
         # We expect high similarity
         assert similarity > 0.95, f"Similarity {similarity:.4f} too low"
+
+
+class TestWhiteningKernelEdgeCases:
+    """Test edge cases for WhiteningKernel element."""
+
+    def test_old_epoch_skipped(self):
+        """Test that epochs older than or equal to latest are skipped (line 753)."""
+        elem = WhiteningKernel(
+            name="wk",
+            sink_pad_names=("spec",),
+            zero_latency=True,
+        )
+        elem.configure()
+
+        psd = _make_psd()
+
+        # First frame at epoch 100
+        in1 = TSFrame(buffers=[], metadata={"psd": psd, "epoch": 100})
+        out1 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in1, out1)
+        assert len(out1.data) == 1
+
+        # Second frame with same epoch - should be skipped
+        in2 = TSFrame(buffers=[], metadata={"psd": psd, "epoch": 100})
+        out2 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in2, out2)
+        assert len(out2.data) == 0  # Skipped
+
+        # Third frame with older epoch - should be skipped
+        in3 = TSFrame(buffers=[], metadata={"psd": psd, "epoch": 50})
+        out3 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in3, out3)
+        assert len(out3.data) == 0  # Skipped
+
+    def test_psd_similarity_check_skips_update(self, capsys):
+        """Test that stable PSDs skip updates (lines 779-781)."""
+        elem = WhiteningKernel(
+            name="wk",
+            sink_pad_names=("spec",),
+            zero_latency=True,
+            similarity_threshold=0.9999,  # Very high threshold
+            verbose=True,
+        )
+        elem.configure()
+
+        psd = _make_psd(val=1.0)
+
+        # First frame - will process
+        in1 = TSFrame(buffers=[], metadata={"psd": psd, "epoch": 100})
+        out1 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in1, out1)
+        assert len(out1.data) == 1
+
+        # Second frame with same PSD values - should skip due to similarity
+        in2 = TSFrame(buffers=[], metadata={"psd": psd, "epoch": 101})
+        out2 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in2, out2)
+        assert len(out2.data) == 0  # Skipped due to similarity
+
+        captured = capsys.readouterr()
+        assert "PSD stable" in captured.out
+
+    def test_kernel_generation_exception(self, capsys):
+        """Test exception handling during kernel generation (lines 806-808)."""
+        from unittest.mock import patch
+
+        elem = WhiteningKernel(
+            name="wk",
+            sink_pad_names=("spec",),
+            zero_latency=True,
+            verbose=True,
+        )
+        elem.configure()
+
+        psd = _make_psd()
+        input_frame = TSFrame(buffers=[], metadata={"psd": psd, "epoch": 100})
+        output_frame = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+
+        with patch("sgnligo.transforms.whiten.kernel_from_psd") as mock_kernel:
+            mock_kernel.side_effect = ValueError("Test kernel error")
+            elem.process.__wrapped__(elem, input_frame, output_frame)
+
+        # Should catch exception and not produce output
+        assert len(output_frame.data) == 0
+        captured = capsys.readouterr()
+        assert "WhiteningKernel Error" in captured.out
+
+
+class TestDriftCorrectionKernelEdgeCases:
+    """Test edge cases for DriftCorrectionKernel element."""
+
+    def test_old_epoch_skipped(self):
+        """Test that epochs older than or equal to latest are skipped (line 893)."""
+        ref_psd = _make_psd(val=1.0)
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=ref_psd,
+            truncation_samples=64,
+        )
+        elem.configure()
+
+        live_psd = _make_psd(val=4.0)
+
+        # First frame at epoch 100
+        in1 = TSFrame(buffers=[], metadata={"psd": live_psd, "epoch": 100})
+        out1 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in1, out1)
+        assert len(out1.data) == 1
+
+        # Second frame with same epoch - should be skipped
+        in2 = TSFrame(buffers=[], metadata={"psd": live_psd, "epoch": 100})
+        out2 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in2, out2)
+        assert len(out2.data) == 0
+
+    def test_min_update_interval_throttling(self):
+        """Test min_update_interval throttling (lines 896-902)."""
+        ref_psd = _make_psd(val=1.0)
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=ref_psd,
+            truncation_samples=64,
+            min_update_interval=1_000_000_000,  # 1 second in ns
+        )
+        elem.configure()
+
+        live_psd = _make_psd(val=4.0)
+
+        # First frame - should process
+        in1 = TSFrame(buffers=[], metadata={"psd": live_psd, "epoch": 100})
+        out1 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in1, out1)
+        assert len(out1.data) == 1
+
+        # Second frame immediately after - should be throttled
+        live_psd2 = _make_psd(val=5.0)  # Different PSD
+        in2 = TSFrame(buffers=[], metadata={"psd": live_psd2, "epoch": 101})
+        out2 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in2, out2)
+        assert len(out2.data) == 0  # Throttled
+
+    def test_psd_similarity_skips_update(self):
+        """Test that stable PSDs skip updates (line 921)."""
+        ref_psd = _make_psd(val=1.0)
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=ref_psd,
+            truncation_samples=64,
+            similarity_threshold=0.9999,
+        )
+        elem.configure()
+
+        live_psd = _make_psd(val=4.0)
+
+        # First frame - should process
+        in1 = TSFrame(buffers=[], metadata={"psd": live_psd, "epoch": 100})
+        out1 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in1, out1)
+        assert len(out1.data) == 1
+
+        # Second frame with same PSD - should skip due to similarity
+        in2 = TSFrame(buffers=[], metadata={"psd": live_psd, "epoch": 101})
+        out2 = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+        elem.process.__wrapped__(elem, in2, out2)
+        assert len(out2.data) == 0  # Skipped
+
+    def test_correction_kernel_exception(self, capsys):
+        """Test exception handling in correction kernel (lines 947-952)."""
+        from unittest.mock import patch
+
+        ref_psd = _make_psd(val=1.0)
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=ref_psd,
+            truncation_samples=64,
+            verbose=True,
+        )
+        elem.configure()
+
+        live_psd = _make_psd(val=4.0)
+        input_frame = TSFrame(buffers=[], metadata={"psd": live_psd, "epoch": 100})
+        output_frame = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+
+        with patch(
+            "sgnligo.transforms.whiten.correction_kernel_from_psds"
+        ) as mock_kernel:
+            mock_kernel.side_effect = ValueError("Test correction error")
+            elem.process.__wrapped__(elem, input_frame, output_frame)
+
+        # Should catch exception and not produce output
+        assert len(output_frame.data) == 0
+        captured = capsys.readouterr()
+        assert "DriftCorrectionKernel Error" in captured.out
+
+    def test_interpolation_exception(self, capsys):
+        """Test exception handling during PSD interpolation (lines 878-881)."""
+        from unittest.mock import patch
+
+        ref_psd = _make_psd(val=1.0)
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=ref_psd,
+            truncation_samples=64,
+            verbose=True,
+        )
+        elem.configure()
+
+        live_psd = _make_psd(val=4.0)
+
+        # Mock interpolate_psd to raise an exception INSIDE _get_interpolated_reference
+        # This tests the try/except block at lines 878-881
+        with patch(
+            "sgnligo.transforms.whiten.interpolate_psd",
+            side_effect=Exception("Interpolation failed"),
+        ):
+            # Clear the cached interpolated PSD to force re-interpolation
+            elem._interpolated_ref_psd = None
+            result = elem._get_interpolated_reference(live_psd)
+
+        # When exception occurs, method should return None and print error
+        assert result is None
+        captured = capsys.readouterr()
+        assert "DriftCorrection Error interpolating PSD" in captured.out
+
+    def test_interpolated_ref_none_returns(self):
+        """Test process returns early when interpolation is None (line 909)."""
+        from unittest.mock import patch
+
+        ref_psd = _make_psd(val=1.0)
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=ref_psd,
+            truncation_samples=64,
+        )
+        elem.configure()
+
+        live_psd = _make_psd(val=4.0)
+        input_frame = TSFrame(buffers=[], metadata={"psd": live_psd, "epoch": 100})
+        output_frame = EventFrame(data=[], offset=0, noffset=int(TIME_MAX))
+
+        with patch.object(elem, "_get_interpolated_reference", return_value=None):
+            elem.process.__wrapped__(elem, input_frame, output_frame)
+
+        # Should return early, no output
+        assert len(output_frame.data) == 0
+
+    def test_no_reference_psd_verbose_warning(self, capsys):
+        """Test warning printed when no reference_psd and verbose=True (line 836)."""
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=None,  # No reference PSD
+            truncation_samples=64,
+            verbose=True,
+        )
+        elem.configure()
+
+        # Should print warning about missing reference_psd
+        captured = capsys.readouterr()
+        assert (
+            "DriftCorrectionKernel warning: No reference_psd provided" in captured.out
+        )
+
+    def test_interpolation_padding_when_target_longer(self, capsys):
+        """Test PSD padding when target longer than interpolated (line 872)."""
+        from unittest.mock import patch
+
+        ref_psd = _make_psd(val=1.0)
+        elem = DriftCorrectionKernel(
+            name="dk",
+            sink_pad_names=("spec",),
+            reference_psd=ref_psd,
+            truncation_samples=64,
+            verbose=True,
+        )
+        elem.configure()
+
+        # Create a live PSD with more frequency bins than the reference
+        live_psd = _make_psd(val=4.0, length=200)  # Longer than default
+
+        # Mock interpolate_psd to return a shorter PSD
+        with patch("sgnligo.transforms.whiten.interpolate_psd") as mock_interp:
+            short_psd = _make_psd(val=2.0, length=50)  # Shorter than live_psd
+            mock_interp.return_value = short_psd
+
+            result = elem._get_interpolated_reference(live_psd)
+
+        # The result should be padded to match live_psd length
+        assert result is not None
+        assert len(result.data.data) == len(live_psd.data.data)
+        # The padded values should be 0.0
+        assert result.data.data[-1] == 0.0

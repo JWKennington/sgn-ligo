@@ -2146,6 +2146,43 @@ class TestGWpyPlotSink:
         # No plots should be generated from empty buffer
         assert sink.plots_generated == 0
 
+    def test_plot_timeseries_with_xlim(self, tmp_path):
+        """Test _plot_timeseries with xlim parameter set."""
+        from gwpy.timeseries import TimeSeries
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+        from matplotlib.figure import Figure
+
+        from sgnligo.gwpy.sinks import GWpyPlotSink
+
+        sink = GWpyPlotSink(
+            name="plotter",
+            sink_pad_names=("in",),
+            ifo="H1",
+            description="TEST",
+            output_dir=str(tmp_path),
+            plot_type="timeseries",
+        )
+
+        # Create test time series
+        sample_rate = 4096
+        duration = 4.0
+        t = np.arange(0, duration, 1 / sample_rate)
+        data = np.sin(2 * np.pi * 100 * t)
+        ts = TimeSeries(data, t0=1000000000, sample_rate=sample_rate, channel="H1:TEST")
+
+        # Create figure and call _plot_timeseries directly with xlim
+        fig = Figure(figsize=(10, 6))
+        FigureCanvas(fig)
+
+        # Call with xlim set - this exercises line 271
+        sink._plot_timeseries(fig, ts, "Test Title", xlim=(1000000001.0, 1000000003.0))
+
+        # Verify that xlim was applied by checking the axes
+        ax = fig.get_axes()[0]
+        xlim_result = ax.get_xlim()
+        assert xlim_result[0] == 1000000001.0
+        assert xlim_result[1] == 1000000003.0
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

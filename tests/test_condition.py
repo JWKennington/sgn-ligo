@@ -662,3 +662,18 @@ class TestConditionDetailedLatency:
         out = pathlib.Path("condition_detailed_latency.png")
         pipeline.visualize(str(out))
         assert out.exists()
+
+
+class TestConditionEdgeCases:
+    """Test edge cases in the condition function."""
+
+    def test_read_psd_raises_on_missing_file(self):
+        """Test that read_psd raises FileNotFoundError for missing files.
+
+        The condition() function catches this exception at lines 206-207 and
+        prints a warning. We test the underlying behavior here.
+        """
+        from sgnligo.psd import read_psd
+
+        with pytest.raises(FileNotFoundError):
+            read_psd("/nonexistent/path/to/psd.xml", verbose=False)
