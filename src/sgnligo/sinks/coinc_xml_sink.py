@@ -154,7 +154,7 @@ class CoincXMLSink(SinkElement):
     compress: bool = False
     create_dir: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize the sink after creation."""
         # Set default pipelines
         if self.pipelines is None:

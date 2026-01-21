@@ -342,3 +342,84 @@ class TestPSDSinkPipeline:
         )
         assert "psd_in" in psd_dict
         assert psd_dict["psd_in"].data.length > 0
+
+
+class TestPSDSinkEdgeCases:
+    """Test edge cases and error handling in PSDSink."""
+
+    def test_resolve_path_unknown_format_key(self, mock_lal_psd, capsys):
+        """Test that unknown format keys are handled gracefully."""
+        sink = PSDSink(
+            fname="psd-{unknown_key}.xml",
+            sink_pad_names=["H1"],
+            verbose=True,
+        )
+
+        # Add a PSD so we can test _resolve_path
+        sink._current_psds["H1"] = mock_lal_psd(epoch=100)
+
+        path = sink._resolve_path()
+
+        # Should return the original fname (unmodified) and print warning
+        assert path == "psd-{unknown_key}.xml"
+        captured = capsys.readouterr()
+        assert "Unknown format key" in captured.out
+
+    def test_resolve_path_bad_format_string(self, mock_lal_psd, capsys):
+        """Test that malformed format strings are handled gracefully."""
+        sink = PSDSink(
+            fname="psd-{gps:.bad}.xml",  # Invalid format spec
+            sink_pad_names=["H1"],
+            verbose=False,
+        )
+
+        # Add a PSD so we can test _resolve_path
+        sink._current_psds["H1"] = mock_lal_psd(epoch=100)
+
+        path = sink._resolve_path()
+
+        # Should return the original fname (unmodified) and print error
+        assert path == "psd-{gps:.bad}.xml"
+        captured = capsys.readouterr()
+        assert "PSDSink Error: Bad format string" in captured.out
+
+    def test_flush_no_psds_verbose(self, capsys):
+        """Test flush when there are no PSDs with verbose output."""
+        sink = PSDSink(
+            fname="output.xml",
+            sink_pad_names=["H1"],
+            verbose=True,
+        )
+
+        # Ensure no PSDs are stored
+        assert len(sink._current_psds) == 0
+
+        # Call flush directly
+        sink._flush_to_disk()
+
+        # Should print a message and not crash
+        captured = capsys.readouterr()
+        assert "No PSDs to write" in captured.out
+
+    @patch("sgnligo.sinks.psd_sink.PSDWriter")
+    def test_flush_write_exception(self, mock_writer, mock_lal_psd, capsys):
+        """Test that write exceptions are handled gracefully."""
+        sink = PSDSink(
+            fname="output.xml",
+            sink_pad_names=["H1"],
+            verbose=False,
+        )
+
+        # Add a PSD
+        sink._current_psds["H1"] = mock_lal_psd(epoch=100)
+
+        # Make write raise an exception
+        mock_writer.write.side_effect = IOError("Disk full")
+
+        # Call flush directly
+        sink._flush_to_disk()
+
+        # Should print error and not crash
+        captured = capsys.readouterr()
+        assert "PSDSink Error: Failed to write PSD" in captured.out
+        assert "Disk full" in captured.out

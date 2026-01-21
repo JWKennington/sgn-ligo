@@ -1683,7 +1683,7 @@ class TestAddStateVectorGating:
 class TestCLIEdgeCases:
     """Test CLI edge cases for better coverage."""
 
-    def test_get_source_optional_fields_with_default_factory(self):
+    def test_get_source_optional_fields_with_default_factory(self) -> None:
         """Test optional fields with default_factory are handled."""
         from dataclasses import dataclass, field
 

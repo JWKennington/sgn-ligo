@@ -859,7 +859,7 @@ class MockGWEventSource(SourceElement, SignalEOS):
     include_snr_series: bool = True
     verbose: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize the source after creation."""
         # Set default pipeline latencies
         if self.pipeline_latencies is None:
