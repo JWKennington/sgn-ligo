@@ -8,10 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isinf
-from typing import ClassVar, Dict, List, Optional
+from typing import ClassVar, Dict
 
 import lal
-
 from sgnts.compose import TSCompose, TSComposedTransformElement
 from sgnts.sinks import NullSeriesSink
 from sgnts.transforms import AdaptiveCorrelate, Resampler, Threshold
@@ -27,7 +26,9 @@ from sgnligo.transforms.condition_v2.cli_mixins import (
     ZeroLatencyOptionsMixin,
 )
 from sgnligo.transforms.condition_v2.composed_base import ComposedTransformBase
-from sgnligo.transforms.condition_v2.composed_registry import register_composed_transform
+from sgnligo.transforms.condition_v2.composed_registry import (
+    register_composed_transform,
+)
 from sgnligo.transforms.latency import Latency
 from sgnligo.transforms.whiten import DriftCorrectionKernel, Whiten, WhiteningKernel
 
@@ -67,9 +68,9 @@ class ZeroLatencyCondition(
         - spectrum_{ifo}: PSD output for each IFO (metadata with LAL frequency series)
         - {ifo}_whitened_raw: Unused whitened output from Whiten (if not gating)
         - {ifo}_latency: (optional) Latency telemetry if whiten_latency enabled
-        - {ifo}_resamp_latency: (optional) Resampler latency if detailed_latency enabled
-        - {ifo}_whiten_latency: (optional) AFIR whiten latency if detailed_latency enabled
-        - {ifo}_drift_latency: (optional) Drift correction latency if detailed_latency enabled
+        - {ifo}_resamp_latency: (optional) Resampler latency if detailed_latency
+        - {ifo}_whiten_latency: (optional) AFIR whiten latency if detailed_latency
+        - {ifo}_drift_latency: (optional) Drift correction latency if detailed
 
     Example:
         >>> cond = ZeroLatencyCondition(
@@ -113,7 +114,9 @@ class ZeroLatencyCondition(
             try:
                 self._ref_psds = _read_psd(self.reference_psd, verbose=True)
             except Exception as e:
-                print(f"Warning: Could not load reference PSD for drift correction: {e}")
+                print(
+                    f"Warning: Could not load reference PSD for drift correction: {e}"
+                )
 
         return self._ref_psds
 
@@ -127,7 +130,9 @@ class ZeroLatencyCondition(
 
         return compose.as_transform(
             name=self.name,
-            also_expose_source_pads=self._also_expose_pads if self._also_expose_pads else None,
+            also_expose_source_pads=(
+                self._also_expose_pads if self._also_expose_pads else None
+            ),
         )
 
     def _build_ifo_chain(
@@ -268,7 +273,7 @@ class ZeroLatencyCondition(
             # Register for multilink
             self._also_expose_pads.append(f"{current_element.name}:src:{current_pad}")
 
-        # 6. Optional Drift Correction (AFIR 2) - if reference PSD available for this IFO
+        # 6. Optional Drift Correction (AFIR 2) - if reference PSD available
         if has_drift:
             kern_drift = DriftCorrectionKernel(
                 name=f"{self.name}_{ifo}_kern_drift",
@@ -321,7 +326,9 @@ class ZeroLatencyCondition(
                     link_map={ifo: current_pad},
                 )
                 # Register for multilink
-                self._also_expose_pads.append(f"{current_element.name}:src:{current_pad}")
+                self._also_expose_pads.append(
+                    f"{current_element.name}:src:{current_pad}"
+                )
 
         # 7. Optional gating (threshold)
         if not isinf(self.ht_gate_threshold):
