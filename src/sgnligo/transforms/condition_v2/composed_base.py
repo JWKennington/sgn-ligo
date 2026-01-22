@@ -60,8 +60,8 @@ class ComposedTransformBase:
     to pipelines via pipeline.connect(upstream, transform.element, downstream).
 
     Class Attributes:
-        transform_type: String identifier for registry (e.g., "standard", "zero-latency").
-            Leave empty if the transform should not be registered.
+        transform_type: String identifier for registry (e.g., "standard",
+            "zero-latency"). Leave empty if the transform should not be registered.
         description: Human-readable description for help text and documentation.
 
     Example:
