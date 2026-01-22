@@ -26,8 +26,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from typing import Any, ClassVar, Dict, Optional, Protocol, Set
-
+from typing import Any, Dict, Optional, Protocol, Set
 
 # =============================================================================
 # Base Protocol for CLI Mixins
