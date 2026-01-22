@@ -192,7 +192,9 @@ def check_condition_help_options(argv: Optional[List[str]] = None) -> bool:
                 return True
             else:
                 available = ", ".join(sorted(_COMPOSED_TRANSFORM_REGISTRY.keys()))
-                print(f"Unknown condition type '{condition_type}'. Available: {available}")
+                print(
+                    f"Unknown condition type '{condition_type}'. Available: {available}"
+                )
                 return True
         except IndexError:
             print("--help-condition requires a condition type argument")
