@@ -13,12 +13,10 @@ from sgnts.compose import TSComposedTransformElement
 
 from sgnligo.transforms.condition_v2 import (
     Condition,
-    ComposedTransformBase,
     StandardCondition,
     ZeroLatencyCondition,
     get_composed_transform_class,
     list_composed_transform_types,
-    register_composed_transform,
 )
 from sgnligo.transforms.condition_v2.cli import (
     build_condition_cli_parser,
@@ -27,7 +25,6 @@ from sgnligo.transforms.condition_v2.cli import (
     format_condition_list,
     namespace_to_condition_kwargs,
 )
-
 
 # --- Registry Tests ---
 
@@ -289,22 +286,33 @@ class TestCLI:
         """Test that parser has --condition-type argument."""
         parser = build_condition_cli_parser()
         # Parse with required args
-        args = parser.parse_args([
-            "--condition-type", "standard",
-            "--ifos", "H1",
-            "--input-sample-rate", "16384",
-        ])
+        args = parser.parse_args(
+            [
+                "--condition-type",
+                "standard",
+                "--ifos",
+                "H1",
+                "--input-sample-rate",
+                "16384",
+            ]
+        )
         assert args.condition_type == "standard"
 
     def test_namespace_to_condition_kwargs(self):
         """Test converting namespace to kwargs."""
         parser = build_condition_cli_parser()
-        args = parser.parse_args([
-            "--condition-type", "standard",
-            "--ifos", "H1",
-            "--input-sample-rate", "16384",
-            "--whiten-sample-rate", "4096",
-        ])
+        args = parser.parse_args(
+            [
+                "--condition-type",
+                "standard",
+                "--ifos",
+                "H1",
+                "--input-sample-rate",
+                "16384",
+                "--whiten-sample-rate",
+                "4096",
+            ]
+        )
         kwargs = namespace_to_condition_kwargs(args)
         assert kwargs["condition_type"] == "standard"
         assert kwargs["ifos"] == ["H1"]
@@ -316,10 +324,13 @@ class TestCLI:
         cond = Condition.from_argv(
             name="test",
             argv=[
-                "--condition-type", "standard",
-                "--ifos", "H1",
-                "--input-sample-rate", "16384",
-            ]
+                "--condition-type",
+                "standard",
+                "--ifos",
+                "H1",
+                "--input-sample-rate",
+                "16384",
+            ],
         )
         assert cond.condition_type == "standard"
         assert "H1" in cond.snks
@@ -329,11 +340,14 @@ class TestCLI:
         cond = Condition.from_argv(
             name="test",
             argv=[
-                "--condition-type", "zero-latency",
-                "--ifos", "H1",
-                "--input-sample-rate", "16384",
+                "--condition-type",
+                "zero-latency",
+                "--ifos",
+                "H1",
+                "--input-sample-rate",
+                "16384",
                 "--no-drift-correction",
-            ]
+            ],
         )
         assert cond.condition_type == "zero-latency"
 
