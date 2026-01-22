@@ -49,14 +49,14 @@ from sgnligo.transforms.condition_v2.composed_registry import (
     register_composed_transform,
 )
 
+# Import dispatcher
+from sgnligo.transforms.condition_v2.condition import Condition
+
 # Import transforms to trigger registration
 from sgnligo.transforms.condition_v2.transforms import (
     StandardCondition,
     ZeroLatencyCondition,
 )
-
-# Import dispatcher
-from sgnligo.transforms.condition_v2.condition import Condition
 
 __all__ = [
     # Base class
