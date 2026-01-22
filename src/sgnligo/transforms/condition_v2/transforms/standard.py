@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isinf
-from typing import ClassVar, List, Optional
+from typing import ClassVar
 
 from sgnts.compose import TSCompose, TSComposedTransformElement
 from sgnts.transforms import Threshold
@@ -23,7 +23,9 @@ from sgnligo.transforms.condition_v2.cli_mixins import (
     WhitenSampleRateOptionsMixin,
 )
 from sgnligo.transforms.condition_v2.composed_base import ComposedTransformBase
-from sgnligo.transforms.condition_v2.composed_registry import register_composed_transform
+from sgnligo.transforms.condition_v2.composed_registry import (
+    register_composed_transform,
+)
 from sgnligo.transforms.latency import Latency
 from sgnligo.transforms.whiten import Whiten
 
@@ -140,5 +142,7 @@ class StandardCondition(
 
         return compose.as_transform(
             name=self.name,
-            also_expose_source_pads=self._also_expose_pads if self._also_expose_pads else None,
+            also_expose_source_pads=(
+                self._also_expose_pads if self._also_expose_pads else None
+            ),
         )
