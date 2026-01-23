@@ -36,11 +36,7 @@ from sgnts.transforms import AdaptiveCorrelate, Resampler, Threshold
 
 from sgnligo.psd import read_psd as _read_psd
 from sgnligo.transforms.latency import Latency
-from sgnligo.transforms.whiten import (
-    DriftCorrectionKernel,
-    Whiten,
-    WhiteningKernel,
-)
+from sgnligo.transforms.whiten import DriftCorrectionKernel, Whiten, WhiteningKernel
 
 
 @dataclass

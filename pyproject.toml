@@ -12,16 +12,16 @@ name = "sgn-ligo"
 dynamic = ["version"]
 dependencies = [
     "confluent-kafka",
-    "gwpy",
+    "gwpy>=3.0.8",  # 3.0.8+ required for scipy 1.14+ compatibility
     "h5py",
     "igwn-ligolw",
     "igwn-segments",
     "lalsuite>=7.26",
     "ligo-scald",
     "scipy < 1.17",
-    "sgn >= 0.4",
+    "sgn >= 0.5",
     "sgn-arrakis",
-    "sgn-ts >= 0.4",
+    "sgn-ts >= 0.5",
     "zlw",
     "sympy",
     "watchdog",
@@ -150,3 +150,4 @@ sgn-ligo-ll-dq = "sgnligo.bin.ll_dq:main"
 sgn-ligo-plot-psd = "sgnligo.bin.plot_psd:main"
 sgn-ligo-gwistat = "sgnligo.bin.gwistat:main"
 sgn-ligo-fake-frames = "sgnligo.bin.fake_frames:main"
+sgn-ligo-coinc-to-html = "sgnligo.bin.coinc_to_html:main"

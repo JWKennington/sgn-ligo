@@ -1,17 +1,32 @@
 """A composed source element that generates fake GW noise with injections.
 
-This module provides a factory function to create a composed source element
+This module provides the InjectedNoiseSource class, a composed source element
 that combines GWDataNoiseSource (fake detector noise) with SimInspiralSource
 (gravitational wave injections) using an Adder to produce realistic test data.
+
+Example:
+    >>> source = InjectedNoiseSource(
+    ...     name="test_data",
+    ...     ifos=["H1", "L1"],
+    ...     t0=1126259460,
+    ...     duration=64.0,
+    ...     test_mode="bbh",
+    ... )
+    >>> # Use in pipeline
+    >>> pipeline = Pipeline()
+    >>> pipeline.connect(source.element, sink)
 """
 
 from __future__ import annotations
 
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import ClassVar, List, Optional
 
 from sgnts.compose import TSCompose, TSComposedSourceElement
 from sgnts.transforms import Adder
 
+from sgnligo.sources.composed_base import ComposedSourceBase
+from sgnligo.sources.datasource_v2.composed_registry import register_composed_source
 from sgnligo.sources.gwdata_noise_source import GWDataNoiseSource
 from sgnligo.sources.sim_inspiral_source import SimInspiralSource
 
@@ -19,29 +34,13 @@ from sgnligo.sources.sim_inspiral_source import SimInspiralSource
 SAMPLE_RATE = 16384
 
 
-def create_injected_noise_source(
-    name: str,
-    ifos: List[str],
-    t0: Optional[float] = None,
-    duration: Optional[float] = None,
-    end: Optional[float] = None,
-    injection_file: Optional[str] = None,
-    test_mode: Optional[str] = None,
-    f_min: float = 20.0,
-    approximant_override: Optional[str] = None,
-    real_time: bool = False,
-    verbose: bool = False,
-    output_channel_pattern: str = "{ifo}:STRAIN",
-) -> TSComposedSourceElement:
-    """Create a composed source that generates fake GW noise with injections.
+@register_composed_source
+@dataclass
+class InjectedNoiseSource(ComposedSourceBase):
+    """Composed source generating fake GW noise with injections.
 
-    This factory function creates a composed source element combining:
-    - GWDataNoiseSource: generates realistic colored noise with Advanced LIGO PSD
-    - SimInspiralSource: generates gravitational wave injection signals
-    - Adder (one per IFO): adds noise + injections together
-
-    The result is a single source element that outputs fake GW data with
-    test injections embedded, suitable for pipeline testing and development.
+    Combines GWDataNoiseSource (colored detector noise) with SimInspiralSource
+    (gravitational wave signals) to produce realistic test data.
 
     Args:
         name: Name of the composed element
@@ -63,18 +62,9 @@ def create_injected_noise_source(
         output_channel_pattern: Pattern for output pad names. Use {ifo} as
             placeholder for detector prefix. Default: "{ifo}:STRAIN"
 
-    Returns:
-        TSComposedSourceElement with one output pad per IFO, named according
-        to output_channel_pattern (e.g., "H1:STRAIN", "L1:STRAIN")
-
-    Raises:
-        ValueError: If neither injection_file nor test_mode is specified,
-            or if both are specified, or if neither duration nor end is
-            specified when real_time=False.
-
     Example:
         >>> # With test mode (automatic BBH injections every 30s)
-        >>> source = create_injected_noise_source(
+        >>> source = InjectedNoiseSource(
         ...     name="test_data",
         ...     ifos=["H1", "L1"],
         ...     t0=1126259460,
@@ -83,7 +73,7 @@ def create_injected_noise_source(
         ... )
 
         >>> # With injection file
-        >>> source = create_injected_noise_source(
+        >>> source = InjectedNoiseSource(
         ...     name="injected_data",
         ...     ifos=["H1", "L1"],
         ...     t0=1126259460,
@@ -93,7 +83,7 @@ def create_injected_noise_source(
         ... )
 
         >>> # Real-time mode
-        >>> source = create_injected_noise_source(
+        >>> source = InjectedNoiseSource(
         ...     name="realtime_data",
         ...     ifos=["H1"],
         ...     real_time=True,
@@ -106,71 +96,101 @@ def create_injected_noise_source(
         >>> from sgn.sinks import CollectSink
         >>> pipeline = Pipeline()
         >>> sink = CollectSink(name="sink", sink_pad_names=["H1:STRAIN"])
-        >>> pipeline.connect(source, sink)
+        >>> pipeline.connect(source.element, sink)
         >>> pipeline.run()
     """
-    # Validate injection source specification
-    if injection_file is None and test_mode is None:
-        raise ValueError("Must specify either injection_file or test_mode")
-    if injection_file is not None and test_mode is not None:
-        raise ValueError("Cannot specify both injection_file and test_mode")
 
-    # Validate time specification (unless real_time mode allows indefinite)
-    if not real_time and duration is None and end is None:
-        raise ValueError("Must specify either duration or end when real_time=False")
+    # Required
+    ifos: List[str]
 
-    # Build channel dictionaries for internal elements
-    # Noise source uses {ifo}:FAKE-STRAIN
-    noise_channel_dict = {ifo: f"{ifo}:FAKE-STRAIN" for ifo in ifos}
+    # Time specification (at least one required unless real_time=True)
+    t0: Optional[float] = None
+    duration: Optional[float] = None
+    end: Optional[float] = None
 
-    # Output channel names from pattern
-    output_channels = [output_channel_pattern.format(ifo=ifo) for ifo in ifos]
+    # Injection source (one required)
+    injection_file: Optional[str] = None
+    test_mode: Optional[str] = None
 
-    # Create the noise source
-    noise_source = GWDataNoiseSource(
-        name=f"{name}_noise",
-        channel_dict=noise_channel_dict,
-        t0=t0,
-        duration=duration,
-        end=end,
-        real_time=real_time,
-        verbose=verbose,
-    )
+    # Optional parameters
+    f_min: float = 20.0
+    approximant_override: Optional[str] = None
+    real_time: bool = False
+    verbose: bool = False
+    output_channel_pattern: str = "{ifo}:STRAIN"
 
-    # Create the injection source
-    inj_source = SimInspiralSource(
-        name=f"{name}_injections",
-        ifos=ifos,
-        t0=t0,
-        duration=duration,
-        end=end,
-        injection_file=injection_file,
-        test_mode=test_mode,
-        sample_rate=SAMPLE_RATE,
-        f_min=f_min,
-        approximant_override=approximant_override,
-    )
+    # Class metadata
+    source_type: ClassVar[str] = "injected-noise"
+    description: ClassVar[str] = "Colored noise with GW injections"
 
-    # Create one Adder per IFO to keep detector outputs separate
-    adders = []
-    for ifo, out_channel in zip(ifos, output_channels):
-        noise_pad = f"{ifo}:FAKE-STRAIN"
-        inj_pad = f"{ifo}:INJ-STRAIN"
+    def _validate(self) -> None:
+        """Validate injection source and time specification."""
+        # Validate injection source specification
+        if self.injection_file is None and self.test_mode is None:
+            raise ValueError("Must specify either injection_file or test_mode")
+        if self.injection_file is not None and self.test_mode is not None:
+            raise ValueError("Cannot specify both injection_file and test_mode")
 
-        adder = Adder(
-            name=f"{name}_adder_{ifo}",
-            sink_pad_names=(noise_pad, inj_pad),
-            source_pad_names=(out_channel,),
+        # Validate time specification (unless real_time mode allows indefinite)
+        if not self.real_time and self.duration is None and self.end is None:
+            raise ValueError("Must specify either duration or end when real_time=False")
+
+    def _build(self) -> TSComposedSourceElement:
+        """Build the composed source element."""
+        # Build channel dictionaries for internal elements
+        # Noise source uses {ifo}:FAKE-STRAIN
+        noise_channel_dict = {ifo: f"{ifo}:FAKE-STRAIN" for ifo in self.ifos}
+
+        # Output channel names from pattern
+        output_channels = [
+            self.output_channel_pattern.format(ifo=ifo) for ifo in self.ifos
+        ]
+
+        # Create the noise source
+        noise_source = GWDataNoiseSource(
+            name=f"{self.name}_noise",
+            channel_dict=noise_channel_dict,
+            t0=self.t0,
+            duration=self.duration,
+            end=self.end,
+            real_time=self.real_time,
+            verbose=self.verbose,
         )
-        adders.append(adder)
 
-    # Build the composed element using TSCompose
-    compose = TSCompose()
+        # Create the injection source
+        inj_source = SimInspiralSource(
+            name=f"{self.name}_injections",
+            ifos=self.ifos,
+            t0=self.t0,
+            duration=self.duration,
+            end=self.end,
+            injection_file=self.injection_file,
+            test_mode=self.test_mode,
+            sample_rate=SAMPLE_RATE,
+            f_min=self.f_min,
+            approximant_override=self.approximant_override,
+        )
 
-    # Connect noise source and injection source to each adder
-    # Implicit linking works because pad names match (e.g., H1:FAKE-STRAIN)
-    for adder in adders:
-        compose.connect(noise_source, adder)
-        compose.connect(inj_source, adder)
+        # Create one Adder per IFO to keep detector outputs separate
+        adders = []
+        for ifo, out_channel in zip(self.ifos, output_channels):
+            noise_pad = f"{ifo}:FAKE-STRAIN"
+            inj_pad = f"{ifo}:INJ-STRAIN"
 
-    return compose.as_source(name=name)
+            adder = Adder(
+                name=f"{self.name}_adder_{ifo}",
+                sink_pad_names=(noise_pad, inj_pad),
+                source_pad_names=(out_channel,),
+            )
+            adders.append(adder)
+
+        # Build the composed element using TSCompose
+        compose = TSCompose()
+
+        # Connect noise source and injection source to each adder
+        # Implicit linking works because pad names match (e.g., H1:FAKE-STRAIN)
+        for adder in adders:
+            compose.connect(noise_source, adder)
+            compose.connect(inj_source, adder)
+
+        return compose.as_source(name=self.name)

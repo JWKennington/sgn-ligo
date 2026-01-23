@@ -5,6 +5,7 @@ nav:
   - User Guide:
     - Key Concepts: user-guide/concepts.md
     - DataSource Tutorial: user-guide/datasource-tutorial.md
+    - DataSource V2 Guide: user-guide/datasource-v2.md
     - GWpy Integration Tutorial: user-guide/gwpy-tutorial.md
     - GWDataNoiseSource Tutorial: user-guide/gwdata_noise_source.md
     - SimInspiralSource Tutorial: user-guide/sim_inspiral_source.md
@@ -17,8 +18,8 @@ nav:
       - Utils: api/base/utils.md
     - Sources:
       - DataSource: api/sources/datasource.md
+      - DataSource V2: api/sources/datasource_v2.md
       - DevSHMSource: api/sources/devshmsrc.md
-      - FakeRealtime: api/sources/fake_realtime.md
       - FrameCacheSource: api/sources/framecachesrc.md
       - GWDataNoiseSource: api/sources/gwdata_noise_source.md
       - SimInspiralSource: api/sources/sim_inspiral_source.md

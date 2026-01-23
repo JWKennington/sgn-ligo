@@ -758,6 +758,23 @@ class TestPSDWriter:
         data = np.loadtxt(tmp_path / "multi_H1.txt")
         assert data.shape == (100, 2)
 
+    def test_write_txt_single(self, mock_psd_dict, tmp_path):
+        """Test writing a single PSD to TXT creates a single file."""
+        single_dict = {"H1": mock_psd_dict["H1"]}
+        output = tmp_path / "single.txt"
+
+        PSDWriter.write(output, single_dict)
+
+        # Single PSD should create a single file (not split)
+        assert output.exists()
+
+        # Verify content can be loaded
+        data = np.loadtxt(output)
+        assert data.shape == (100, 2)
+
+        # Check first column is frequency and second is PSD
+        assert data[1, 0] == 1.0  # f0=0, deltaF=1, so index 1 is 1.0 Hz
+
     def test_explicit_format_override(self, mock_psd_dict, tmp_path):
         """Test forcing format via the 'fmt' argument."""
         # Filename indicates .dat (unknown), but we force 'txt'
