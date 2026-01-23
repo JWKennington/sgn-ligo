@@ -25,6 +25,13 @@ Available Condition Types:
     - "standard": Standard whitening with PSD tracking
     - "zero-latency": Zero-latency AFIR whitening
 
+CLI Integration:
+    For applications that embed condition options in their own CLI:
+    >>> from sgnligo.transforms.condition_v2 import add_condition_options_to_parser
+    >>> parser = DataSource.create_cli_parser()
+    >>> add_condition_options_to_parser(parser)
+    >>> args = parser.parse_args()
+
 Architecture:
     The package uses a registry pattern where each condition type is a
     dataclass that inherits from ComposedTransformBase and is decorated
@@ -37,10 +44,12 @@ Modules:
     - composed_base: Abstract base class for composed transforms
     - composed_registry: Registry for transform class lookup
     - cli_mixins: CLI argument mixins for composable options
+    - cli: CLI utilities including add_condition_options_to_parser
     - condition: Dispatcher class and factory function
     - transforms/: Concrete transform implementations
 """
 
+from sgnligo.transforms.condition_v2.cli import add_condition_options_to_parser
 from sgnligo.transforms.condition_v2.composed_base import ComposedTransformBase
 from sgnligo.transforms.condition_v2.composed_registry import (
     get_composed_transform_class,
@@ -66,6 +75,8 @@ __all__ = [
     "get_composed_transform_class",
     "list_composed_transform_types",
     "get_composed_transform_registry",
+    # CLI utilities
+    "add_condition_options_to_parser",
     # Concrete transforms
     "StandardCondition",
     "ZeroLatencyCondition",

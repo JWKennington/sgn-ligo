@@ -266,10 +266,7 @@ def build_condition_cli_parser(
             if "get_cli_arg_names" not in base.__dict__:
                 continue  # pragma: no cover
 
-            # Skip the protocol class itself
-            if base is CLIMixinProtocol:
-                continue  # pragma: no cover
-
+            assert base is not CLIMixinProtocol, "Protocol should not be in MRO"
             cli_mixins.append(base)
             seen_mixins.add(base)
 
@@ -298,7 +295,86 @@ def build_condition_cli_parser(
     return parser
 
 
-def namespace_to_condition_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
+def add_condition_options_to_parser(
+    parser: argparse.ArgumentParser,
+    include_condition_type: bool = False,
+) -> None:
+    """Add condition options to an existing argument parser.
+
+    Use this when you have an existing parser (e.g., from
+    DataSource.create_cli_parser()) and want to add condition-related
+    options without creating a new parser.
+
+    This allows embedding condition options in applications that don't need the
+    full --condition-type dispatch mechanism.
+
+    Args:
+        parser: ArgumentParser to add options to
+        include_condition_type: If True, add --condition-type as a required
+            argument. If False (default), options are added without requiring
+            a condition type to be specified.
+
+    Example:
+        >>> from sgnligo.sources.datasource_v2 import DataSource
+        >>> from sgnligo.transforms.condition_v2.cli import (
+        ...     add_condition_options_to_parser,
+        ... )
+        >>>
+        >>> # Start with DataSource parser
+        >>> parser = DataSource.create_cli_parser()
+        >>>
+        >>> # Add condition options
+        >>> add_condition_options_to_parser(parser)
+        >>>
+        >>> # Add application-specific options
+        >>> parser.add_argument("--inj-file", required=True)
+        >>>
+        >>> args = parser.parse_args()
+    """
+    if include_condition_type:
+        condition_types = list_composed_transform_types()
+        parser.add_argument(
+            "--condition-type",
+            choices=condition_types,
+            help="Type of conditioning transform to use",
+        )
+
+    # Collect all CLI mixins from registered transforms
+    # (same logic as build_condition_cli_parser)
+    cli_mixins: List[Type] = []
+    seen_mixins: Set[Type] = set()
+
+    for _condition_type, cls in _COMPOSED_TRANSFORM_REGISTRY.items():
+        for base in cls.__mro__:
+            if base in seen_mixins:
+                continue
+            if "add_cli_arguments" not in base.__dict__:
+                continue
+            if "get_cli_arg_names" not in base.__dict__:
+                continue
+            assert base is not CLIMixinProtocol, "Protocol should not be in MRO"
+            cli_mixins.append(base)
+            seen_mixins.add(base)
+
+    # Sort mixins by arg count descending - supersets first
+    cli_mixins.sort(key=lambda m: len(m.get_cli_arg_names()), reverse=True)
+
+    # Add arguments, skipping mixins with overlapping args
+    added_args: Dict[str, Type] = {}
+    for mixin in cli_mixins:
+        new_args = mixin.get_cli_arg_names()
+        any_args_exist = any(arg in added_args for arg in new_args)
+        if any_args_exist:
+            continue
+        for arg in new_args:
+            added_args[arg] = mixin
+        mixin.add_cli_arguments(parser)
+
+
+def namespace_to_condition_kwargs(
+    args: argparse.Namespace,
+    condition_type: Optional[str] = None,
+) -> Dict[str, Any]:
     """Convert argparse namespace to Condition kwargs.
 
     This function walks the MRO of the selected transform class and calls
@@ -306,16 +382,21 @@ def namespace_to_condition_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
 
     Args:
         args: Parsed argparse namespace
+        condition_type: Override condition type. If not provided, uses
+            args.condition_type. Useful for apps that hardcode the type.
 
     Returns:
         Dict of kwargs for Condition
     """
+    # Determine condition type - explicit parameter overrides args
+    if condition_type is None:
+        condition_type = getattr(args, "condition_type", "standard")
+
     kwargs: Dict[str, Any] = {
-        "condition_type": args.condition_type,
+        "condition_type": condition_type,
     }
 
     # Get the transform class to walk its MRO for process_cli_args
-    condition_type = args.condition_type
     if condition_type in _COMPOSED_TRANSFORM_REGISTRY:
         cls = _COMPOSED_TRANSFORM_REGISTRY[condition_type]
         processed_classes: Set[Type] = set()

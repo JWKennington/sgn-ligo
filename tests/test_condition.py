@@ -583,6 +583,43 @@ class TestConditionZeroLatency:
                 input_links={"H1": "H1_white:src:H1"},
             )
 
+    def test_zero_latency_invalid_reference_psd_warns(self, capsys):
+        """Test that invalid reference_psd prints warning but continues."""
+        from unittest.mock import patch
+
+        pipeline = Pipeline()
+        pipeline.insert(
+            FakeSeriesSource(
+                name="H1_white",
+                source_pad_names=("H1",),
+                rate=4096,
+                signal_type="white",
+                end=2,
+            )
+        )
+        info = ConditionInfo(
+            psd_fft_length=4,
+            reference_psd=PATH_PSD.as_posix(),  # Valid path for Whiten
+            whiten_sample_rate=2048,
+            zero_latency=True,
+        )
+        # Mock _read_psd to raise an exception (covers lines 206-207)
+        with patch(
+            "sgnligo.transforms.condition._read_psd",
+            side_effect=Exception("Mocked PSD read failure"),
+        ):
+            condition(
+                pipeline=pipeline,
+                condition_info=info,
+                ifos=["H1"],
+                data_source="white",
+                input_sample_rate=4096,
+                input_links={"H1": "H1_white:src:H1"},
+            )
+        captured = capsys.readouterr()
+        assert "Warning: Could not load reference PSD" in captured.out
+        assert "Mocked PSD read failure" in captured.out
+
     @SKIP_OPT_PLOTS
     def test_visualize_zero_latency_pipeline_graph(self, pipeline):
         """Render the zero-latency conditioning pipeline graph."""
