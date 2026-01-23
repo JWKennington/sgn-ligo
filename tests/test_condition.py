@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import pathlib
+import sys
 from argparse import ArgumentParser
 
 import pytest
@@ -9,8 +10,12 @@ from sgn.apps import Pipeline
 from sgnts.sources import FakeSeriesSource
 from sgnts.transforms import Threshold
 
+import sgnligo.transforms.condition  # noqa: F401 - import to populate sys.modules
 from sgnligo.transforms import Whiten
 from sgnligo.transforms.condition import ConditionInfo, condition
+
+# Access the actual module (not shadowed by __init__.py re-export)
+_condition_module = sys.modules["sgnligo.transforms.condition"]
 
 PATH_DATA = pathlib.Path(__file__).parent / "data"
 PATH_PSD = PATH_DATA / "H1L1-GSTLAL-MEDIAN.xml.gz"
@@ -604,8 +609,12 @@ class TestConditionZeroLatency:
             zero_latency=True,
         )
         # Mock _read_psd to raise an exception (covers lines 206-207)
-        with patch(
-            "sgnligo.transforms.condition._read_psd",
+        # Use patch.object with _condition_module (from sys.modules) to avoid
+        # Python 3.10 name resolution issue where "sgnligo.transforms.condition"
+        # resolves to the function (re-exported in __init__.py) instead of the module.
+        with patch.object(
+            _condition_module,
+            "_read_psd",
             side_effect=Exception("Mocked PSD read failure"),
         ):
             condition(
