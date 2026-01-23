@@ -19,6 +19,8 @@ from igwn_ligolw import utils as ligolw_utils
 from scipy import interpolate
 from scipy.signal import butter, sosfilt
 from scipy.special import loggamma
+
+from sgn import SinkPad
 from sgnts.base import (
     AdapterConfig,
     EventBuffer,
@@ -27,6 +29,7 @@ from sgnts.base import (
     SeriesBuffer,
     TSFrame,
     TSTransform,
+    TimeSpanFrame,
 )
 from sgnts.base.slice_tools import TIME_MAX
 from sgnts.decorators import transform
@@ -701,8 +704,8 @@ def correction_kernel_from_psds(
         check_aliasing=False,
     )
 
-    L = truncation_samples
     N = len(k_circ)
+    L = truncation_samples or N
     taps = np.zeros(L, dtype=np.float64)
 
     if L > 1:
@@ -711,6 +714,13 @@ def correction_kernel_from_psds(
     taps[L - 1] = k_circ[0]
 
     return Kernel(fir_matrix=taps, latency=L - 1)
+
+
+def _extract_psd_from_tsframe(frame: TSFrame) -> Optional[lal.COMPLEX16FrequencySeries]:
+    """Extracts a lal.COMPLEX16FrequencySeries PSD from a TSFrame."""
+    # TODO: TSFrame currently doesn't support PSD in the is_gap attribute, we need
+    #  to check the metadata attribute for a "psd" key
+    return frame.metadata.get("psd", None)
 
 
 @dataclass
@@ -725,7 +735,21 @@ class WhiteningKernel(TSTransform):
     verbose: bool = False
 
     @property
+    def static_sink_pads(self) -> list[str]:  # type: ignore[override]
+        """Add the filter sink pad as an static sink pad."""
+        return [self.filters_pad_name]
+
+    @property
+    def static_unaligned_sink_pads(self) -> list[str]:  # type: ignore[override]
+        """Declare that the filter sink pad is unaligned."""
+        return [self.filters_pad_name]
+
+    @property
     def static_source_pads(self) -> list[str]:
+        return [self.filters_pad_name]
+
+    @property
+    def static_unaligned_source_pads(self) -> list[str]:
         return [self.filters_pad_name]
 
     def configure(self) -> None:
@@ -733,11 +757,12 @@ class WhiteningKernel(TSTransform):
         self._latest_epoch: Optional[int] = None
         self._latest_send_ns: Optional[int] = None
         self._last_psd_data: Optional[np.ndarray] = None
-        self.source_pad = self.srcs[self.filters_pad_name]
 
-    @transform.one_to_one
-    def process(self, input_frame: TSFrame, output_frame: EventFrame) -> None:
-        output_frame.is_gap = True
+    def internal(self) -> None:
+        # Get aligned buffer to see if overlaps with new filters
+        _, input_frame = self.next_input()
+        _, output_frame = self.next_event_output()
+
         live_psd = input_frame.metadata.get("psd", None)
         epoch = input_frame.metadata.get("epoch", None)
 
@@ -816,7 +841,21 @@ class DriftCorrectionKernel(TSTransform):
     verbose: bool = False
 
     @property
+    def static_sink_pads(self) -> list[str]:  # type: ignore[override]
+        """Add the filter sink pad as an static sink pad."""
+        return [self.filters_pad_name]
+
+    @property
+    def static_unaligned_sink_pads(self) -> list[str]:  # type: ignore[override]
+        """Declare that the filter sink pad is unaligned."""
+        return [self.filters_pad_name]
+
+    @property
     def static_source_pads(self) -> list[str]:
+        return [self.filters_pad_name]
+
+    @property
+    def static_unaligned_source_pads(self) -> list[str]:
         return [self.filters_pad_name]
 
     def configure(self) -> None:
@@ -875,8 +914,10 @@ class DriftCorrectionKernel(TSTransform):
                 print(f"DriftCorrection Error interpolating PSD: {e}")
             return None
 
-    @transform.one_to_one
-    def process(self, input_frame: TSFrame, output_frame: EventFrame) -> None:
+    def internal(self) -> None:
+        _, input_frame = self.next_input()
+        _, output_frame = self.next_event_output()
+
         output_frame.is_gap = True
         live_psd = input_frame.metadata.get("psd", None)
         epoch = input_frame.metadata.get("epoch", None)

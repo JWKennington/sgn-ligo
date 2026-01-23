@@ -291,13 +291,13 @@ def condition(
 
             # C. Whitening (AFIR 1)
             kern_whiten_name = f"{ifo}_KernWhiten"
+            kern_whiten_elem = WhiteningKernel(
+                name=kern_whiten_name,
+                filters_pad_name=f"spectrum_{ifo}",
+                zero_latency=True,
+            )
             pipeline.insert(
-                WhiteningKernel(
-                    name=kern_whiten_name,
-                    sink_pad_names=(f"spectrum_{ifo}",),
-                    filters_pad_name="filters",
-                    zero_latency=True,
-                ),
+                kern_whiten_elem,
                 link_map={
                     f"{kern_whiten_name}:snk:spectrum_{ifo}": spectrum_out_links[ifo]
                 },
@@ -314,8 +314,8 @@ def condition(
                 ),
                 link_map={
                     f"{afir_whiten_name}:snk:{ifo}": current_link,
-                    f"{afir_whiten_name}:snk:filters": f"{kern_whiten_name}"
-                    f":src:filters",
+                    f"{afir_whiten_name}:snk:filters": f"{kern_whiten_name}:"
+                    f"src:spectrum_{ifo}",
                 },
             )
             current_link = f"{afir_whiten_name}:src:{ifo}"
@@ -348,8 +348,7 @@ def condition(
                 pipeline.insert(
                     DriftCorrectionKernel(
                         name=kern_drift_name,
-                        sink_pad_names=(f"spectrum_{ifo}",),
-                        filters_pad_name="filters",
+                        filters_pad_name=f"spectrum_{ifo}",
                         reference_psd=ref_psds[ifo],
                         # truncation_samples=128,
                         truncation_samples=None,
@@ -372,7 +371,7 @@ def condition(
                     link_map={
                         f"{afir_drift_name}:snk:{ifo}": current_link,
                         f"{afir_drift_name}:snk:filters": f"{kern_drift_name}"
-                        f":src:filters",
+                        f":src:spectrum_{ifo}",
                     },
                 )
                 current_link = f"{afir_drift_name}:src:{ifo}"
