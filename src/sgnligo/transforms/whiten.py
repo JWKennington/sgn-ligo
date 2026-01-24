@@ -891,7 +891,6 @@ class DriftCorrectionKernel(TSTransform):
     def configure(self) -> None:
         self.output_frame_types[self.filters_pad_name] = EventFrame
         self._latest_epoch: Optional[int] = None
-        self._latest_send_ns: Optional[int] = None
         self._last_psd_data: Optional[np.ndarray] = None
         self._interpolated_ref_psd: Optional[lal.REAL8FrequencySeries] = None
         self.source_pad = self.srcs[self.filters_pad_name]
@@ -899,14 +898,12 @@ class DriftCorrectionKernel(TSTransform):
         if self.reference_psd is None and self.verbose:
             print("DriftCorrectionKernel warning: No reference_psd provided.")
 
-    def _get_interpolated_reference(
-        self, live_psd: lal.REAL8FrequencySeries
-    ) -> Optional[lal.REAL8FrequencySeries]:
+    def _get_interpolated_reference(self, live_psd):
+        # ... [Keep existing implementation] ...
         """Align the static reference PSD to the frequency grid of the live PSD."""
         target_df = live_psd.deltaF
         target_len = len(live_psd.data.data)
 
-        # Check if cache is valid
         if self._interpolated_ref_psd is not None:
             if (
                 np.isclose(self._interpolated_ref_psd.deltaF, target_df)
@@ -914,12 +911,8 @@ class DriftCorrectionKernel(TSTransform):
             ):
                 return self._interpolated_ref_psd
 
-        # Re-interpolate
         try:
-            # 1. Resample to match frequency spacing
             interp_psd = interpolate_psd(self.reference_psd, target_df)
-
-            # 2. Force length match (truncate or pad if f_max differs)
             interp_len = len(interp_psd.data.data)
             if interp_len != target_len:
                 new_series = lal.CreateREAL8FrequencySeries(
@@ -955,19 +948,21 @@ class DriftCorrectionKernel(TSTransform):
         if epoch is None or self.reference_psd is None or live_psd is None:
             return
 
-        if self._latest_epoch is not None and epoch <= self._latest_epoch:
-            return
-
-        if self.min_update_interval is not None:
-            curr_ns = now().ns()
-            if (
-                self._latest_send_ns
-                and (curr_ns - self._latest_send_ns) < self.min_update_interval
-            ):
+        # --- FIX: Throttle using Data Time (Epoch) instead of Wall Clock ---
+        if self._latest_epoch is not None:
+            # 1. Monotonicity check (already present)
+            if epoch <= self._latest_epoch:
                 return
-            self._latest_send_ns = curr_ns
 
-        self._latest_epoch = epoch
+            # 2. Minimum Interval Check (New logic)
+            # If min_update_interval is set (ns), convert to seconds and compare
+            if self.min_update_interval is not None:
+                interval_sec = self.min_update_interval / 1e9
+                if epoch < (self._latest_epoch + interval_sec):
+                    return
+
+        # We update self._latest_epoch later, ONLY if we decide to proceed.
+        # This ensures we don't "burn" the interval on skipped frames.
 
         # Align Reference
         ref_to_use = self._get_interpolated_reference(live_psd)
@@ -976,6 +971,14 @@ class DriftCorrectionKernel(TSTransform):
 
         # Optimization Check
         current_psd_data = np.asarray(live_psd.data.data)
+
+        # --- FIX: Sanitize PSD (Same as in WhiteningKernel to be safe) ---
+        # Although zlw now has epsilon, we want to prevent 10^10 gain spikes here too
+        if current_psd_data[0] <= 0:
+            current_psd_data[0] = (
+                current_psd_data[1] if current_psd_data[1] > 0 else 1.0
+            )
+
         if self._last_psd_data is not None and len(current_psd_data) == len(
             self._last_psd_data
         ):
@@ -986,7 +989,9 @@ class DriftCorrectionKernel(TSTransform):
             ):
                 return
 
+        # Commit to updating
         self._last_psd_data = current_psd_data.copy()
+        self._latest_epoch = epoch  # Update epoch only when we emit
 
         try:
             k = correction_kernel_from_psds(
@@ -997,6 +1002,7 @@ class DriftCorrectionKernel(TSTransform):
             )
             taps = k.fir_matrix
 
+            # Set infinite duration for the filter validity
             output_frame.noffset = int(TIME_MAX) - output_frame.offset
 
             buf = EventBuffer(
