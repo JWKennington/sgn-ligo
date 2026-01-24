@@ -872,12 +872,10 @@ class DriftCorrectionKernel(TSTransform):
 
     @property
     def static_sink_pads(self) -> list[str]:  # type: ignore[override]
-        """Add the filter sink pad as an static sink pad."""
         return [self.filters_pad_name]
 
     @property
     def static_unaligned_sink_pads(self) -> list[str]:  # type: ignore[override]
-        """Declare that the filter sink pad is unaligned."""
         return [self.filters_pad_name]
 
     @property
@@ -899,8 +897,6 @@ class DriftCorrectionKernel(TSTransform):
             print("DriftCorrectionKernel warning: No reference_psd provided.")
 
     def _get_interpolated_reference(self, live_psd):
-        # ... [Keep existing implementation] ...
-        """Align the static reference PSD to the frequency grid of the live PSD."""
         target_df = live_psd.deltaF
         target_len = len(live_psd.data.data)
 
@@ -941,44 +937,33 @@ class DriftCorrectionKernel(TSTransform):
         _, input_frame = self.next_input()
         _, output_frame = self.next_event_output()
 
+        # FIX 1: Timestamp Propagation (Explicit Start Time)
+        output_frame.offset = input_frame.offset
         output_frame.is_gap = True
+
         live_psd = input_frame.metadata.get("psd", None)
         epoch = input_frame.metadata.get("epoch", None)
 
         if epoch is None or self.reference_psd is None or live_psd is None:
             return
 
-        # --- FIX: Throttle using Data Time (Epoch) instead of Wall Clock ---
+        # FIX 2: Data-Time Throttling
         if self._latest_epoch is not None:
-            # 1. Monotonicity check (already present)
             if epoch <= self._latest_epoch:
                 return
-
-            # 2. Minimum Interval Check (New logic)
-            # If min_update_interval is set (ns), convert to seconds and compare
             if self.min_update_interval is not None:
                 interval_sec = self.min_update_interval / 1e9
                 if epoch < (self._latest_epoch + interval_sec):
                     return
 
-        # We update self._latest_epoch later, ONLY if we decide to proceed.
-        # This ensures we don't "burn" the interval on skipped frames.
-
-        # Align Reference
-        ref_to_use = self._get_interpolated_reference(live_psd)
-        if ref_to_use is None:
-            return
-
-        # Optimization Check
+        # FIX 3: Sanitize PSD
         current_psd_data = np.asarray(live_psd.data.data)
-
-        # --- FIX: Sanitize PSD (Same as in WhiteningKernel to be safe) ---
-        # Although zlw now has epsilon, we want to prevent 10^10 gain spikes here too
         if current_psd_data[0] <= 0:
             current_psd_data[0] = (
                 current_psd_data[1] if current_psd_data[1] > 0 else 1.0
             )
 
+        # FIX 4: Similarity Check (Prevent Updates if Kernel is Identical)
         if self._last_psd_data is not None and len(current_psd_data) == len(
             self._last_psd_data
         ):
@@ -987,11 +972,15 @@ class DriftCorrectionKernel(TSTransform):
             if ref_norm > 0 and (diff_norm / ref_norm) < (
                 1.0 - self.similarity_threshold
             ):
+                # PSD is stable, so Kernel would be identical. Skip.
                 return
 
-        # Commit to updating
         self._last_psd_data = current_psd_data.copy()
-        self._latest_epoch = epoch  # Update epoch only when we emit
+        self._latest_epoch = epoch
+
+        ref_to_use = self._get_interpolated_reference(live_psd)
+        if ref_to_use is None:
+            return
 
         try:
             k = correction_kernel_from_psds(
@@ -1002,7 +991,6 @@ class DriftCorrectionKernel(TSTransform):
             )
             taps = k.fir_matrix
 
-            # Set infinite duration for the filter validity
             output_frame.noffset = int(TIME_MAX) - output_frame.offset
 
             buf = EventBuffer(
@@ -1014,11 +1002,11 @@ class DriftCorrectionKernel(TSTransform):
             output_frame.is_gap = False
 
             if self.verbose:
-                print(f"DriftCorrection: Updated {epoch}, lat={k.latency}")
+                print(
+                    f"DriftCorrection: Updated {epoch} (offset={output_frame.offset}), lat={k.latency}"
+                )
 
         except Exception as e:
-            if self.verbose:
-                import traceback
-
-                print(f"DriftCorrectionKernel Error: {e}")
-                traceback.print_exc()
+            # Force print error
+            print(f"DriftCorrectionKernel CRITICAL ERROR: {e}")
+            traceback.print_exc()
