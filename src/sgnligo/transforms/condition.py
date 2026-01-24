@@ -295,6 +295,7 @@ def condition(
                 name=kern_whiten_name,
                 filters_pad_name=f"spectrum_{ifo}",
                 zero_latency=True,
+                min_update_interval=4_000_000_000,
             )
             pipeline.insert(
                 kern_whiten_elem,
@@ -353,6 +354,7 @@ def condition(
                         # truncation_samples=whiten_sample_rate,
                         truncation_samples=None,
                         smoothing_hz=0.5,
+                        min_update_interval=4_000_000_000,
                     ),
                     link_map={
                         f"{kern_drift_name}:snk:spectrum_{ifo}": spectrum_out_links[ifo]
