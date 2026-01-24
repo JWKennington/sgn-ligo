@@ -350,7 +350,7 @@ def condition(
                         name=kern_drift_name,
                         filters_pad_name=f"spectrum_{ifo}",
                         reference_psd=ref_psds[ifo],
-                        # truncation_samples=128,
+                        # truncation_samples=whiten_sample_rate,
                         truncation_samples=None,
                         smoothing_hz=0.5,
                     ),

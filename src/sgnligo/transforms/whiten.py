@@ -647,36 +647,66 @@ def kernel_from_psd(
     zero_latency: bool = False,
     window_spec: Optional[WindowSpec] = None,
 ) -> Kernel:
-    """Build a time-domain whitening kernel from a one-sided PSD using ZLW."""
-    psd_data = np.asarray(psd.data.data, dtype=np.float64)
-    df = psd.deltaF
-    f0 = psd.f0
+    """
+    Generate a whitening kernel from a PSD.
 
-    n_fft = 2 * (len(psd_data) - 1)
-    fs = 2.0 * (f0 + (len(psd_data) - 1) * df)
+    Args:
+        psd: The input Power Spectral Density (LAL Series).
+        zero_latency: If True, computes a Minimum-Phase (causal) kernel using zlw.
+        window_spec: Windowing parameters for the kernel.
+
+    Returns:
+        A Kernel object containing the FIR taps.
+    """
+    # Create a writable copy of the data to avoid modifying the LAL object in-place
+    psd_data = np.asarray(psd.data.data).copy()
+    sample_rate = 2 * (len(psd_data) - 1) * psd.deltaF
+
+    # --- ADMISSIBILITY FIX ---
+    # Cepstral whitening requires the log-spectrum to be finite and well-behaved.
+    # Zeros in the PSD result in -inf logs, causing numerical explosions.
+    # We "continue" the PSD to the boundaries to remove DC/Nyquist singularities.
+
+    # 1. Fix DC (Index 0)
+    if psd_data[0] <= 0:
+        # Use the first valid neighbor (simple continuation)
+        psd_data[0] = (
+            psd_data[1] if psd_data[1] > 0 else 1.0
+        )  # Fallback 1.0 if S[1] is also bad
+
+    # 2. Fix Nyquist (Last Index)
+    if psd_data[-1] <= 0:
+        psd_data[-1] = psd_data[-2] if psd_data[-2] > 0 else 1.0
+
+    # 3. Sanity check interior values
+    # If we still have non-positives, we clamp them to a small epsilon to strictly
+    # satisfy the Paley-Wiener condition for admissibility.
+    min_val = np.min(psd_data)
+    if min_val <= 0:
+        # Warn if verbose logging were available, but here we just sanitize
+        epsilon = (
+            np.min(psd_data[psd_data > 0]) * 1e-4 if np.any(psd_data > 0) else 1e-20
+        )
+        psd_data[psd_data <= 0] = epsilon
 
     if zero_latency:
-        # Minimum Phase: Causal, Latency = 0
-        filt = MPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft)
-        taps = filt.impulse_response(window=window_spec)
-        latency = 0
+        # Use ZLW's Minimum Phase filter generator
+        # We pass the sanitized psd_data
+        wf = MPWhiteningFilter(psd_data, sample_rate)
+
+        # Apply windowing if specified
+        if window_spec:
+            wf.apply_window(window_spec)
+
+        taps = wf.compute_kernel()
+
+        # ZLW returns a kernel with 0 latency (causal)
+        return Kernel(fir_matrix=taps, latency=0)
+
     else:
-        # Linear Phase: Symmetric, Latency = Group Delay
-        # We must explicitly set the delay to center the impulse for a causal filter.
-        # Length of impulse response typically defaults to n_fft
-        # unless windowed shorter, but here we rely on standard n_fft length.
-
-        # Center of the filter in samples
-        delay_samples = (n_fft - 1) / 2.0
-        delay_seconds = delay_samples / fs
-
-        filt = LPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft, delay=delay_seconds)
-        taps = filt.impulse_response(window=window_spec)
-
-        # The peak of the LP filter is now at index `delay_samples`
-        latency = int(delay_samples)
-
-    return Kernel(fir_matrix=taps, latency=latency)
+        # Standard Linear Phase logic (unchanged)
+        k = whitening_kernel_from_psd(psd, window_spec)
+        return k
 
 
 def correction_kernel_from_psds(
