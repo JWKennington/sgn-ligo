@@ -958,7 +958,7 @@ class DriftCorrectionKernel(TSTransform):
         if self._latest_epoch is not None and epoch <= self._latest_epoch:
             return
 
-        if self.min_update_interval:
+        if self.min_update_interval is not None:
             curr_ns = now().ns()
             if (
                 self._latest_send_ns
