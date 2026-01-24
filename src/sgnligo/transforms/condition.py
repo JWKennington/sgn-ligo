@@ -368,6 +368,7 @@ def condition(
                         source_pad_names=(ifo,),
                         sample_rate=whiten_sample_rate,
                         filter_sink_name="filters",
+                        ignore_rapid_updates=True,
                     ),
                     link_map={
                         f"{afir_drift_name}:snk:{ifo}": current_link,
