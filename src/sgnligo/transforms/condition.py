@@ -353,7 +353,6 @@ def condition(
                         # truncation_samples=whiten_sample_rate,
                         truncation_samples=None,
                         smoothing_hz=0.5,
-                        min_update_interval=3_000_000_000,  # 3 second minimum
                     ),
                     link_map={
                         f"{kern_drift_name}:snk:spectrum_{ifo}": spectrum_out_links[ifo]
@@ -368,7 +367,6 @@ def condition(
                         source_pad_names=(ifo,),
                         sample_rate=whiten_sample_rate,
                         filter_sink_name="filters",
-                        ignore_rapid_updates=True,
                         verbose=True,
                     ),
                     link_map={
