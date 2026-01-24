@@ -741,10 +741,10 @@ class PSDKernelLogicMixin:
         self, input_frame: TSFrame, output_frame: EventFrame
     ) -> tuple[Optional[lal.REAL8FrequencySeries], Optional[int]]:
         """
-        Validates the incoming PSD, checks for throttling and similarity,
-        propagates timestamps, and sanitizes the PSD data.
+        Validates PSD, checks throttling, propagates timestamps.
+        Returns (sanitized_psd, epoch) or (None, None) if update skipped.
         """
-        # 1. Propagate Timestamp (Fixes start=0 collision)
+        # 1. Propagate Timestamp
         output_frame.offset = input_frame.offset
         output_frame.is_gap = True
 
@@ -754,31 +754,28 @@ class PSDKernelLogicMixin:
         if epoch is None or live_psd is None:
             return None, None
 
-        # 2. Throttling (Uses Data Time/Epoch)
+        # 2. Data-Time Throttling
         if self._latest_epoch is not None:
             if epoch <= self._latest_epoch:
                 return None, None
+
             if self.min_update_interval is not None:
-                interval_sec = self.min_update_interval / 1e9
-                if epoch < (self._latest_epoch + interval_sec):
+                # FIX: Do not convert to seconds. Compare Nanoseconds directly.
+                # epoch is ns, min_update_interval is ns.
+                if epoch < (self._latest_epoch + self.min_update_interval):
+                    if self.verbose:
+                        delta = epoch - self._latest_epoch
+                        # print(f"[{self.name}] Skipping update at {epoch}. Delta {delta}ns < Interval {self.min_update_interval}ns")
                     return None, None
 
         # 3. Sanitize PSD
-        # Ensure DC and other bins are positive to avoid AdmissibilityError
-        # Modifying live_psd.data.data is generally safe if it's a writable view.
-        # If not, this logic might need adjustment, but usually SWIG-LAL allows it.
-        try:
-            psd_data_view = np.asarray(live_psd.data.data)
-            if psd_data_view[0] <= 0:
-                psd_data_view[0] = psd_data_view[1] if psd_data_view[1] > 0 else 1.0
-        except Exception:
-            # Fallback if modification fails, though this implies risk for downstream kernel gen
-            pass
+        current_psd_data = np.asarray(live_psd.data.data)
+        if current_psd_data[0] <= 0:
+            current_psd_data[0] = (
+                current_psd_data[1] if current_psd_data[1] > 0 else 1.0
+            )
 
         # 4. Similarity Check
-        # Use sanitized data for comparison
-        current_psd_data = np.asarray(live_psd.data.data)
-
         if self._last_psd_data is not None and len(current_psd_data) == len(
             self._last_psd_data
         ):
@@ -788,12 +785,11 @@ class PSDKernelLogicMixin:
                 1.0 - self.similarity_threshold
             ):
                 if self.verbose:
-                    print(
-                        f"{self.__class__.__name__}: PSD stable at {epoch}. Skipping."
-                    )
+                    # print(f"[{self.name}] Skipping update at {epoch}. PSD stable.")
+                    pass
                 return None, None
 
-        # Update State
+        # Commit State
         self._last_psd_data = current_psd_data.copy()
         self._latest_epoch = epoch
 
