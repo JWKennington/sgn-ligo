@@ -643,6 +643,50 @@ class Kernel:
     latency: int
 
 
+def condition_seismic_wall(psd_data: np.ndarray, df: float) -> np.ndarray:
+    """
+    Restores PSD admissibility by enforcing the Seismic Wall structure.
+    Extends the seismic peak (5-50Hz) down to DC to prevent infinite gain.
+    """
+    # Create frequency axis
+    n_bins = len(psd_data)
+    freqs = np.arange(n_bins) * df
+
+    # 1. Find Seismic Peak (5-50 Hz)
+    mask_seismic = (freqs >= 5.0) & (freqs <= 50.0)
+
+    # Fallback if grid is weird or empty (e.g. very low sample rate)
+    if not np.any(mask_seismic):
+        # Just ensure positivity
+        psd_data[psd_data <= 0] = (
+            np.min(psd_data[psd_data > 0]) if np.any(psd_data > 0) else 1e-40
+        )
+        return psd_data
+
+    # Find the peak index relative to the mask
+    # We want the index in the original array
+    seismic_indices = np.where(mask_seismic)[0]
+    peak_idx_rel = np.argmax(psd_data[seismic_indices])
+    peak_idx = seismic_indices[peak_idx_rel]
+    peak_val = psd_data[peak_idx]
+
+    # 2. Extend the Wall
+    # Clamp all frequencies below the peak to be at least the peak value
+    # This ensures gain <= 1/sqrt(peak) at DC.
+    if peak_val > 0:
+        psd_data[:peak_idx] = np.maximum(psd_data[:peak_idx], peak_val)
+
+    # 3. Final Sanity Check for Zeros (High freq or gaps)
+    # If any zeros remain, clamp them to epsilon
+    min_val = np.min(psd_data)
+    if min_val <= 0:
+        valid_vals = psd_data[psd_data > 0]
+        epsilon = np.min(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-40
+        psd_data[psd_data <= 0] = epsilon
+
+    return psd_data
+
+
 def kernel_from_psd(
     psd: lal.REAL8FrequencySeries,
     zero_latency: bool = False,
@@ -663,17 +707,19 @@ def kernel_from_psd(
 
     # 3. Sanitize PSD (Prevent ZLW Admissibility Errors)
     # Fix DC/Nyquist
-    if psd_data[0] <= 0:
-        psd_data[0] = psd_data[1] if psd_data[1] > 0 else 1.0
-    if psd_data[-1] <= 0:
-        psd_data[-1] = psd_data[-2] if psd_data[-2] > 0 else 1.0
+    # if psd_data[0] <= 0:
+    #     psd_data[0] = psd_data[1] if psd_data[1] > 0 else 1.0
+    # if psd_data[-1] <= 0:
+    #     psd_data[-1] = psd_data[-2] if psd_data[-2] > 0 else 1.0
+    #
+    # # Clamp interior zeros
+    # min_val = np.min(psd_data)
+    # if min_val <= 0:
+    #     valid_vals = psd_data[psd_data > 0]
+    #     floor = np.min(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-20
+    #     psd_data[psd_data <= 0] = floor
 
-    # Clamp interior zeros
-    min_val = np.min(psd_data)
-    if min_val <= 0:
-        valid_vals = psd_data[psd_data > 0]
-        floor = np.min(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-20
-        psd_data[psd_data <= 0] = floor
+    psd_data = condition_seismic_wall(psd_data, df)
 
     # 4. Generate Filter
     if zero_latency:
