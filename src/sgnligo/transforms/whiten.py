@@ -18,6 +18,7 @@ import lal.series
 import numpy as np
 from igwn_ligolw import utils as ligolw_utils
 from scipy import interpolate
+from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, sosfilt
 from scipy.special import loggamma
 
@@ -645,44 +646,43 @@ class Kernel:
 
 def condition_seismic_wall(psd_data: np.ndarray, df: float) -> np.ndarray:
     """
-    Restores PSD admissibility by enforcing the Seismic Wall structure.
-    Extends the seismic peak (5-50Hz) down to DC to prevent infinite gain.
+    1. Extends seismic wall to DC to prevent infinite gain.
+    2. Smooths the PSD to prevent time-domain ringing (spectral leakage).
     """
-    # Create frequency axis
     n_bins = len(psd_data)
     freqs = np.arange(n_bins) * df
 
-    # 1. Find Seismic Peak (5-50 Hz)
+    # --- 1. Seismic Wall Extension ---
+    # Find the peak between 5-50 Hz and clamp everything below it.
     mask_seismic = (freqs >= 5.0) & (freqs <= 50.0)
+    if np.any(mask_seismic):
+        seismic_indices = np.where(mask_seismic)[0]
+        # Find index of max value in the band
+        peak_idx_rel = np.argmax(psd_data[seismic_indices])
+        peak_idx = seismic_indices[peak_idx_rel]
+        peak_val = psd_data[peak_idx]
 
-    # Fallback if grid is weird or empty (e.g. very low sample rate)
-    if not np.any(mask_seismic):
-        # Just ensure positivity
-        psd_data[psd_data <= 0] = (
-            np.min(psd_data[psd_data > 0]) if np.any(psd_data > 0) else 1e-40
-        )
-        return psd_data
+        if peak_val > 0:
+            # Flatten the wall to DC
+            psd_data[:peak_idx] = np.maximum(psd_data[:peak_idx], peak_val)
 
-    # Find the peak index relative to the mask
-    # We want the index in the original array
-    seismic_indices = np.where(mask_seismic)[0]
-    peak_idx_rel = np.argmax(psd_data[seismic_indices])
-    peak_idx = seismic_indices[peak_idx_rel]
-    peak_val = psd_data[peak_idx]
-
-    # 2. Extend the Wall
-    # Clamp all frequencies below the peak to be at least the peak value
-    # This ensures gain <= 1/sqrt(peak) at DC.
-    if peak_val > 0:
-        psd_data[:peak_idx] = np.maximum(psd_data[:peak_idx], peak_val)
-
-    # 3. Final Sanity Check for Zeros (High freq or gaps)
-    # If any zeros remain, clamp them to epsilon
+    # --- 2. Clamp Zeros (Safety) ---
     min_val = np.min(psd_data)
     if min_val <= 0:
         valid_vals = psd_data[psd_data > 0]
         epsilon = np.min(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-40
         psd_data[psd_data <= 0] = epsilon
+
+    # --- 3. Cepstral-Compatible Smoothing (CRITICAL FIX) ---
+    # Sharp features (lines) cause long impulse responses that don't fit in the kernel window.
+    # We smooth the Log-PSD (Cepstrum) to preserve dynamic range while removing spikes.
+    # Sigma=2 bins is a robust default for 4s/8s kernels.
+    log_psd = np.log(psd_data)
+
+    # Apply Gaussian smoothing
+    smooth_log = gaussian_filter1d(log_psd, sigma=2.0)
+
+    psd_data = np.exp(smooth_log)
 
     return psd_data
 
