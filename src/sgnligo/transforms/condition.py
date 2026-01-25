@@ -297,7 +297,7 @@ def condition(
                 filters_pad_name=f"spectrum_{ifo}",
                 zero_latency=True,
                 min_update_interval=4_000_000_000,
-                window_spec=Tukey(alpha=0.1),
+                window_spec=Tukey(alpha=0.99),
             )
             pipeline.insert(
                 kern_whiten_elem,
@@ -355,7 +355,7 @@ def condition(
                         reference_psd=ref_psds[ifo],
                         # truncation_samples=whiten_sample_rate,
                         truncation_samples=None,
-                        smoothing_hz=0.5,
+                        smoothing_hz=10.0,
                         min_update_interval=4_000_000_000,
                     ),
                     link_map={
