@@ -296,7 +296,7 @@ def condition(
                 name=kern_whiten_name,
                 filters_pad_name=f"spectrum_{ifo}",
                 zero_latency=True,
-                min_update_interval=4_000_000_000_000,
+                min_update_interval=400_000_000_000,
                 window_spec=Tukey(alpha=0.1),
             )
             pipeline.insert(
