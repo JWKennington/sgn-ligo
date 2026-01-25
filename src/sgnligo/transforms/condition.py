@@ -37,6 +37,7 @@ from sgnts.transforms import AdaptiveCorrelate, Resampler, Threshold
 from sgnligo.psd import read_psd as _read_psd
 from sgnligo.transforms.latency import Latency
 from sgnligo.transforms.whiten import DriftCorrectionKernel, Whiten, WhiteningKernel
+from zlw.window import Tukey
 
 
 @dataclass
@@ -296,6 +297,7 @@ def condition(
                 filters_pad_name=f"spectrum_{ifo}",
                 zero_latency=True,
                 min_update_interval=4_000_000_000,
+                window_spec=Tukey(alpha=0.5),
             )
             pipeline.insert(
                 kern_whiten_elem,
