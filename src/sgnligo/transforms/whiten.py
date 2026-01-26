@@ -647,56 +647,35 @@ class Kernel:
 def regularize_psd_for_afir(psd_data: np.ndarray, df: float) -> np.ndarray:
     """
     Conditions PSD for Minimum Phase Whitening.
-
-    Updates:
-    - Enforces a 'Hard' DC Mountain to ensure Gain < 1 at low frequencies.
-    - Preserves Nyquist Wall and Safety Floor.
     """
     n_bins = len(psd_data)
-    freqs = np.arange(n_bins) * df
 
-    # --- 1. SEISMIC WALL (The "Hard" Fix) ---
-    # We simulate a High-Pass filter behavior.
-    # For the Whitener to act as a High-Pass, the PSD must blow up at DC.
-    # We enforce: PSD(f) >= (f_corner / f)^8.
-    # This ensures PSD > 1.0 below 10Hz, driving Gain (1/sqrt(P)) < 1.0.
+    # --- 1. Nyquist Wall (High Freq Fix) ---
+    # Prevents 1e-40 values at Nyquist from creating infinite gain
+    idx_safe = int(n_bins * 0.85)
+    if idx_safe < n_bins - 1:
+        # Floor to the median of the valid signal (robust against outliers)
+        valid_vals = psd_data[psd_data > 0]
+        floor_val = np.median(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-20
+        psd_data[idx_safe:] = np.maximum(psd_data[idx_safe:], floor_val)
 
-    f_corner = 10.0  # Hz (The cutoff frequency)
+    # --- 2. Safety Floor (Diagonal Loading) ---
+    # Prevents division by zero anywhere
+    psd_data = np.maximum(psd_data, 1e-50)
 
-    # Mask frequencies below corner (avoid division by zero at index 0)
-    mask_low = (freqs > 0) & (freqs < f_corner)
-    if np.any(mask_low):
-        # Calculate the "Mountain" shape
-        # Power 8 = 4th order filter slope (80dB/decade)
-        # We start from 1.0 to ensure the inverse gain is <= 1.0
-        mountain = 1.0 * (f_corner / freqs[mask_low]) ** 8
+    # --- 3. DC INFINITY (The Sinusoid Fix) ---
+    # To kill low-freq drift, we need Gain(0) = 0.
+    # Since Gain ~ 1/sqrt(PSD), we need PSD(0) = Infinity.
+    # We set DC (and the first bin) to a massive value relative to the strain.
+    # Typical strain PSD is 1e-40. Setting DC to 1.0 gives 10^40 margin.
+    # We apply this BEFORE smoothing so it blends naturally.
 
-        # Apply the mountain
-        # We take the MAXIMUM of the existing data or the mountain
-        # This overwrites the tiny 1e-45 values with massive numbers
-        psd_data[mask_low] = np.maximum(psd_data[mask_low], mountain)
+    huge_val = 1.0e10  # Effectively infinite compared to 1e-40
+    psd_data[0] = huge_val
+    psd_data[1] = huge_val
 
-        # Clamp DC (index 0) to the first valid bin's value
-        psd_data[0] = psd_data[mask_low][0]
-
-    # --- 2. Nyquist Wall (Existing Correct Logic) ---
-    safe_freq_ratio = 0.85
-    idx_safe_limit = int(n_bins * safe_freq_ratio)
-    if idx_safe_limit < n_bins - 1:
-        floor_val = psd_data[idx_safe_limit]
-        if floor_val <= 0:
-            floor_val = np.max(psd_data[int(n_bins * 0.5) : idx_safe_limit])
-        psd_data[idx_safe_limit:] = np.maximum(psd_data[idx_safe_limit:], floor_val)
-
-    # --- 3. Safety Floor (Existing Correct Logic) ---
-    # Robust Diagonal Loading
-    valid_vals = psd_data[psd_data > 0]
-    if len(valid_vals) > 0:
-        median_val = np.median(valid_vals)
-        dynamic_range_floor = median_val * 1e-6
-        psd_data = np.maximum(psd_data, dynamic_range_floor)
-
-    # --- 4. Smoothing (Existing Correct Logic) ---
+    # --- 4. Smoothing ---
+    # This prevents long time-domain ringing and helps the filter realizing the DC notch
     log_psd = np.log(psd_data)
     smooth_log = gaussian_filter1d(log_psd, sigma=2.0)
     psd_data = np.exp(smooth_log)
@@ -711,74 +690,40 @@ def kernel_from_psd(
 ) -> Kernel:
     """
     Generate a whitening kernel from a PSD using ZLW.
-    Includes robust fixes for DC leakage and Amplitude Scaling.
+    Matches Legacy scaling and enforces stability.
     """
-    # 1. Convert LAL to Numpy (Float64)
+    # 1. Convert LAL to Numpy
     psd_data = np.asarray(psd.data.data, dtype=np.float64).copy()
 
-    # 2. Derive Sampling Parameters
+    # 2. Derive Parameters
     df = psd.deltaF
     f0 = psd.f0
     n_bins = len(psd_data)
     n_fft = 2 * (n_bins - 1)
     fs = 2.0 * (f0 + (n_bins - 1) * df)
 
-    # 3. Regularize PSD (Nyquist Wall & Floor)
-    # We still use this to prevent high-freq explosion
+    # 3. Regularize (Includes the "DC Infinity" fix)
     psd_data = regularize_psd_for_afir(psd_data, df)
 
-    # --- 4. PRE-CONDITIONING: DIRECT DC ZEROING (Sinusoid Fix) ---
-    # The "DC Mountain" in step 3 isn't steep enough. We force the
-    # frequency response magnitude to zero at DC explicitly.
-
-    # Calculate target magnitude response: |H(f)| = 1 / sqrt(PSD)
-    # Handle zeros to avoid div/0 warnings
-    mag_response = np.zeros_like(psd_data)
-    valid_mask = psd_data > 0
-    mag_response[valid_mask] = 1.0 / np.sqrt(psd_data[valid_mask])
-
-    # KILL DC (This stops the sinusoid)
-    mag_response[0] = 0.0
-
-    # Optional: Smooth the transition (0-5Hz) to help the FIR filter
-    f_axis = np.arange(n_bins) * df
-    ramp_mask = (f_axis < 5.0) & (f_axis > 0)
-    mag_response[ramp_mask] *= np.sin((np.pi / 2) * (f_axis[ramp_mask] / 5.0)) ** 2
-
-    # Re-calculate Effective PSD for the filter class
-    # Effective PSD = 1 / |H|^2
-    effective_psd = np.zeros_like(psd_data)
-    valid_mag = mag_response > 0
-    effective_psd[valid_mag] = 1.0 / (mag_response[valid_mag] ** 2)
-    # For DC (where mag=0), PSD is effectively infinite.
-    # We set it to a safe huge number (e.g. 1e20 * max)
-    effective_psd[~valid_mag] = np.max(effective_psd[valid_mag]) * 1e6
-
-    # 5. Generate Filter
+    # 4. Generate Filter (Using zlw package)
     if zero_latency:
-        filt = MPWhiteningFilter(psd=effective_psd, fs=fs, n_fft=n_fft)
+        filt = MPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft)
         taps = filt.impulse_response(window=window_spec)
         latency = 0
     else:
         delay_samples = (n_fft - 1) / 2.0
         delay_seconds = delay_samples / fs
-        filt = LPWhiteningFilter(
-            psd=effective_psd, fs=fs, n_fft=n_fft, delay=delay_seconds
-        )
+        filt = LPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft, delay=delay_seconds)
         taps = filt.impulse_response(window=window_spec)
         latency = int(delay_samples)
 
-    # --- 6. NORMALIZE (The Amplitude Fix) ---
-    # We use Energy Normalization to guarantee RMS ~ 1.0.
-    # This bypasses all unit confusion.
-    # 1. Normalize filter to Unit Energy (preserves white noise variance)
-    energy = np.sum(taps**2)
-    if energy > 0:
-        taps /= np.sqrt(energy)
+    # --- 5. SCALING (The Amplitude Fix) ---
+    # The Legacy Whiten element scales the frequency response by sqrt(2 * df).
+    # The zlw filters have unit response (1/sqrt(PSD)).
+    # We apply the legacy factor to restore physical units.
 
-    # 2. Normalize for Bandwidth (Standard LIGO definition: Output RMS ~ 1)
-    # We divide by sqrt(Nyquist) to scale from Unit Variance to Sigma units.
-    taps /= np.sqrt(fs / 2)
+    scaling_factor = np.sqrt(2 * df)
+    taps *= scaling_factor
 
     return Kernel(fir_matrix=taps, latency=latency)
 
