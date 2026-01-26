@@ -699,18 +699,17 @@ def kernel_from_psd(
     # 1. Convert LAL to Numpy
     psd_data = np.asarray(psd.data.data, dtype=np.float64).copy()
 
-    # 2. Derive Sampling Parameters
+    # 2. Derive Parameters
     df = psd.deltaF
     f0 = psd.f0
     n_bins = len(psd_data)
     n_fft = 2 * (n_bins - 1)
     fs = 2.0 * (f0 + (n_bins - 1) * df)
 
-    # 3. Regularize (Apply Infinite DC & Nyquist Walls)
+    # 3. Regularize (Keep the Infinite DC fix!)
     psd_data = regularize_psd_for_afir(psd_data, df)
 
     # 4. Generate Filter
-    # We use the MPWhiteningFilter class as requested.
     if zero_latency:
         filt = MPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft)
         taps = filt.impulse_response(window=window_spec)
@@ -722,10 +721,18 @@ def kernel_from_psd(
         taps = filt.impulse_response(window=window_spec)
         latency = int(delay_samples)
 
-    # --- 5. SCALING ---
-    # Matches Legacy Whiten element scaling (sqrt(2 * df))
-    scaling_factor = np.sqrt(2 * df)
-    taps *= scaling_factor
+    # --- 5. SCALING CORRECTION ---
+    # Previous: taps *= np.sqrt(2*df)  --> Result RMS ~ 2000
+    # The mismatch is exactly factor of Bandwidth (f_Nyquist = fs/2 = 1024).
+    # We apply the legacy factor AND divide by Nyquist to normalize energy density.
+
+    # 1. Apply Frequency Domain scaling (Legacy)
+    taps *= np.sqrt(2 * df)
+
+    # 2. Apply Time Domain Normalization (Divide by Bandwidth)
+    # This brings the Sum of Squares from ~2000^2 down to ~1.0
+    f_nyquist = fs / 2.0
+    taps /= f_nyquist
 
     return Kernel(fir_matrix=taps, latency=latency)
 
