@@ -644,7 +644,7 @@ class Kernel:
     latency: int
 
 
-def condition_seismic_wall(psd_data: np.ndarray, df: float) -> np.ndarray:
+def regularize_psd_for_afir(psd_data: np.ndarray, df: float) -> np.ndarray:
     """
     Conditions the PSD to ensure stability of the inverse whitening filter.
 
@@ -748,7 +748,7 @@ def kernel_from_psd(
     #     floor = np.min(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-20
     #     psd_data[psd_data <= 0] = floor
 
-    psd_data = condition_seismic_wall(psd_data, df)
+    psd_data = regularize_psd_for_afir(psd_data, df)
 
     # 4. Generate Filter
     if zero_latency:
@@ -761,6 +761,9 @@ def kernel_from_psd(
         filt = LPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft, delay=delay_seconds)
         taps = filt.impulse_response(window=window_spec)
         latency = int(delay_samples)
+
+    # For now, let's just apply the physical bandwidth correction:
+    taps /= np.sqrt(fs / 2)
 
     return Kernel(fir_matrix=taps, latency=latency)
 
