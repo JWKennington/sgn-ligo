@@ -298,6 +298,7 @@ def condition(
                 zero_latency=True,
                 # min_update_interval=400_000_000_000,
                 window_spec=Tukey(alpha=0.5),
+                whiten_sample_rate=whiten_sample_rate,
             )
             pipeline.insert(
                 kern_whiten_elem,

@@ -854,6 +854,7 @@ class WhiteningKernel(PSDKernelLogicMixin, TSTransform):
     window_spec: Optional[WindowSpec] = None
     min_update_interval: Optional[int] = None
     similarity_threshold: float = 0.9999
+    whiten_sample_rate: int = 2048
     verbose: bool = False
 
     @property
@@ -877,6 +878,8 @@ class WhiteningKernel(PSDKernelLogicMixin, TSTransform):
         self._latest_epoch: Optional[int] = None
         self._last_psd_data: Optional[np.ndarray] = None
         self.source_pad = self.srcs[self.filters_pad_name]
+        if self.whiten_sample_rate is None:
+            raise ValueError("Whitening kernel requires `whiten_sample_rate`.")
 
     def internal(self) -> None:
         _, input_frame = self.next_input()
@@ -891,6 +894,12 @@ class WhiteningKernel(PSDKernelLogicMixin, TSTransform):
                 live_psd, zero_latency=self.zero_latency, window_spec=self.window_spec
             )
             taps = k.fir_matrix
+
+            # Trim kernel for data length compatibility (so that correlate(data, taps)
+            # produces output of length len(data))
+            max_kernel_len = 2 * self.whiten_sample_rate - 1
+            taps = taps[:max_kernel_len]
+
             output_frame.noffset = int(TIME_MAX) - output_frame.offset
             buf = EventBuffer(
                 offset=output_frame.offset,
