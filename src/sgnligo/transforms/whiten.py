@@ -733,6 +733,9 @@ def kernel_from_psd(
     # This brings the Sum of Squares from ~2000^2 down to ~1.0
     taps /= fs
 
+    # Flip order for usage with correlate instead of convolve
+    taps = taps[::-1]
+
     return Kernel(fir_matrix=taps, latency=latency)
 
 
@@ -892,7 +895,7 @@ class WhiteningKernel(PSDKernelLogicMixin, TSTransform):
             buf = EventBuffer(
                 offset=output_frame.offset,
                 noffset=output_frame.noffset,
-                data=[np.asarray([taps[::-1]])],
+                data=[np.asarray(taps)],
             )
             output_frame.append(buf)
             output_frame.is_gap = False
