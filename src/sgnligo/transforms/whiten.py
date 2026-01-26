@@ -647,44 +647,37 @@ class Kernel:
 def regularize_psd_for_afir(psd_data: np.ndarray, df: float) -> np.ndarray:
     """
     Conditions PSD for Minimum Phase Whitening.
+
     Updates:
-    - Enforces 'DC Mountain' (High Pass) to kill low-freq drift.
-    - Enforces 'Nyquist Wall' to prevent high-freq explosion.
-    - Enforces 'Safety Floor' for stability.
+    - Enforces a 'Hard' DC Mountain to ensure Gain < 1 at low frequencies.
+    - Preserves Nyquist Wall and Safety Floor.
     """
     n_bins = len(psd_data)
     freqs = np.arange(n_bins) * df
 
-    # --- 1. SEISMIC WALL -> DC MOUNTAIN (The Sinusoid Fix) ---
-    # Old way: Flatten to peak.
-    # New way: Ramp up to Infinity below peak to force DC Gain -> 0.
+    # --- 1. SEISMIC WALL (The "Hard" Fix) ---
+    # We simulate a High-Pass filter behavior.
+    # For the Whitener to act as a High-Pass, the PSD must blow up at DC.
+    # We enforce: PSD(f) >= (f_corner / f)^8.
+    # This ensures PSD > 1.0 below 10Hz, driving Gain (1/sqrt(P)) < 1.0.
 
-    mask_seismic = (freqs >= 5.0) & (freqs <= 50.0)
-    if np.any(mask_seismic):
-        seismic_indices = np.where(mask_seismic)[0]
-        peak_idx_rel = np.argmax(psd_data[seismic_indices])
-        peak_idx = seismic_indices[peak_idx_rel]
-        peak_val = psd_data[peak_idx]
+    f_corner = 10.0  # Hz (The cutoff frequency)
 
-        if peak_val > 0:
-            # 1. First, flatten it (base level)
-            psd_data[:peak_idx] = np.maximum(psd_data[:peak_idx], peak_val)
+    # Mask frequencies below corner (avoid division by zero at index 0)
+    mask_low = (freqs > 0) & (freqs < f_corner)
+    if np.any(mask_low):
+        # Calculate the "Mountain" shape
+        # Power 8 = 4th order filter slope (80dB/decade)
+        # We start from 1.0 to ensure the inverse gain is <= 1.0
+        mountain = 1.0 * (f_corner / freqs[mask_low]) ** 8
 
-            # 2. Then, build the Mountain (Inverse Square law below peak)
-            # This simulates a 2nd order High Pass filter in the whitener.
-            # Avoid div/0 at index 0
-            if peak_idx > 1:
-                # Frequencies below peak
-                f_sub = freqs[1:peak_idx]
-                f_peak = freqs[peak_idx]
+        # Apply the mountain
+        # We take the MAXIMUM of the existing data or the mountain
+        # This overwrites the tiny 1e-45 values with massive numbers
+        psd_data[mask_low] = np.maximum(psd_data[mask_low], mountain)
 
-                # Scale factor: (f_peak / f)^2
-                # This makes PSD grow as f -> 0
-                ramp = (f_peak / f_sub) ** 4  # Steep wall (4th order)
-                psd_data[1:peak_idx] *= ramp
-
-                # Set DC bin (index 0) to a massive value
-                psd_data[0] = psd_data[1] * 100
+        # Clamp DC (index 0) to the first valid bin's value
+        psd_data[0] = psd_data[mask_low][0]
 
     # --- 2. Nyquist Wall (Existing Correct Logic) ---
     safe_freq_ratio = 0.85
@@ -696,9 +689,12 @@ def regularize_psd_for_afir(psd_data: np.ndarray, df: float) -> np.ndarray:
         psd_data[idx_safe_limit:] = np.maximum(psd_data[idx_safe_limit:], floor_val)
 
     # --- 3. Safety Floor (Existing Correct Logic) ---
-    median_val = np.median(psd_data[psd_data > 0])
-    dynamic_range_floor = median_val * 1e-6
-    psd_data = np.maximum(psd_data, dynamic_range_floor)
+    # Robust Diagonal Loading
+    valid_vals = psd_data[psd_data > 0]
+    if len(valid_vals) > 0:
+        median_val = np.median(valid_vals)
+        dynamic_range_floor = median_val * 1e-6
+        psd_data = np.maximum(psd_data, dynamic_range_floor)
 
     # --- 4. Smoothing (Existing Correct Logic) ---
     log_psd = np.log(psd_data)
