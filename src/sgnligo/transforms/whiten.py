@@ -646,18 +646,19 @@ class Kernel:
 
 def regularize_psd_for_afir(psd_data: np.ndarray, df: float) -> np.ndarray:
     """
-    Conditions the PSD to ensure stability of the inverse whitening filter.
-
-    1. Seismic Wall (DC): Extends the seismic peak down to DC to prevent infinite gain.
-    2. Nyquist Wall (HF): Extends the high-frequency floor up to Nyquist to prevent infinite gain.
-    3. Smoothing: Smooths spectral lines to prevent long time-domain ringing.
+    Conditions PSD for Minimum Phase Whitening.
+    Updates:
+    - Enforces 'DC Mountain' (High Pass) to kill low-freq drift.
+    - Enforces 'Nyquist Wall' to prevent high-freq explosion.
+    - Enforces 'Safety Floor' for stability.
     """
     n_bins = len(psd_data)
     freqs = np.arange(n_bins) * df
-    f_nyquist = freqs[-1]
 
-    # --- 1. Seismic Wall Extension (Low Freq) ---
-    # Find the peak between 5-50 Hz and clamp everything below it.
+    # --- 1. SEISMIC WALL -> DC MOUNTAIN (The Sinusoid Fix) ---
+    # Old way: Flatten to peak.
+    # New way: Ramp up to Infinity below peak to force DC Gain -> 0.
+
     mask_seismic = (freqs >= 5.0) & (freqs <= 50.0)
     if np.any(mask_seismic):
         seismic_indices = np.where(mask_seismic)[0]
@@ -666,49 +667,40 @@ def regularize_psd_for_afir(psd_data: np.ndarray, df: float) -> np.ndarray:
         peak_val = psd_data[peak_idx]
 
         if peak_val > 0:
-            # Flatten the wall to DC
+            # 1. First, flatten it (base level)
             psd_data[:peak_idx] = np.maximum(psd_data[:peak_idx], peak_val)
 
-    # --- 2. Nyquist Wall Extension (High Freq) ---
-    # The anti-aliasing filter causes a roll-off near Nyquist.
-    # If the PSD drops to zero (or epsilon), gain becomes infinite (10^25).
-    # We detect where the roll-off starts (e.g. 85% of Nyquist) and clamp to that floor.
+            # 2. Then, build the Mountain (Inverse Square law below peak)
+            # This simulates a 2nd order High Pass filter in the whitener.
+            # Avoid div/0 at index 0
+            if peak_idx > 1:
+                # Frequencies below peak
+                f_sub = freqs[1:peak_idx]
+                f_peak = freqs[peak_idx]
 
-    # Define a safe cutoff, e.g., 0.85 * Nyquist
-    # (Standard LIGO data is often valid up to ~7 kHz for 16 kHz sampling)
+                # Scale factor: (f_peak / f)^2
+                # This makes PSD grow as f -> 0
+                ramp = (f_peak / f_sub) ** 4  # Steep wall (4th order)
+                psd_data[1:peak_idx] *= ramp
+
+                # Set DC bin (index 0) to a massive value
+                psd_data[0] = psd_data[1] * 100
+
+    # --- 2. Nyquist Wall (Existing Correct Logic) ---
     safe_freq_ratio = 0.85
     idx_safe_limit = int(n_bins * safe_freq_ratio)
-
     if idx_safe_limit < n_bins - 1:
-        # Take the value at the safe limit as the "floor"
         floor_val = psd_data[idx_safe_limit]
-
-        # Ensure we don't accidentally pick a zero if the spectrum is weird
-        # Search backwards a bit if needed, or just use a robust max
         if floor_val <= 0:
             floor_val = np.max(psd_data[int(n_bins * 0.5) : idx_safe_limit])
-
-        # Clamp everything above the safe limit to this floor
-        # This fills the "Trench"
         psd_data[idx_safe_limit:] = np.maximum(psd_data[idx_safe_limit:], floor_val)
 
-    # --- 3. Robust Diagonal Loading (The "Safety Floor") ---
-    # Instead of trusting the minimum (which can be tiny), we inject a
-    # specific amount of white noise relative to the MEDIAN power.
-    # This guarantees the condition number of the inversion is bounded.
-
-    # Calculate median power of the active band
+    # --- 3. Safety Floor (Existing Correct Logic) ---
     median_val = np.median(psd_data[psd_data > 0])
-
-    # Set floor at -60dB (1e-6) relative to typical signal levels.
-    # This ensures max gain never exceeds ~1000x, preventing explosions.
     dynamic_range_floor = median_val * 1e-6
-
-    # Apply the floor globally
     psd_data = np.maximum(psd_data, dynamic_range_floor)
 
-    # --- 4. Cepstral-Compatible Smoothing ---
-    # Reduces time-domain ringing
+    # --- 4. Smoothing (Existing Correct Logic) ---
     log_psd = np.log(psd_data)
     smooth_log = gaussian_filter1d(log_psd, sigma=2.0)
     psd_data = np.exp(smooth_log)
@@ -762,8 +754,13 @@ def kernel_from_psd(
         taps = filt.impulse_response(window=window_spec)
         latency = int(delay_samples)
 
-    # For now, let's just apply the physical bandwidth correction:
-    taps /= np.sqrt(fs / 2)
+    # --- 5. NORMALIZE (The Amplitude Fix) ---
+    # Legacy code uses Gain = sqrt(2 * df / PSD).
+    # MPWhiteningFilter uses Gain = 1 / sqrt(PSD).
+    # We must apply the missing sqrt(2 * df) factor.
+
+    scaling_factor = np.sqrt(2 * df)
+    taps *= scaling_factor
 
     return Kernel(fir_matrix=taps, latency=latency)
 
