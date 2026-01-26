@@ -711,6 +711,7 @@ def kernel_from_psd(
 ) -> Kernel:
     """
     Generate a whitening kernel from a PSD using ZLW.
+    Includes robust fixes for DC leakage and Amplitude Scaling.
     """
     # 1. Convert LAL to Numpy (Float64)
     psd_data = np.asarray(psd.data.data, dtype=np.float64).copy()
@@ -722,41 +723,62 @@ def kernel_from_psd(
     n_fft = 2 * (n_bins - 1)
     fs = 2.0 * (f0 + (n_bins - 1) * df)
 
-    # 3. Sanitize PSD (Prevent ZLW Admissibility Errors)
-    # Fix DC/Nyquist
-    # if psd_data[0] <= 0:
-    #     psd_data[0] = psd_data[1] if psd_data[1] > 0 else 1.0
-    # if psd_data[-1] <= 0:
-    #     psd_data[-1] = psd_data[-2] if psd_data[-2] > 0 else 1.0
-    #
-    # # Clamp interior zeros
-    # min_val = np.min(psd_data)
-    # if min_val <= 0:
-    #     valid_vals = psd_data[psd_data > 0]
-    #     floor = np.min(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-20
-    #     psd_data[psd_data <= 0] = floor
-
+    # 3. Regularize PSD (Nyquist Wall & Floor)
+    # We still use this to prevent high-freq explosion
     psd_data = regularize_psd_for_afir(psd_data, df)
 
-    # 4. Generate Filter
+    # --- 4. PRE-CONDITIONING: DIRECT DC ZEROING (Sinusoid Fix) ---
+    # The "DC Mountain" in step 3 isn't steep enough. We force the
+    # frequency response magnitude to zero at DC explicitly.
+
+    # Calculate target magnitude response: |H(f)| = 1 / sqrt(PSD)
+    # Handle zeros to avoid div/0 warnings
+    mag_response = np.zeros_like(psd_data)
+    valid_mask = psd_data > 0
+    mag_response[valid_mask] = 1.0 / np.sqrt(psd_data[valid_mask])
+
+    # KILL DC (This stops the sinusoid)
+    mag_response[0] = 0.0
+
+    # Optional: Smooth the transition (0-5Hz) to help the FIR filter
+    f_axis = np.arange(n_bins) * df
+    ramp_mask = (f_axis < 5.0) & (f_axis > 0)
+    mag_response[ramp_mask] *= np.sin((np.pi / 2) * (f_axis[ramp_mask] / 5.0)) ** 2
+
+    # Re-calculate Effective PSD for the filter class
+    # Effective PSD = 1 / |H|^2
+    effective_psd = np.zeros_like(psd_data)
+    valid_mag = mag_response > 0
+    effective_psd[valid_mag] = 1.0 / (mag_response[valid_mag] ** 2)
+    # For DC (where mag=0), PSD is effectively infinite.
+    # We set it to a safe huge number (e.g. 1e20 * max)
+    effective_psd[~valid_mag] = np.max(effective_psd[valid_mag]) * 1e6
+
+    # 5. Generate Filter
     if zero_latency:
-        filt = MPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft)
+        filt = MPWhiteningFilter(psd=effective_psd, fs=fs, n_fft=n_fft)
         taps = filt.impulse_response(window=window_spec)
         latency = 0
     else:
         delay_samples = (n_fft - 1) / 2.0
         delay_seconds = delay_samples / fs
-        filt = LPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft, delay=delay_seconds)
+        filt = LPWhiteningFilter(
+            psd=effective_psd, fs=fs, n_fft=n_fft, delay=delay_seconds
+        )
         taps = filt.impulse_response(window=window_spec)
         latency = int(delay_samples)
 
-    # --- 5. NORMALIZE (The Amplitude Fix) ---
-    # Legacy code uses Gain = sqrt(2 * df / PSD).
-    # MPWhiteningFilter uses Gain = 1 / sqrt(PSD).
-    # We must apply the missing sqrt(2 * df) factor.
+    # --- 6. NORMALIZE (The Amplitude Fix) ---
+    # We use Energy Normalization to guarantee RMS ~ 1.0.
+    # This bypasses all unit confusion.
+    # 1. Normalize filter to Unit Energy (preserves white noise variance)
+    energy = np.sum(taps**2)
+    if energy > 0:
+        taps /= np.sqrt(energy)
 
-    scaling_factor = np.sqrt(2 * df)
-    taps *= scaling_factor
+    # 2. Normalize for Bandwidth (Standard LIGO definition: Output RMS ~ 1)
+    # We divide by sqrt(Nyquist) to scale from Unit Variance to Sigma units.
+    taps /= np.sqrt(fs / 2)
 
     return Kernel(fir_matrix=taps, latency=latency)
 
