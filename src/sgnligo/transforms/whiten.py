@@ -692,13 +692,20 @@ def condition_seismic_wall(psd_data: np.ndarray, df: float) -> np.ndarray:
         # This fills the "Trench"
         psd_data[idx_safe_limit:] = np.maximum(psd_data[idx_safe_limit:], floor_val)
 
-    # --- 3. Clamp Zeros (Global Safety) ---
-    # Ensure no bin is absolute zero
-    min_val = np.min(psd_data)
-    if min_val <= 0:
-        valid_vals = psd_data[psd_data > 0]
-        epsilon = np.min(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-40
-        psd_data[psd_data <= 0] = epsilon
+    # --- 3. Robust Diagonal Loading (The "Safety Floor") ---
+    # Instead of trusting the minimum (which can be tiny), we inject a
+    # specific amount of white noise relative to the MEDIAN power.
+    # This guarantees the condition number of the inversion is bounded.
+
+    # Calculate median power of the active band
+    median_val = np.median(psd_data[psd_data > 0])
+
+    # Set floor at -60dB (1e-6) relative to typical signal levels.
+    # This ensures max gain never exceeds ~1000x, preventing explosions.
+    dynamic_range_floor = median_val * 1e-6
+
+    # Apply the floor globally
+    psd_data = np.maximum(psd_data, dynamic_range_floor)
 
     # --- 4. Cepstral-Compatible Smoothing ---
     # Reduces time-domain ringing
