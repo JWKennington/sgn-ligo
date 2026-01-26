@@ -296,7 +296,7 @@ def condition(
                 name=kern_whiten_name,
                 filters_pad_name=f"spectrum_{ifo}",
                 zero_latency=True,
-                # min_update_interval=400_000_000_000,
+                min_update_interval=4_000_000_000,
                 window_spec=Tukey(alpha=0.5),
                 whiten_sample_rate=whiten_sample_rate,
             )
@@ -315,6 +315,7 @@ def condition(
                     source_pad_names=(ifo,),
                     sample_rate=whiten_sample_rate,
                     filter_sink_name="filters",
+                    shape=(8192,),
                 ),
                 link_map={
                     f"{afir_whiten_name}:snk:{ifo}": current_link,
