@@ -647,39 +647,40 @@ class Kernel:
 def regularize_psd_for_afir(psd_data: np.ndarray, df: float) -> np.ndarray:
     """
     Conditions PSD for Minimum Phase Whitening.
+
+    CRITICAL FIX: Replaces "Seismic Wall" (Flattening) with "Infinite Wall" (Boundary Kill).
+    This forces the Whitening Gain to ZERO at DC and Nyquist.
     """
     n_bins = len(psd_data)
 
     # --- 1. Nyquist Wall (High Freq Fix) ---
-    # Prevents 1e-40 values at Nyquist from creating infinite gain
+    # Prevents high-frequency explosion due to anti-aliasing roll-off
     idx_safe = int(n_bins * 0.85)
     if idx_safe < n_bins - 1:
-        # Floor to the median of the valid signal (robust against outliers)
         valid_vals = psd_data[psd_data > 0]
+        # Robust floor based on median
         floor_val = np.median(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-20
         psd_data[idx_safe:] = np.maximum(psd_data[idx_safe:], floor_val)
 
     # --- 2. Safety Floor (Diagonal Loading) ---
-    # Prevents division by zero anywhere
+    # Prevents division by zero
     psd_data = np.maximum(psd_data, 1e-50)
 
-    # --- 3. DC INFINITY (The Sinusoid Fix) ---
-    # To kill low-freq drift, we need Gain(0) = 0.
-    # Since Gain ~ 1/sqrt(PSD), we need PSD(0) = Infinity.
-    # We set DC (and the first bin) to a massive value relative to the strain.
-    # Typical strain PSD is 1e-40. Setting DC to 1.0 gives 10^40 margin.
-    # We apply this BEFORE smoothing so it blends naturally.
+    # --- 3. BOUNDARY KILL (The Sinusoid Fix) ---
+    # We DO NOT flatten the seismic wall. We set it to "Infinity".
+    # This forces the Inverse Filter (Whitener) to have 0 Gain at DC.
 
-    huge_val = 1.0e10  # Effectively infinite compared to 1e-40
+    huge_val = 1.0e10  # Sufficiently huge relative to 1e-40 signal
 
-    # Kill DC (Drift)
+    # Kill DC (Stops Drift/Sinusoid)
     psd_data[0] = huge_val
+    psd_data[1] = huge_val
 
-    # Kill Nyquist (Aliasing/Noise) - THE FIX
+    # Kill Nyquist (Matches Legacy Behavior)
     psd_data[-1] = huge_val
 
     # --- 4. Smoothing ---
-    # This prevents long time-domain ringing and helps the filter realizing the DC notch
+    # Essential for short FIR kernels to capture features without ringing
     log_psd = np.log(psd_data)
     smooth_log = gaussian_filter1d(log_psd, sigma=2.0)
     psd_data = np.exp(smooth_log)
@@ -694,22 +695,22 @@ def kernel_from_psd(
 ) -> Kernel:
     """
     Generate a whitening kernel from a PSD using ZLW.
-    Matches Legacy scaling and enforces stability.
     """
     # 1. Convert LAL to Numpy
     psd_data = np.asarray(psd.data.data, dtype=np.float64).copy()
 
-    # 2. Derive Parameters
+    # 2. Derive Sampling Parameters
     df = psd.deltaF
     f0 = psd.f0
     n_bins = len(psd_data)
     n_fft = 2 * (n_bins - 1)
     fs = 2.0 * (f0 + (n_bins - 1) * df)
 
-    # 3. Regularize (Includes the "DC Infinity" fix)
+    # 3. Regularize (Apply Infinite DC & Nyquist Walls)
     psd_data = regularize_psd_for_afir(psd_data, df)
 
-    # 4. Generate Filter (Using zlw package)
+    # 4. Generate Filter
+    # We use the MPWhiteningFilter class as requested.
     if zero_latency:
         filt = MPWhiteningFilter(psd=psd_data, fs=fs, n_fft=n_fft)
         taps = filt.impulse_response(window=window_spec)
@@ -721,11 +722,8 @@ def kernel_from_psd(
         taps = filt.impulse_response(window=window_spec)
         latency = int(delay_samples)
 
-    # --- 5. SCALING (The Amplitude Fix) ---
-    # The Legacy Whiten element scales the frequency response by sqrt(2 * df).
-    # The zlw filters have unit response (1/sqrt(PSD)).
-    # We apply the legacy factor to restore physical units.
-
+    # --- 5. SCALING ---
+    # Matches Legacy Whiten element scaling (sqrt(2 * df))
     scaling_factor = np.sqrt(2 * df)
     taps *= scaling_factor
 
