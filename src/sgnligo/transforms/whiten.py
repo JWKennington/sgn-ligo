@@ -727,7 +727,7 @@ def kernel_from_psd(
     # We apply the legacy factor AND divide by Nyquist to normalize energy density.
 
     # 1. Apply Frequency Domain scaling (Legacy)
-    taps *= np.sqrt(2 * df)
+    taps *= np.sqrt(df)
 
     # 2. Apply Time Domain Normalization (Divide by Bandwidth)
     # This brings the Sum of Squares from ~2000^2 down to ~1.0
