@@ -671,8 +671,12 @@ def regularize_psd_for_afir(psd_data: np.ndarray, df: float) -> np.ndarray:
     # We apply this BEFORE smoothing so it blends naturally.
 
     huge_val = 1.0e10  # Effectively infinite compared to 1e-40
+
+    # Kill DC (Drift)
     psd_data[0] = huge_val
-    psd_data[1] = huge_val
+
+    # Kill Nyquist (Aliasing/Noise) - THE FIX
+    psd_data[-1] = huge_val
 
     # --- 4. Smoothing ---
     # This prevents long time-domain ringing and helps the filter realizing the DC notch
