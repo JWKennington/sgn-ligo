@@ -892,7 +892,7 @@ class WhiteningKernel(PSDKernelLogicMixin, TSTransform):
             buf = EventBuffer(
                 offset=output_frame.offset,
                 noffset=output_frame.noffset,
-                data=[np.asarray([taps])],
+                data=[np.asarray([taps[::-1]])],
             )
             output_frame.append(buf)
             output_frame.is_gap = False
