@@ -647,41 +647,56 @@ class Kernel:
 def condition_seismic_wall(psd_data: np.ndarray, df: float) -> np.ndarray:
     """
     1. Extends seismic wall to DC to prevent infinite gain.
-    2. Smooths the PSD to prevent time-domain ringing (spectral leakage).
+    2. Extends the high-freq noise floor to Nyquist (The "Nyquist Wall").
+    3. Smooths the PSD to prevent time-domain ringing.
     """
     n_bins = len(psd_data)
     freqs = np.arange(n_bins) * df
 
-    # --- 1. Seismic Wall Extension ---
-    # Find the peak between 5-50 Hz and clamp everything below it.
+    # --- 1. Seismic Wall (Low Freq Fix) ---
+    # Find peak between 5-50 Hz and clamp everything below it.
     mask_seismic = (freqs >= 5.0) & (freqs <= 50.0)
     if np.any(mask_seismic):
         seismic_indices = np.where(mask_seismic)[0]
-        # Find index of max value in the band
         peak_idx_rel = np.argmax(psd_data[seismic_indices])
         peak_idx = seismic_indices[peak_idx_rel]
         peak_val = psd_data[peak_idx]
 
+        # Clamp Low Freqs to the Seismic Peak
         if peak_val > 0:
-            # Flatten the wall to DC
             psd_data[:peak_idx] = np.maximum(psd_data[:peak_idx], peak_val)
 
-    # --- 2. Clamp Zeros (Safety) ---
+    # --- 2. Nyquist Wall (High Freq Fix - NEW) ---
+    # The PSD drops off due to anti-aliasing filters. Inverting this causes
+    # the noise explosion. We find a safe reference (e.g., 80% of Nyquist)
+    # and clamp everything above it to that level.
+
+    # Define a "safe" high frequency anchor (e.g. 7kHz for a 16kHz system)
+    # or simply use the last 10% of the band.
+    nyquist_freq = freqs[-1]
+    safe_freq_cutoff = 0.9 * nyquist_freq
+
+    mask_high = freqs >= safe_freq_cutoff
+    if np.any(mask_high):
+        # Use the value AT the cutoff as the floor for everything above it
+        idx_cutoff = np.where(freqs >= safe_freq_cutoff)[0][0]
+        floor_val = psd_data[idx_cutoff]
+
+        # Clamp High Freqs to the High-Freq Floor
+        psd_data[idx_cutoff:] = np.maximum(psd_data[idx_cutoff:], floor_val)
+
+    # --- 3. Clamp Zeros (Safety Net) ---
+    # Now that we've handled the edges, this catches only true oddities.
     min_val = np.min(psd_data)
     if min_val <= 0:
         valid_vals = psd_data[psd_data > 0]
-        epsilon = np.min(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-40
-        psd_data[psd_data <= 0] = epsilon
+        # Use a reasonable floor relative to signal, not 1e-40
+        epsilon = np.median(valid_vals) * 1e-8 if len(valid_vals) > 0 else 1e-10
+        psd_data[psd_data <= epsilon] = epsilon
 
-    # --- 3. Cepstral-Compatible Smoothing (CRITICAL FIX) ---
-    # Sharp features (lines) cause long impulse responses that don't fit in the kernel window.
-    # We smooth the Log-PSD (Cepstrum) to preserve dynamic range while removing spikes.
-    # Sigma=2 bins is a robust default for 4s/8s kernels.
+    # --- 4. Cepstral Smoothing ---
     log_psd = np.log(psd_data)
-
-    # Apply Gaussian smoothing
     smooth_log = gaussian_filter1d(log_psd, sigma=2.0)
-
     psd_data = np.exp(smooth_log)
 
     return psd_data
