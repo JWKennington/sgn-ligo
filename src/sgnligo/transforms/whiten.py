@@ -646,15 +646,18 @@ class Kernel:
 
 def condition_seismic_wall(psd_data: np.ndarray, df: float) -> np.ndarray:
     """
-    1. Extends seismic wall to DC to prevent infinite gain.
-    2. Extends the high-freq noise floor to Nyquist (The "Nyquist Wall").
-    3. Smooths the PSD to prevent time-domain ringing.
+    Conditions the PSD to ensure stability of the inverse whitening filter.
+
+    1. Seismic Wall (DC): Extends the seismic peak down to DC to prevent infinite gain.
+    2. Nyquist Wall (HF): Extends the high-frequency floor up to Nyquist to prevent infinite gain.
+    3. Smoothing: Smooths spectral lines to prevent long time-domain ringing.
     """
     n_bins = len(psd_data)
     freqs = np.arange(n_bins) * df
+    f_nyquist = freqs[-1]
 
-    # --- 1. Seismic Wall (Low Freq Fix) ---
-    # Find peak between 5-50 Hz and clamp everything below it.
+    # --- 1. Seismic Wall Extension (Low Freq) ---
+    # Find the peak between 5-50 Hz and clamp everything below it.
     mask_seismic = (freqs >= 5.0) & (freqs <= 50.0)
     if np.any(mask_seismic):
         seismic_indices = np.where(mask_seismic)[0]
@@ -662,39 +665,43 @@ def condition_seismic_wall(psd_data: np.ndarray, df: float) -> np.ndarray:
         peak_idx = seismic_indices[peak_idx_rel]
         peak_val = psd_data[peak_idx]
 
-        # Clamp Low Freqs to the Seismic Peak
         if peak_val > 0:
+            # Flatten the wall to DC
             psd_data[:peak_idx] = np.maximum(psd_data[:peak_idx], peak_val)
 
-    # --- 2. Nyquist Wall (High Freq Fix - NEW) ---
-    # The PSD drops off due to anti-aliasing filters. Inverting this causes
-    # the noise explosion. We find a safe reference (e.g., 80% of Nyquist)
-    # and clamp everything above it to that level.
+    # --- 2. Nyquist Wall Extension (High Freq) ---
+    # The anti-aliasing filter causes a roll-off near Nyquist.
+    # If the PSD drops to zero (or epsilon), gain becomes infinite (10^25).
+    # We detect where the roll-off starts (e.g. 85% of Nyquist) and clamp to that floor.
 
-    # Define a "safe" high frequency anchor (e.g. 7kHz for a 16kHz system)
-    # or simply use the last 10% of the band.
-    nyquist_freq = freqs[-1]
-    safe_freq_cutoff = 0.9 * nyquist_freq
+    # Define a safe cutoff, e.g., 0.85 * Nyquist
+    # (Standard LIGO data is often valid up to ~7 kHz for 16 kHz sampling)
+    safe_freq_ratio = 0.85
+    idx_safe_limit = int(n_bins * safe_freq_ratio)
 
-    mask_high = freqs >= safe_freq_cutoff
-    if np.any(mask_high):
-        # Use the value AT the cutoff as the floor for everything above it
-        idx_cutoff = np.where(freqs >= safe_freq_cutoff)[0][0]
-        floor_val = psd_data[idx_cutoff]
+    if idx_safe_limit < n_bins - 1:
+        # Take the value at the safe limit as the "floor"
+        floor_val = psd_data[idx_safe_limit]
 
-        # Clamp High Freqs to the High-Freq Floor
-        psd_data[idx_cutoff:] = np.maximum(psd_data[idx_cutoff:], floor_val)
+        # Ensure we don't accidentally pick a zero if the spectrum is weird
+        # Search backwards a bit if needed, or just use a robust max
+        if floor_val <= 0:
+            floor_val = np.max(psd_data[int(n_bins * 0.5) : idx_safe_limit])
 
-    # --- 3. Clamp Zeros (Safety Net) ---
-    # Now that we've handled the edges, this catches only true oddities.
+        # Clamp everything above the safe limit to this floor
+        # This fills the "Trench"
+        psd_data[idx_safe_limit:] = np.maximum(psd_data[idx_safe_limit:], floor_val)
+
+    # --- 3. Clamp Zeros (Global Safety) ---
+    # Ensure no bin is absolute zero
     min_val = np.min(psd_data)
     if min_val <= 0:
         valid_vals = psd_data[psd_data > 0]
-        # Use a reasonable floor relative to signal, not 1e-40
-        epsilon = np.median(valid_vals) * 1e-8 if len(valid_vals) > 0 else 1e-10
-        psd_data[psd_data <= epsilon] = epsilon
+        epsilon = np.min(valid_vals) * 1e-6 if len(valid_vals) > 0 else 1e-40
+        psd_data[psd_data <= 0] = epsilon
 
-    # --- 4. Cepstral Smoothing ---
+    # --- 4. Cepstral-Compatible Smoothing ---
+    # Reduces time-domain ringing
     log_psd = np.log(psd_data)
     smooth_log = gaussian_filter1d(log_psd, sigma=2.0)
     psd_data = np.exp(smooth_log)
