@@ -897,8 +897,8 @@ class WhiteningKernel(PSDKernelLogicMixin, TSTransform):
 
             # Trim kernel for data length compatibility (so that correlate(data, taps)
             # produces output of length len(data))
-            max_kernel_len = 2 * self.whiten_sample_rate - 1
-            taps = taps[:max_kernel_len]
+            # max_kernel_len = 2 * self.whiten_sample_rate - 1
+            # taps = taps[:max_kernel_len]
 
             output_frame.noffset = int(TIME_MAX) - output_frame.offset
             buf = EventBuffer(
