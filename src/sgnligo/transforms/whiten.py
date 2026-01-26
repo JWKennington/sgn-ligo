@@ -734,7 +734,7 @@ def kernel_from_psd(
     taps /= fs
 
     # Flip order for usage with correlate instead of convolve
-    # taps = taps[::-1]
+    taps = taps[::-1]
 
     return Kernel(fir_matrix=taps, latency=latency)
 
