@@ -351,6 +351,8 @@ def condition(
             # D. Drift Correction (AFIR 2)
             if drift_correction and (ifo in ref_psds):
                 kern_drift_name = f"{ifo}_KernDrift"
+                drift_kernel_len = int(condition_info.psd_fft_length *
+                                      whiten_sample_rate)
                 pipeline.insert(
                     DriftCorrectionKernel(
                         name=kern_drift_name,
@@ -375,6 +377,7 @@ def condition(
                         sample_rate=whiten_sample_rate,
                         filter_sink_name="filters",
                         verbose=True,
+                        shape=(drift_kernel_len,),
                     ),
                     link_map={
                         f"{afir_drift_name}:snk:{ifo}": current_link,

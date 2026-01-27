@@ -769,6 +769,9 @@ def correction_kernel_from_psds(
 
     taps[L - 1] = k_circ[0]
 
+    # Reverse for correlate usage
+    taps = taps[::-1]
+
     return Kernel(fir_matrix=taps, latency=L - 1)
 
 
@@ -1013,7 +1016,7 @@ class DriftCorrectionKernel(PSDKernelLogicMixin, TSTransform):
             buf = EventBuffer(
                 offset=output_frame.offset,
                 noffset=output_frame.noffset,
-                data=[np.asarray([taps])],
+                data=[np.asarray(taps)],
             )
             output_frame.append(buf)
             output_frame.is_gap = False
