@@ -292,6 +292,7 @@ def condition(
 
             # C. Whitening (AFIR 1)
             kern_whiten_name = f"{ifo}_KernWhiten"
+            kernel_len = int(condition_info.psd_fft_length * whiten_sample_rate)
             kern_whiten_elem = WhiteningKernel(
                 name=kern_whiten_name,
                 filters_pad_name=f"spectrum_{ifo}",
@@ -315,7 +316,7 @@ def condition(
                     source_pad_names=(ifo,),
                     sample_rate=whiten_sample_rate,
                     filter_sink_name="filters",
-                    shape=(8192,),
+                    shape=(kernel_len,),
                 ),
                 link_map={
                     f"{afir_whiten_name}:snk:{ifo}": current_link,
