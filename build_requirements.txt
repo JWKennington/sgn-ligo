@@ -4,7 +4,7 @@
 gwpy>=3.0.8
 
 stillsuit @ git+https://git.ligo.org/greg/stillsuit.git@main
-strike @ git+https://git.ligo.org/greg/strike.git@main
+gw-strike @ git+https://git.ligo.org/greg/strike.git@main
 sgn @ git+https://git.ligo.org/greg/sgn.git@main
 sgn-event @ git+https://git.ligo.org/greg/sgn-event.git@main
 sgn-ts @ git+https://git.ligo.org/greg/sgn-ts.git@main
