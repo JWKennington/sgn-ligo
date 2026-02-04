@@ -12,6 +12,7 @@ import traceback
 from dataclasses import dataclass
 
 import numpy
+from astropy.io.registry import IORegistryError
 from gwpy.timeseries import TimeSeriesDict
 from sgn.base import SourcePad
 from sgnts.base import Offset, SeriesBuffer, TSFrame, TSSource
@@ -160,6 +161,7 @@ class DevShmSource(TSSource):
                     break
 
             _data_dict = TimeSeriesDict.read(file0, self.channel_names[ifo])
+
             self.rates[ifo] = {
                 c: int(data.sample_rate.value) for c, data in _data_dict.items()
             }
@@ -326,7 +328,7 @@ class DevShmSource(TSSource):
                         next_file,
                         self.channel_names[ifo],
                     )
-                except RuntimeError:
+                except (RuntimeError, IORegistryError):
                     print(
                         f"Could not read file {next_file}",
                         traceback.format_exc(),
