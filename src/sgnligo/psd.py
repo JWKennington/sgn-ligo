@@ -133,7 +133,7 @@ def read_asd_txt(
 
     uniformf = numpy.arange(f[0], f.max(), df)
     psdinterp = interpolate.interp1d(f, psd_data)
-    psd_data = psdinterp(uniformf)
+    psd_data = psdinterp(uniformf)  # type: ignore[assignment]
 
     psd = lal.CreateREAL8FrequencySeries(
         name="PSD",

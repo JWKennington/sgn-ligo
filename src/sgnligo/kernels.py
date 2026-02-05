@@ -414,12 +414,10 @@ def fir_whitener_kernel(
     #
 
     psd_fir_kernel = PSDFirKernel()
-    (kernel, latency, fir_rate) = (
-        psd_fir_kernel.psd_to_linear_phase_whitening_fir_kernel(
-            psd, nyquist=sample_rate / 2.0
-        )
+    kernel, latency, fir_rate = psd_fir_kernel.psd_to_linear_phase_whitening_fir_kernel(
+        psd, nyquist=sample_rate / 2.0
     )
-    (kernel, theta) = (
+    kernel, theta = (
         psd_fir_kernel.linear_phase_fir_kernel_to_minimum_phase_whitening_fir_kernel(
             kernel, fir_rate
         )
