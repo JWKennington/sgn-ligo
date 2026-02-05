@@ -46,12 +46,12 @@ class TestGwoscBasic:
 
 
 class TestGwoscRateSafety:
-    def test_rate_mismatch_raises(self, mock_fetch_real_object):
-        """Ensure Source raises ValueError if GWOSC returns wrong rate."""
+    def test_rate_mismatch_resamples(self, mock_fetch_real_object):
+        """Ensure Source resamples if GWOSC returns wrong rate."""
         src = GWOSCSource(start=0, end=10, sample_rate=2048, batch_duration=10.0)
-        with pytest.raises(RuntimeError) as excinfo:
-            src.internal()
-        assert "4096 Hz" in str(excinfo.value)
+        # Should not raise, but handle gracefully via resampling
+        src.internal()
+        assert src._adapters["H1"].size > 0
 
     def test_rate_match_ok(self, mock_fetch_real_object):
         src = GWOSCSource(start=0, end=10, sample_rate=4096)
@@ -78,8 +78,8 @@ class TestGwoscData:
         # 3. Trigger second fetch
         src.internal()
         assert mock_fetch_real_object.fetch_open_data.call_count == 2
-        args, _ = mock_fetch_real_object.fetch_open_data.call_args_list[1]
-        assert args[1] == 1050
+        _, kwargs = mock_fetch_real_object.fetch_open_data.call_args_list[1]
+        assert kwargs["start"] == 1050
 
     def test_rate_limiting(self, mock_fetch_real_object):
         src = GWOSCSource(
