@@ -739,7 +739,7 @@ def correction_kernel_from_psds(
     psd_live: lal.REAL8FrequencySeries,
     psd_ref: lal.REAL8FrequencySeries,
     truncation_samples: Optional[int] = 1024,
-    smoothing_hz: float = 0.0,
+    smoothing_hz: Optional[float] = None,
 ) -> Kernel:
     """Generate a drift correction kernel using ZLW Adjoint logic."""
     assert len(psd_live.data.data) == len(psd_ref.data.data)
@@ -749,8 +749,8 @@ def correction_kernel_from_psds(
 
     corrector = ExtPsdDriftCorrection(
         freqs=np.linspace(0, fs / 2, n_bins),
-        psd_ref=np.asarray(psd_live.data.data, dtype=float),
-        psd_live=np.asarray(psd_ref.data.data, dtype=float),
+        psd_ref=np.asarray(psd_ref.data.data, dtype=float),
+        psd_live=np.asarray(psd_live.data.data, dtype=float),
         fs=fs,
     )
 
@@ -921,7 +921,7 @@ class DriftCorrectionKernel(PSDKernelLogicMixin, TSTransform):
     filters_pad_name: str = "filters"
     reference_psd: Optional[lal.REAL8FrequencySeries] = None
     truncation_samples: Optional[int] = 1024
-    smoothing_hz: float = 0.0
+    smoothing_hz: Optional[float] = None
     min_update_interval: Optional[int] = None
     similarity_threshold: float = 0.9999
     verbose: bool = False
